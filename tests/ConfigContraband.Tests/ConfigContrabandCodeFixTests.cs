@@ -83,6 +83,50 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg003_fix_appends_validate_on_start_for_split_validation_chain()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            optionsBuilder.ValidateDataAnnotations();
+            """);
+
+        var fixedSource = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe").ValidateOnStart();
+            optionsBuilder.ValidateDataAnnotations();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_fix_appends_data_annotations_for_split_validate_on_start_chain()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        var fixedSource = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe").ValidateDataAnnotations();
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg005_fix_adds_validate_object_members()
     {
         var source = OptionsSource("""

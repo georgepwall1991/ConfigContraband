@@ -243,7 +243,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        var chain = InvocationChain.Create(invocation);
+        var chain = InvocationChain.Create(invocation, semanticModel);
         registration = new OptionsRegistration(
             optionsType,
             sectionPath,
@@ -358,7 +358,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         public InvocationExpressionSyntax OutermostInvocation { get; }
         public ImmutableHashSet<string> MethodNames { get; }
 
-        public static InvocationChain Create(InvocationExpressionSyntax bindInvocation)
+        public static InvocationChain Create(InvocationExpressionSyntax bindInvocation, SemanticModel semanticModel)
         {
             var methods = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
             methods.Add("BindConfiguration");
@@ -375,7 +375,73 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 current = nextInvocation;
             }
 
+            AddSubsequentLocalInvocations(bindInvocation, semanticModel, methods);
+
             return new InvocationChain(outermost, methods.ToImmutable());
+        }
+
+        private static void AddSubsequentLocalInvocations(
+            InvocationExpressionSyntax bindInvocation,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            var declarator = bindInvocation.FirstAncestorOrSelf<VariableDeclaratorSyntax>();
+            if (declarator?.Initializer?.Value is null ||
+                !declarator.Initializer.Value.Span.Contains(bindInvocation.Span) ||
+                declarator.Parent?.Parent is not LocalDeclarationStatementSyntax declarationStatement ||
+                declarationStatement.Parent is not BlockSyntax block ||
+                semanticModel.GetDeclaredSymbol(declarator) is not ILocalSymbol localSymbol)
+            {
+                return;
+            }
+
+            var declarationIndex = block.Statements.IndexOf(declarationStatement);
+            for (var i = declarationIndex + 1; i < block.Statements.Count; i++)
+            {
+                if (block.Statements[i] is not ExpressionStatementSyntax expressionStatement ||
+                    expressionStatement.Expression is not InvocationExpressionSyntax invocation ||
+                    !TryCollectLocalInvocationChain(invocation, localSymbol, semanticModel, methods))
+                {
+                    break;
+                }
+            }
+        }
+
+        private static bool TryCollectLocalInvocationChain(
+            InvocationExpressionSyntax invocation,
+            ILocalSymbol localSymbol,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+            {
+                return false;
+            }
+
+            if (IsLocalReference(memberAccess.Expression, localSymbol, semanticModel))
+            {
+                methods.Add(memberAccess.Name.Identifier.ValueText);
+                return true;
+            }
+
+            if (memberAccess.Expression is not InvocationExpressionSyntax receiverInvocation ||
+                !TryCollectLocalInvocationChain(receiverInvocation, localSymbol, semanticModel, methods))
+            {
+                return false;
+            }
+
+            methods.Add(memberAccess.Name.Identifier.ValueText);
+            return true;
+        }
+
+        private static bool IsLocalReference(
+            ExpressionSyntax expression,
+            ILocalSymbol localSymbol,
+            SemanticModel semanticModel)
+        {
+            return expression is IdentifierNameSyntax identifier &&
+                   string.Equals(identifier.Identifier.ValueText, localSymbol.Name, StringComparison.Ordinal) &&
+                   SymbolEqualityComparer.Default.Equals(semanticModel.GetSymbolInfo(identifier).Symbol, localSymbol);
         }
     }
 }
