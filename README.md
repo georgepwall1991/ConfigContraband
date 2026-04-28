@@ -1,8 +1,11 @@
 # ConfigContraband
 
+[![CI](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/ci.yml/badge.svg)](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/codeql.yml/badge.svg)](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/codeql.yml)
+
 Stop smuggling broken `appsettings` into production.
 
-ConfigContraband is a Roslyn analyzer for .NET configuration and the Options pattern. It catches the configuration mistakes that compile cleanly, pass code review, and then fail at startup or, worse, on first use.
+ConfigContraband is a high-signal Roslyn analyzer for .NET configuration, ASP.NET Core Options, `appsettings.json`, `ValidateOnStart()`, and `ValidateDataAnnotations()`. It catches the configuration mistakes that compile cleanly, pass code review, and then fail at startup or, worse, on first use.
 
 It focuses on the boring production failures:
 
@@ -12,6 +15,18 @@ It focuses on the boring production failures:
 - nested options that look validated but are silently skipped
 - misspelled JSON keys hiding under a bound section
 
+Use it when your app relies on strongly typed options and you want configuration validation feedback in the editor, in pull requests, and in CI before a bad setting reaches production.
+
+## Feature Snapshot
+
+| Area | What ConfigContraband does |
+|------|----------------------------|
+| Section binding | Checks `BindConfiguration("Section")` against visible `appsettings*.json` files. |
+| Startup validation | Flags options validation that is registered but not forced to run at startup. |
+| DataAnnotations | Finds `[Required]`, `[Range]`, and inherited validation attributes without `ValidateDataAnnotations()`. |
+| Nested validation | Detects nested options objects and collections that need recursive validation attributes. |
+| JSON key drift | Reports likely misspelled keys under bound sections while staying conservative for flexible binding shapes. |
+
 ## Install
 
 ```xml
@@ -19,6 +34,8 @@ It focuses on the boring production failures:
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
+
+No runtime dependency is added to your app. ConfigContraband runs as an analyzer during build and in supported IDEs.
 
 ## What It Looks At
 
