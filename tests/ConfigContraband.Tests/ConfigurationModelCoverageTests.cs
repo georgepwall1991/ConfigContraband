@@ -59,4 +59,29 @@ public sealed class ConfigurationModelCoverageTests
         Assert.Equal("0", item.Key);
         Assert.True(item.Value.TryGetProperty("Host", out _));
     }
+
+    [Fact]
+    public void Json_parser_preserves_duplicate_object_members()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              "Features": {
+                "Billing": {
+                  "Enabled": true
+                }
+              },
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """));
+
+        Assert.NotNull(root);
+        Assert.Collection(
+            root!.Properties.Where(property => property.Key == "Features"),
+            first => Assert.True(first.Value.TryGetProperty("Billing", out _)),
+            second => Assert.True(second.Value.TryGetProperty("Stripe", out _)));
+    }
 }

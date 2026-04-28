@@ -25,7 +25,7 @@ Importance * 0.25 + Precision * 0.25 + TestDepth * 0.20 + FixSafety * 0.15 + Doc
 
 | Rule | Severity | Importance | Precision | Test Depth | Fix Safety | Docs | Release | Score | Priority | Status |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
-| CFG001 Missing configuration section | Warning | 5 | 4 | 4 | 4 | 4 | 4 | 4.25 | P1 | Handles nested section-path suggestions with full-path fixes and treats appsettings files as a visible set for section lookup. |
+| CFG001 Missing configuration section | Warning | 5 | 5 | 5 | 4 | 4 | 4 | 4.70 | P1 | Handles nested section-path suggestions with full-path fixes, traverses duplicate JSON section members, and treats appsettings files as a visible set for section lookup. |
 | CFG003 Validation not on startup | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local validation chains with deterministic fixes. |
 | CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P1 | Handles inherited bindable DataAnnotations and fluent or immediate split local startup-validation chains with deterministic fixes. |
 | CFG005 Nested validation not recursive | Warning | 5 | 4 | 4 | 4 | 4 | 4 | 4.25 | P1 | Recurses through nested object graphs, honors existing recursive attributes, and covers arrays, nullable properties, collections, and interface boundaries. |
@@ -44,11 +44,7 @@ Do not raise severity, rename analyzer IDs, or broaden diagnostics unless tests 
 
 ## Current Shortlist
 
-1. `CFG001` duplicate-section follow-up:
-   - Add explicit duplicate-section tests if future merge semantics become more precise.
-   - Preserve conservative diagnostics when no appsettings files are available.
-
-2. `CFG006` precision follow-up:
+1. `CFG006` precision follow-up:
    - Add only narrowly proven binding-shape coverage; keep as Info because configuration binding remains intentionally flexible.
 
 ## Rule Notes
@@ -60,7 +56,10 @@ Reports when a string literal passed to `BindConfiguration()` does not exist in 
 Known gaps:
 
 - Multi-file section lookup treats visible appsettings files as one searchable set for section existence; it does not model provider ordering.
-- Explicit duplicate-section tests can be added if future merge semantics become more precise.
+
+Current behavior:
+
+- Duplicate JSON section members are traversed when resolving nested section paths and typo suggestions.
 
 ### CFG003 Validation Not On Startup
 
