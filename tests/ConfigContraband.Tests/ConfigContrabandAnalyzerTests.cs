@@ -190,6 +190,101 @@ public sealed class ConfigContrabandAnalyzerTests
             """));
     }
 
+    [Fact]
+    public async Task Cfg006_reports_unknown_key_under_nested_options_object()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions Database { get; set; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 7, 4, 24)
+            .WithArguments("App:Database:ConnetionString", "DatabaseOptions", ". Did you mean \"ConnectionString\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Database": {
+                  "ConnetionString": "Server=.;"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_honors_configuration_key_name_alias_under_nested_options_object()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions Database { get; set; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [ConfigurationKeyName("connection_string")]
+                public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Database": {
+                  "connection_string": "Server=.;"
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg006_does_not_recurse_into_scalar_property_with_object_value()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": {
+                  "Value": "secret"
+                }
+              }
+            }
+            """));
+    }
+
     private static string OptionsSource(string registration, string extraUsings = "", string? optionsTypes = null)
     {
         optionsTypes ??= """

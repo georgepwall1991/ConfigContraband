@@ -40,7 +40,7 @@ internal sealed class OptionsTypeMetadata
         return BindableProperties.Any(property => property.HasValidationAttribute);
     }
 
-    public bool MatchesConfigurationKey(string key)
+    public bool TryGetConfigurationProperty(string key, out BindableProperty bindableProperty)
     {
         foreach (var property in BindableProperties)
         {
@@ -48,11 +48,26 @@ internal sealed class OptionsTypeMetadata
             {
                 if (string.Equals(name, key, StringComparison.OrdinalIgnoreCase))
                 {
+                    bindableProperty = property;
                     return true;
                 }
             }
         }
 
+        bindableProperty = null!;
+        return false;
+    }
+
+    public bool TryCreateNestedMetadata(BindableProperty property, out OptionsTypeMetadata metadata)
+    {
+        if (IsPotentialNestedObject(property.Symbol.Type) &&
+            property.Symbol.Type is INamedTypeSymbol namedType)
+        {
+            metadata = Create(namedType);
+            return true;
+        }
+
+        metadata = null!;
         return false;
     }
 

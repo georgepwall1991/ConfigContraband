@@ -153,29 +153,60 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         }
 
         var metadata = OptionsTypeMetadata.Create(registration.OptionsType);
+        AnalyzeUnknownKeysInSection(
+            reportDiagnostic,
+            section,
+            metadata,
+            registration.OptionsType.Name,
+            registration.OptionsType.ToDisplayString(),
+            unknownKeysReported);
+    }
+
+    private static void AnalyzeUnknownKeysInSection(
+        Action<Diagnostic> reportDiagnostic,
+        ConfigurationNode section,
+        OptionsTypeMetadata metadata,
+        string optionsTypeName,
+        string optionsTypeKey,
+        ConcurrentDictionary<string, byte> unknownKeysReported)
+    {
         var knownNames = metadata.GetConfigurationNames();
         foreach (var property in section.Properties)
         {
-            if (metadata.MatchesConfigurationKey(property.Key))
+            if (!metadata.TryGetConfigurationProperty(property.Key, out var bindableProperty))
+            {
+                var reportKey = optionsTypeKey + "|" + property.FullPath;
+                if (!unknownKeysReported.TryAdd(reportKey, 0))
+                {
+                    continue;
+                }
+
+                var suggestion = FindClosest(property.Key, knownNames);
+                var suffix = suggestion is null ? "." : $". Did you mean \"{suggestion}\"?";
+
+                reportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.UnknownConfigurationKey,
+                    property.Location,
+                    property.FullPath,
+                    optionsTypeName,
+                    suffix));
+
+                continue;
+            }
+
+            if (property.Value.Properties.IsDefaultOrEmpty ||
+                !metadata.TryCreateNestedMetadata(bindableProperty, out var nestedMetadata))
             {
                 continue;
             }
 
-            var reportKey = registration.OptionsType.ToDisplayString() + "|" + property.FullPath;
-            if (!unknownKeysReported.TryAdd(reportKey, 0))
-            {
-                continue;
-            }
-
-            var suggestion = FindClosest(property.Key, knownNames);
-            var suffix = suggestion is null ? "." : $". Did you mean \"{suggestion}\"?";
-
-            reportDiagnostic(Diagnostic.Create(
-                DiagnosticDescriptors.UnknownConfigurationKey,
-                property.Location,
-                property.FullPath,
-                registration.OptionsType.Name,
-                suffix));
+            AnalyzeUnknownKeysInSection(
+                reportDiagnostic,
+                property.Value,
+                nestedMetadata,
+                bindableProperty.Symbol.Type.Name,
+                bindableProperty.Symbol.Type.ToDisplayString(),
+                unknownKeysReported);
         }
     }
 
