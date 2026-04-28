@@ -27,7 +27,7 @@ Importance * 0.25 + Precision * 0.25 + TestDepth * 0.20 + FixSafety * 0.15 + Doc
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
 | CFG001 Missing configuration section | Warning | 5 | 4 | 4 | 4 | 4 | 4 | 4.25 | P1 | Handles nested section-path suggestions with full-path fixes and treats appsettings files as a visible set for section lookup. |
 | CFG003 Validation not on startup | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local validation chains with deterministic fixes. |
-| CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local startup-validation chains with deterministic fixes. |
+| CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P1 | Handles inherited bindable DataAnnotations and fluent or immediate split local startup-validation chains with deterministic fixes. |
 | CFG005 Nested validation not recursive | Warning | 5 | 4 | 4 | 4 | 4 | 4 | 4.25 | P1 | Recurses through nested object graphs, honors existing recursive attributes, and covers arrays, nullable properties, collections, and interface boundaries. |
 | CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 4 | 4 | 4.35 | P2 | Checks nested object-array keys across every matching appsettings section while leaving scalar arrays and dictionary entries conservative. |
 
@@ -44,15 +44,11 @@ Do not raise severity, rename analyzer IDs, or broaden diagnostics unless tests 
 
 ## Current Shortlist
 
-1. `CFG004` inherited DataAnnotations follow-up:
-   - Add inherited-property coverage.
-   - Keep code fixes narrow when validation chains are split across locals.
-
-2. `CFG001` duplicate-section follow-up:
+1. `CFG001` duplicate-section follow-up:
    - Add explicit duplicate-section tests if future merge semantics become more precise.
    - Preserve conservative diagnostics when no appsettings files are available.
 
-3. `CFG006` dictionary-value follow-up:
+2. `CFG006` dictionary-value follow-up:
    - Consider whether strongly typed dictionary values can be checked without reporting arbitrary dictionary entry names.
    - Keep as Info because configuration binding remains intentionally flexible.
 
@@ -83,9 +79,10 @@ Reports when an options type uses DataAnnotations but the registration does not 
 
 Known gaps:
 
-- More tests are needed for inherited properties and non-bindable annotated properties.
+- Inherited bindable properties with DataAnnotations are included when deciding whether `ValidateDataAnnotations()` is required.
+- Non-bindable annotated properties remain ignored to match options binding behavior.
 - Code fix should continue to avoid adding duplicate `ValidateOnStart()` across more chain shapes.
-- Documentation distinguishes DataAnnotations from custom validation delegates, but inherited DataAnnotations need examples.
+- Documentation distinguishes DataAnnotations from custom validation delegates and inherited annotation shapes.
 
 ### CFG005 Nested Validation Not Recursive
 

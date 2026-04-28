@@ -138,6 +138,57 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_reports_inherited_data_annotations_without_validate_data_annotations()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateOnStart()|};
+            """, optionsTypes: """
+            public class BaseStripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+
+            public sealed class StripeOptions : BaseStripeOptions
+            {
+                public string WebhookSecret { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_does_not_report_inherited_data_annotations_when_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public class BaseStripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+
+            public sealed class StripeOptions : BaseStripeOptions
+            {
+                public string WebhookSecret { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg003_and_cfg004_honor_split_local_registration_chain()
     {
         var source = OptionsSource("""
