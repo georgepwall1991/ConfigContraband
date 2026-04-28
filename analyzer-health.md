@@ -29,7 +29,7 @@ Importance * 0.25 + Precision * 0.25 + TestDepth * 0.20 + FixSafety * 0.15 + Doc
 | CFG003 Validation not on startup | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local validation chains with deterministic fixes. |
 | CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P1 | Handles inherited bindable DataAnnotations and fluent or immediate split local startup-validation chains with deterministic fixes. |
 | CFG005 Nested validation not recursive | Warning | 5 | 4 | 4 | 4 | 4 | 4 | 4.25 | P1 | Recurses through nested object graphs, honors existing recursive attributes, and covers arrays, nullable properties, collections, and interface boundaries. |
-| CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 4 | 4 | 4.35 | P2 | Checks nested object-array keys across every matching appsettings section while leaving scalar arrays and dictionary entries conservative. |
+| CFG006 Unknown configuration key | Info | 4 | 5 | 5 | 5 | 4 | 4 | 4.60 | P2 | Checks nested object-array and strongly typed dictionary-value keys across every matching appsettings section while leaving scalar arrays and dynamic dictionary entry names conservative. |
 
 ## Selection Policy
 
@@ -48,9 +48,8 @@ Do not raise severity, rename analyzer IDs, or broaden diagnostics unless tests 
    - Add explicit duplicate-section tests if future merge semantics become more precise.
    - Preserve conservative diagnostics when no appsettings files are available.
 
-2. `CFG006` dictionary-value follow-up:
-   - Consider whether strongly typed dictionary values can be checked without reporting arbitrary dictionary entry names.
-   - Keep as Info because configuration binding remains intentionally flexible.
+2. `CFG006` precision follow-up:
+   - Add only narrowly proven binding-shape coverage; keep as Info because configuration binding remains intentionally flexible.
 
 ## Rule Notes
 
@@ -99,10 +98,9 @@ Reports an appsettings key under a bound section when it does not match any bind
 
 Known gaps:
 
-- Object arrays and lists are checked recursively, and scalar arrays are treated as values.
+- Object arrays, lists, and strongly typed dictionary values are checked recursively, while scalar arrays are treated as values.
 - Visible appsettings files are treated as a merged view for unknown-key checks; every matching bound section can produce diagnostics.
 - Dictionary entry names are intentionally treated as dynamic keys and are not reported as unknown properties.
-- Strongly typed dictionary values may become checkable later if the analyzer can avoid flagging dynamic entry names.
 
 ## Verification Baseline
 

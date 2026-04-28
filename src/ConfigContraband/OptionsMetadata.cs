@@ -84,6 +84,20 @@ internal sealed class OptionsTypeMetadata
         return false;
     }
 
+    public bool TryCreateDictionaryValueMetadata(BindableProperty property, out OptionsTypeMetadata metadata)
+    {
+        if (TryGetDictionaryValueType(property.Symbol.Type, out var valueType) &&
+            IsPotentialNestedObject(valueType) &&
+            valueType is INamedTypeSymbol namedType)
+        {
+            metadata = Create(namedType);
+            return true;
+        }
+
+        metadata = null!;
+        return false;
+    }
+
     public ImmutableArray<string> GetConfigurationNames()
     {
         return BindableProperties
@@ -283,6 +297,31 @@ internal sealed class OptionsTypeMetadata
         }
 
         elementType = null!;
+        return false;
+    }
+
+    private static bool TryGetDictionaryValueType(ITypeSymbol type, out ITypeSymbol valueType)
+    {
+        if (type is INamedTypeSymbol namedType)
+        {
+            foreach (var iface in namedType.AllInterfaces.Concat(new[] { namedType }))
+            {
+                if (!iface.IsGenericType)
+                {
+                    continue;
+                }
+
+                var originalDefinition = iface.OriginalDefinition.ToDisplayString();
+                if (originalDefinition == "System.Collections.Generic.IDictionary<TKey, TValue>" ||
+                    originalDefinition == "System.Collections.Generic.IReadOnlyDictionary<TKey, TValue>")
+                {
+                    valueType = iface.TypeArguments[1];
+                    return true;
+                }
+            }
+        }
+
+        valueType = null!;
         return false;
     }
 }
