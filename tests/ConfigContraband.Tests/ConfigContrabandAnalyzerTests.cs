@@ -31,6 +31,69 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg001_reports_missing_nested_section_with_full_path_suggestion()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:"Features:Strpie"|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_does_not_report_nested_section_from_any_appsettings_file()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Features:Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            new[]
+            {
+                ("appsettings.json", """
+                {
+                  "Logging": {
+                    "LogLevel": {
+                      "Default": "Information"
+                    }
+                  }
+                }
+                """),
+                ("appsettings.Production.json", """
+                {
+                  "Features": {
+                    "Stripe": {
+                      "ApiKey": "secret"
+                    }
+                  }
+                }
+                """)
+            });
+    }
+
+    [Fact]
     public async Task Cfg001_does_not_report_when_no_appsettings_files_are_available()
     {
         var source = OptionsSource("""
