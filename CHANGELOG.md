@@ -2,6 +2,11 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.1.1 - 2026-04-28
+
+- Hardened `CFG001` to traverse duplicate JSON section members when resolving nested section paths and typo suggestions.
+- Added regression coverage for duplicate-section lookup and nested suggestion behavior.
+
 ## 0.1.0 - 2026-04-28
 
 - Initial MVP analyzer package.

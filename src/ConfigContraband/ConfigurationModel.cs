@@ -60,23 +60,19 @@ internal sealed class ConfigurationSnapshot
 
         var parentPath = string.Join(":", pathParts.Take(pathParts.Length - 1));
         return _files
-            .Select(file => FindSection(file.Root, parentPath))
-            .Where(node => node is not null)
-            .SelectMany(node => node!.Properties.Select(property => property.Key))
+            .SelectMany(file => FindSections(file.Root, parentPath))
+            .SelectMany(node => node.Properties.Select(property => property.Key))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToImmutableArray();
     }
 
     public bool TryFindSection(string sectionPath, out ConfigurationNode section)
     {
-        foreach (var file in _files)
+        var sections = FindSections(sectionPath);
+        if (!sections.IsDefaultOrEmpty)
         {
-            var node = FindSection(file.Root, sectionPath);
-            if (node is not null)
-            {
-                section = node;
-                return true;
-            }
+            section = sections[0];
+            return true;
         }
 
         section = ConfigurationNode.Empty;
@@ -89,30 +85,38 @@ internal sealed class ConfigurationSnapshot
 
         foreach (var file in _files)
         {
-            var node = FindSection(file.Root, sectionPath);
-            if (node is not null)
-            {
-                builder.Add(node);
-            }
+            builder.AddRange(FindSections(file.Root, sectionPath));
         }
 
         return builder.ToImmutable();
     }
 
-    private static ConfigurationNode? FindSection(ConfigurationNode root, string sectionPath)
+    private static ImmutableArray<ConfigurationNode> FindSections(ConfigurationNode root, string sectionPath)
     {
-        var current = root;
-        foreach (var part in SplitPath(sectionPath))
-        {
-            if (!current.TryGetProperty(part, out var property))
-            {
-                return null;
-            }
+        var builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
+        FindSections(root, SplitPath(sectionPath), partIndex: 0, builder);
+        return builder.ToImmutable();
+    }
 
-            current = property.Value;
+    private static void FindSections(
+        ConfigurationNode current,
+        string[] pathParts,
+        int partIndex,
+        ImmutableArray<ConfigurationNode>.Builder builder)
+    {
+        if (partIndex >= pathParts.Length)
+        {
+            builder.Add(current);
+            return;
         }
 
-        return current;
+        foreach (var property in current.Properties)
+        {
+            if (string.Equals(property.Key, pathParts[partIndex], StringComparison.OrdinalIgnoreCase))
+            {
+                FindSections(property.Value, pathParts, partIndex + 1, builder);
+            }
+        }
     }
 
     private static string[] SplitPath(string sectionPath)
