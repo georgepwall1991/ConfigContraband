@@ -2,36 +2,34 @@
 
 Stop smuggling broken `appsettings` into production.
 
-ConfigContraband is a Roslyn analyser for .NET configuration and the Options pattern. It spots configuration mistakes while you are coding, before the app starts up and falls over.
+ConfigContraband is a Roslyn analyzer for .NET configuration and the Options pattern. It catches the configuration mistakes that compile cleanly, pass code review, and then fail at startup or, worse, on first use.
 
-## Quickstart
+It focuses on the boring production failures:
+
+- a section name typo in `BindConfiguration(...)`
+- validation that exists but does not run on startup
+- `[Required]` properties that are never wired into Options validation
+- nested options that look validated but are silently skipped
+- misspelled JSON keys hiding under a bound section
+
+## Install
 
 ```xml
 <PackageReference Include="ConfigContraband" Version="0.1.0" PrivateAssets="all" />
 ```
 
-The package automatically passes `appsettings*.json` files to the analyser through `buildTransitive` props.
+The package includes `buildTransitive` props that pass visible `appsettings*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
 
-## Try The Analyzer
+## What It Looks At
 
-The repo includes a standalone showcase project with one intentional example for each rule:
-
-```bash
-dotnet build samples/ConfigContraband.Showcase/ConfigContraband.Showcase.csproj --configuration Release --no-incremental
-```
-
-The sample is kept out of the main solution so normal builds stay clean.
-
-## What It Checks
-
-ConfigContraband checks options registrations that use:
+ConfigContraband analyzes options registrations shaped like this:
 
 ```csharp
-services.AddOptions<MyOptions>()
-    .BindConfiguration("MySection");
+services.AddOptions<StripeOptions>()
+    .BindConfiguration("Stripe");
 ```
 
-The section name must be a string the compiler can read. The analyser follows normal fluent chains:
+The section name must be a compile-time string literal. The analyzer follows normal fluent chains:
 
 ```csharp
 services.AddOptions<StripeOptions>()
@@ -40,7 +38,7 @@ services.AddOptions<StripeOptions>()
     .ValidateOnStart();
 ```
 
-It also follows simple split local chains in the same block:
+It also follows immediate same-block local `OptionsBuilder<T>` chains:
 
 ```csharp
 var optionsBuilder = services.AddOptions<StripeOptions>()
@@ -50,21 +48,33 @@ optionsBuilder.ValidateDataAnnotations();
 optionsBuilder.ValidateOnStart();
 ```
 
+When the analyzer cannot prove a configuration shape statically, it stays quiet. The goal is high-signal feedback, not noisy guesses.
+
 ## Rules
 
-| ID | Rule | Default | What it means |
-|----|------|---------|---------------|
-| `CFG001` | Bound configuration section does not exist | Warning | The section passed to `BindConfiguration(...)` was not found in `appsettings*.json`. |
-| `CFG003` | Options validation does not run on startup | Warning | Validation is registered, but `ValidateOnStart()` is missing. |
-| `CFG004` | DataAnnotations are not enabled for options validation | Warning | The options type uses attributes like `[Required]`, but `ValidateDataAnnotations()` is missing. |
-| `CFG005` | Nested options validation is not recursive | Warning | A nested object or collection contains validation attributes, but recursive validation is not enabled. |
-| `CFG006` | Unknown configuration key under bound section | Info | A key in `appsettings*.json` does not match a bindable options property. |
+| ID | Rule | Default | Catches |
+|----|------|---------|---------|
+| `CFG001` | Bound configuration section does not exist | Warning | `BindConfiguration("Strpie")` when only `Stripe` exists. |
+| `CFG003` | Options validation does not run on startup | Warning | Validation is registered but `ValidateOnStart()` is missing. |
+| `CFG004` | DataAnnotations are not enabled for options validation | Warning | `[Required]`, `[Range]`, and inherited annotations without `ValidateDataAnnotations()`. |
+| `CFG005` | Nested options validation is not recursive | Warning | Nested objects or item types with annotations but no recursive validation attribute. |
+| `CFG006` | Unknown configuration key under bound section | Info | JSON keys that do not match bindable options properties or aliases. |
 
-## Clear Rules
+## Fast Feedback Loop
+
+The repository includes a showcase project with one intentional example for each rule:
+
+```bash
+dotnet build samples/ConfigContraband.Showcase/ConfigContraband.Showcase.csproj --configuration Release --no-incremental
+```
+
+The sample stays out of the main solution so normal development builds remain clean.
+
+## Rule Details
 
 ### `CFG001`: The Section Must Exist
 
-If your code says `BindConfiguration("Stripe")`, there should be a matching `Stripe` section in `appsettings*.json`.
+If your code binds `"Stripe"`, a visible `appsettings*.json` file should contain a matching `Stripe` section.
 
 Before:
 
@@ -92,9 +102,7 @@ services.AddOptions<StripeOptions>()
     .ValidateOnStart();
 ```
 
-ConfigContraband can offer a fix when it can see a likely spelling mistake.
-
-Nested paths use colon-separated section names, the same shape used by .NET configuration:
+When ConfigContraband sees a likely typo, it can offer a code fix. Nested section paths use the same colon-separated shape as .NET configuration:
 
 ```csharp
 services.AddOptions<StripeOptions>()
@@ -115,11 +123,11 @@ services.AddOptions<StripeOptions>()
 
 For nested typos, the fix keeps the parent path and replaces only the bad leaf section. If the code says `Features:Strpie` and the file contains `Features:Stripe`, the fix changes it to `Features:Stripe`.
 
-The analyser checks every visible `appsettings*.json` additional file for section existence. It stays quiet when no appsettings files are available, because it cannot prove whether the section exists at runtime.
+The analyzer checks every visible `appsettings*.json` additional file for section existence. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
 
 ### `CFG003`: Validation Should Run When The App Starts
 
-Options validation normally runs later, when the options are first used. `ValidateOnStart()` makes the app check them during startup.
+Options validation often runs later, when options are first used. `ValidateOnStart()` moves that failure to startup, where it belongs.
 
 Before:
 
@@ -140,20 +148,25 @@ services.AddOptions<StripeOptions>()
 
 ### `CFG004`: DataAnnotations Must Be Switched On
 
-Attributes such as `[Required]` do nothing for options unless `ValidateDataAnnotations()` is registered.
-Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration.
+Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration.
 
 Before:
 
 ```csharp
-public sealed class StripeOptions
+public class BillingOptions
 {
     [Required]
     public string ApiKey { get; set; } = "";
 }
 
+public sealed class StripeOptions : BillingOptions
+{
+    public string WebhookSecret { get; set; } = "";
+}
+
 services.AddOptions<StripeOptions>()
-    .BindConfiguration("Stripe");
+    .BindConfiguration("Stripe")
+    .ValidateOnStart();
 ```
 
 After:
@@ -204,7 +217,7 @@ public sealed class DatabaseOptions
 }
 ```
 
-For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. `CFG005` does not report interface-typed nested properties or system scalar types because the options validator cannot safely infer a concrete object graph for those shapes.
+For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. `CFG005` does not report interface-typed nested properties or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
 
 ### `CFG006`: Config Keys Should Match Options Properties
 
@@ -240,27 +253,18 @@ After:
 }
 ```
 
-`CFG006` is informational because .NET configuration binding allows flexible shapes. It is still useful for catching typos.
+`CFG006` is informational because .NET configuration binding allows flexible shapes. It is still useful for catching the typos that hide in environment-specific settings.
 
-The analyser treats visible `appsettings*.json` files as a merged configuration view for unknown-key checks: if a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects and arrays or lists of nested options objects are checked recursively, so typos under `Servers:0:Port`-style data can still be found.
+Visible `appsettings*.json` files are treated as a merged configuration view for unknown-key checks. If a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects and arrays or lists of nested options objects are checked recursively, so typos under `Servers:0:Port`-style data can still be found.
 
-Dictionary entries and scalar array items are treated as values rather than property names. For example, arbitrary keys under `Dictionary<string, string>` and values inside `string[]` are not reported as unknown options properties.
+Dictionary entries and scalar array items are treated as values rather than property names. Arbitrary keys under `Dictionary<string, string>` and values inside `string[]` are not reported as unknown options properties.
 
-## Explained Like You're Ten
+## Design Principles
 
-Think of `appsettings.json` as a list of instructions for your app.
-
-Your C# options class is the checklist that says what instructions are allowed.
-
-ConfigContraband is like a careful teacher checking your work before you hand it in:
-
-- Did you ask for a section called `Strpie` when the list says `Stripe`?
-- Did you write rules like `[Required]` but forget to switch the rule checker on?
-- Did you switch the checker on, but only after the app has already started doing work?
-- Did you put a smaller checklist inside a bigger checklist, then forget to check the smaller one?
-- Did you type `WebookSecret` when you meant `WebhookSecret`?
-
-The aim is simple: catch the silly mistakes early, while they are cheap to fix, rather than finding them in production.
+- Prefer warnings for configuration failures that are likely to break production.
+- Keep flexible binding shapes quiet when static proof is weak.
+- Offer fixes only when the rewrite is narrow and deterministic.
+- Treat `appsettings*.json` as the contract your options classes are supposed to honor.
 
 ## Current Scope
 
@@ -269,8 +273,8 @@ ConfigContraband currently focuses on:
 - `appsettings*.json` files.
 - `AddOptions<T>().BindConfiguration("Section")` registrations.
 - String-literal section names.
-- Public bindable properties on options types.
+- Public bindable properties on options types, including inherited bindable properties.
 - `[ConfigurationKeyName]` aliases.
 - Normal fluent chains and immediate same-block local `OptionsBuilder<T>` chains.
 
-It does not try to prove every possible dynamic configuration shape. When the analyser cannot see enough static information, it stays quiet.
+It does not try to prove every possible dynamic configuration shape. When the analyzer cannot see enough static information, it stays quiet.
