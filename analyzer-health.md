@@ -25,7 +25,7 @@ Importance * 0.25 + Precision * 0.25 + TestDepth * 0.20 + FixSafety * 0.15 + Doc
 
 | Rule | Severity | Importance | Precision | Test Depth | Fix Safety | Docs | Release | Score | Priority | Status |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
-| CFG001 Missing configuration section | Warning | 5 | 4 | 3 | 4 | 2 | 4 | 4.00 | P1 | Useful and shippable, but needs more section-path and multi-file tests. |
+| CFG001 Missing configuration section | Warning | 5 | 4 | 4 | 4 | 4 | 4 | 4.25 | P1 | Handles nested section-path suggestions with full-path fixes and treats appsettings files as a visible set for section lookup. |
 | CFG003 Validation not on startup | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local validation chains with deterministic fixes. |
 | CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local startup-validation chains with deterministic fixes. |
 | CFG005 Nested validation not recursive | Warning | 5 | 4 | 4 | 4 | 4 | 4 | 4.25 | P1 | Recurses through nested object graphs, honors existing recursive attributes, and covers arrays, nullable properties, collections, and interface boundaries. |
@@ -44,31 +44,29 @@ Do not raise severity, rename analyzer IDs, or broaden diagnostics unless tests 
 
 ## Current Shortlist
 
-1. `CFG001` section lookup hardening:
-   - Add nested section-path tests such as `Features:Stripe`.
-   - Add multi-file appsettings coverage and duplicate-section behavior.
-   - Preserve conservative diagnostics when no appsettings files are available.
-
-2. `CFG006` nested key follow-up:
+1. `CFG006` nested key follow-up:
    - Add array and dictionary boundary tests.
    - Decide and document whether multiple appsettings files are treated as merged configuration or independent snapshots.
    - Keep as Info until false-positive boundaries are stronger.
 
-3. `CFG004` inherited DataAnnotations follow-up:
+2. `CFG004` inherited DataAnnotations follow-up:
    - Add inherited-property coverage.
    - Keep code fixes narrow when validation chains are split across locals.
+
+3. `CFG001` duplicate-section follow-up:
+   - Add explicit duplicate-section tests if future merge semantics become more precise.
+   - Preserve conservative diagnostics when no appsettings files are available.
 
 ## Rule Notes
 
 ### CFG001 Missing Configuration Section
 
-Reports when a string literal passed to `BindConfiguration()` does not exist in available `appsettings*.json` files. The code fix replaces the section literal when a close sibling section name is found.
+Reports when a string literal passed to `BindConfiguration()` does not exist in available `appsettings*.json` files. Nested section paths are matched segment by segment, and the code fix replaces the section literal with the full corrected path when a close sibling section name is found.
 
 Known gaps:
 
-- Multi-file configuration behavior is not documented.
-- Nested section suggestions need explicit tests.
-- The README summarizes the rule but does not document safe and risky shapes.
+- Multi-file section lookup treats visible appsettings files as one searchable set for section existence; it does not model provider ordering.
+- Explicit duplicate-section tests can be added if future merge semantics become more precise.
 
 ### CFG003 Validation Not On Startup
 

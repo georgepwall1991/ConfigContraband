@@ -94,6 +94,29 @@ services.AddOptions<StripeOptions>()
 
 ConfigContraband can offer a fix when it can see a likely spelling mistake.
 
+Nested paths use colon-separated section names, the same shape used by .NET configuration:
+
+```csharp
+services.AddOptions<StripeOptions>()
+    .BindConfiguration("Features:Stripe")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+```
+
+```json
+{
+  "Features": {
+    "Stripe": {
+      "ApiKey": "secret"
+    }
+  }
+}
+```
+
+For nested typos, the fix keeps the parent path and replaces only the bad leaf section. If the code says `Features:Strpie` and the file contains `Features:Stripe`, the fix changes it to `Features:Stripe`.
+
+The analyser checks every visible `appsettings*.json` additional file for section existence. It stays quiet when no appsettings files are available, because it cannot prove whether the section exists at runtime.
+
 ### `CFG003`: Validation Should Run When The App Starts
 
 Options validation normally runs later, when the options are first used. `ValidateOnStart()` makes the app check them during startup.

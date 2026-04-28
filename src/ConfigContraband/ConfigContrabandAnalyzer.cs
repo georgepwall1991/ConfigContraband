@@ -124,11 +124,12 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         }
 
         var suggestion = FindClosest(registration.SectionPath.Split(':').Last(), configuration.GetSiblingSectionNames(registration.SectionPath));
-        var suffix = suggestion is null ? "." : $". Did you mean \"{suggestion}\"?";
+        var suggestedSectionPath = suggestion is null ? null : ReplaceSectionLeaf(registration.SectionPath, suggestion);
+        var suffix = suggestedSectionPath is null ? "." : $". Did you mean \"{suggestedSectionPath}\"?";
         var properties = ImmutableDictionary<string, string?>.Empty;
-        if (suggestion is not null)
+        if (suggestedSectionPath is not null)
         {
-            properties = properties.Add(SuggestedSectionPropertyName, suggestion);
+            properties = properties.Add(SuggestedSectionPropertyName, suggestedSectionPath);
         }
 
         reportDiagnostic(Diagnostic.Create(
@@ -137,6 +138,14 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             properties,
             registration.SectionPath,
             suffix));
+    }
+
+    private static string ReplaceSectionLeaf(string sectionPath, string replacement)
+    {
+        var separatorIndex = sectionPath.LastIndexOf(':');
+        return separatorIndex < 0
+            ? replacement
+            : sectionPath.Substring(0, separatorIndex + 1) + replacement;
     }
 
     private static void AnalyzeUnknownKeys(

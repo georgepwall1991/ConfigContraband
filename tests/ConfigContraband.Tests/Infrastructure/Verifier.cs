@@ -34,6 +34,21 @@ internal static class Verifier
         await test.RunAsync();
     }
 
+    public static async Task VerifyAnalyzerAsync(
+        string source,
+        (string filename, string content)[] additionalFiles,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateAnalyzerTest(source);
+        foreach (var additionalFile in additionalFiles)
+        {
+            test.TestState.AdditionalFiles.Add(additionalFile);
+        }
+
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
     public static async Task VerifyCodeFixAsync(
         string source,
         string fixedSource,
