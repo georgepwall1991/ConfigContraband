@@ -1,0 +1,41 @@
+name: Publish to NuGet
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore ConfigContraband.slnx
+
+      - name: Build
+        run: dotnet build ConfigContraband.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test ConfigContraband.slnx --configuration Release --no-build
+
+      - name: Pack
+        run: dotnet pack src/ConfigContraband/ConfigContraband.csproj --configuration Release --no-build --output artifacts/packages
+
+      - name: Publish to NuGet
+        run: dotnet nuget push "artifacts/packages/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Attach package to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" artifacts/packages/*.nupkg --clobber
