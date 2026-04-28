@@ -28,7 +28,7 @@ Importance * 0.25 + Precision * 0.25 + TestDepth * 0.20 + FixSafety * 0.15 + Doc
 | CFG001 Missing configuration section | Warning | 5 | 4 | 3 | 4 | 2 | 4 | 4.00 | P1 | Useful and shippable, but needs more section-path and multi-file tests. |
 | CFG003 Validation not on startup | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local validation chains with deterministic fixes. |
 | CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local startup-validation chains with deterministic fixes. |
-| CFG005 Nested validation not recursive | Warning | 5 | 3 | 3 | 3 | 2 | 4 | 3.55 | P1 | High value; needs recursive/nested depth and existing-attribute safety coverage. |
+| CFG005 Nested validation not recursive | Warning | 5 | 4 | 4 | 4 | 4 | 4 | 4.25 | P1 | Recurses through nested object graphs, honors existing recursive attributes, and covers arrays, nullable properties, collections, and interface boundaries. |
 | CFG006 Unknown configuration key | Info | 4 | 3 | 4 | 5 | 2 | 4 | 3.65 | P2 | Good test base after nested-key work; needs arrays, dictionaries, and multi-file merge semantics. |
 
 ## Selection Policy
@@ -44,20 +44,19 @@ Do not raise severity, rename analyzer IDs, or broaden diagnostics unless tests 
 
 ## Current Shortlist
 
-1. `CFG005` nested validation precision:
-   - Add tests for already annotated nested object and collection properties.
-   - Add tests for recursive depth, nullable nested properties, arrays, and interfaces.
-   - Keep fixer narrow to adding only the missing recursive validation attribute.
-
-2. `CFG001` section lookup hardening:
+1. `CFG001` section lookup hardening:
    - Add nested section-path tests such as `Features:Stripe`.
    - Add multi-file appsettings coverage and duplicate-section behavior.
    - Preserve conservative diagnostics when no appsettings files are available.
 
-3. `CFG006` nested key follow-up:
+2. `CFG006` nested key follow-up:
    - Add array and dictionary boundary tests.
    - Decide and document whether multiple appsettings files are treated as merged configuration or independent snapshots.
    - Keep as Info until false-positive boundaries are stronger.
+
+3. `CFG004` inherited DataAnnotations follow-up:
+   - Add inherited-property coverage.
+   - Keep code fixes narrow when validation chains are split across locals.
 
 ## Rule Notes
 
@@ -97,9 +96,8 @@ Reports when nested object or collection item types contain validation attribute
 
 Known gaps:
 
-- Existing `ValidateObjectMembers` and `ValidateEnumeratedItems` safe cases need explicit regression tests.
-- Recursive depth and nullable nested object behavior need coverage.
-- Fixer should be verified for properties declared in separate documents when supported by tests.
+- Cross-document code-fix behavior is supported by the implementation but still needs a dedicated regression test when the test harness grows multi-document coverage.
+- More complex custom recursive validation patterns are intentionally not inferred.
 
 ### CFG006 Unknown Configuration Key
 
