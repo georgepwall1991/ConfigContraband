@@ -12,6 +12,16 @@ ConfigContraband is a Roslyn analyser for .NET configuration and the Options pat
 
 The package automatically passes `appsettings*.json` files to the analyser through `buildTransitive` props.
 
+## Try The Analyzer
+
+The repo includes a standalone showcase project with one intentional example for each rule:
+
+```bash
+dotnet build samples/ConfigContraband.Showcase/ConfigContraband.Showcase.csproj --configuration Release --no-incremental
+```
+
+The sample is kept out of the main solution so normal builds stay clean.
+
 ## What It Checks
 
 ConfigContraband checks options registrations that use:
