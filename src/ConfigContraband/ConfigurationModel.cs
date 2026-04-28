@@ -83,6 +83,22 @@ internal sealed class ConfigurationSnapshot
         return false;
     }
 
+    public ImmutableArray<ConfigurationNode> FindSections(string sectionPath)
+    {
+        var builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
+
+        foreach (var file in _files)
+        {
+            var node = FindSection(file.Root, sectionPath);
+            if (node is not null)
+            {
+                builder.Add(node);
+            }
+        }
+
+        return builder.ToImmutable();
+    }
+
     private static ConfigurationNode? FindSection(ConfigurationNode root, string sectionPath)
     {
         var current = root;
@@ -257,8 +273,7 @@ internal static class JsonConfigurationParser
 
             if (Current == '[')
             {
-                SkipArray(path);
-                return ConfigurationNode.Empty;
+                return ParseArray(path);
             }
 
             if (Current == '"')
@@ -271,13 +286,26 @@ internal static class JsonConfigurationParser
             return ConfigurationNode.Empty;
         }
 
-        private void SkipArray(string path)
+        private ConfigurationNode ParseArray(string path)
         {
+            var properties = ImmutableArray.CreateBuilder<ConfigurationProperty>();
+            var index = 0;
+
             Read('[');
             SkipWhitespace();
             while (!IsEnd && Current != ']')
             {
-                _ = ParseValue(path);
+                var itemStart = _position;
+                var itemKey = index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                var itemPath = path + ":" + itemKey;
+                var value = ParseValue(itemPath);
+                properties.Add(new ConfigurationProperty(
+                    itemKey,
+                    itemPath,
+                    value,
+                    CreateLocation(TextSpan.FromBounds(itemStart, Math.Min(_position, _text.Length)))));
+                index++;
+
                 SkipWhitespace();
                 if (Current == ',')
                 {
@@ -293,6 +321,8 @@ internal static class JsonConfigurationParser
             {
                 Read(']');
             }
+
+            return new ConfigurationNode(properties.ToImmutable());
         }
 
         private string ParseString()

@@ -154,28 +154,27 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         ConfigurationSnapshot configuration,
         ConcurrentDictionary<string, byte> unknownKeysReported)
     {
-        if (!configuration.TryFindSection(registration.SectionPath, out var section) ||
-            section.Properties.IsDefaultOrEmpty)
+        var sections = configuration.FindSections(registration.SectionPath);
+        if (sections.IsDefaultOrEmpty)
         {
             return;
         }
 
         var metadata = OptionsTypeMetadata.Create(registration.OptionsType);
-        AnalyzeUnknownKeysInSection(
-            reportDiagnostic,
-            section,
-            metadata,
-            registration.OptionsType.Name,
-            registration.OptionsType.ToDisplayString(),
-            unknownKeysReported);
+        foreach (var matchingSection in sections)
+        {
+            AnalyzeUnknownKeysInSection(
+                reportDiagnostic,
+                matchingSection,
+                metadata,
+                unknownKeysReported);
+        }
     }
 
     private static void AnalyzeUnknownKeysInSection(
         Action<Diagnostic> reportDiagnostic,
         ConfigurationNode section,
         OptionsTypeMetadata metadata,
-        string optionsTypeName,
-        string optionsTypeKey,
         ConcurrentDictionary<string, byte> unknownKeysReported)
     {
         var knownNames = metadata.GetConfigurationNames();
@@ -183,7 +182,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             if (!metadata.TryGetConfigurationProperty(property.Key, out var bindableProperty))
             {
-                var reportKey = optionsTypeKey + "|" + property.FullPath;
+                var reportKey = metadata.TypeKey + "|" + property.Location.GetLineSpan().Path + "|" + property.FullPath;
                 if (!unknownKeysReported.TryAdd(reportKey, 0))
                 {
                     continue;
@@ -196,25 +195,43 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     DiagnosticDescriptors.UnknownConfigurationKey,
                     property.Location,
                     property.FullPath,
-                    optionsTypeName,
+                    metadata.TypeName,
                     suffix));
 
                 continue;
             }
 
-            if (property.Value.Properties.IsDefaultOrEmpty ||
-                !metadata.TryCreateNestedMetadata(bindableProperty, out var nestedMetadata))
+            if (property.Value.Properties.IsDefaultOrEmpty)
             {
                 continue;
             }
 
-            AnalyzeUnknownKeysInSection(
-                reportDiagnostic,
-                property.Value,
-                nestedMetadata,
-                bindableProperty.Symbol.Type.Name,
-                bindableProperty.Symbol.Type.ToDisplayString(),
-                unknownKeysReported);
+            if (metadata.TryCreateNestedMetadata(bindableProperty, out var nestedMetadata))
+            {
+                AnalyzeUnknownKeysInSection(
+                    reportDiagnostic,
+                    property.Value,
+                    nestedMetadata,
+                    unknownKeysReported);
+                continue;
+            }
+
+            if (!metadata.TryCreateCollectionElementMetadata(bindableProperty, out var elementMetadata))
+            {
+                continue;
+            }
+
+            foreach (var item in property.Value.Properties)
+            {
+                if (!item.Value.Properties.IsDefaultOrEmpty)
+                {
+                    AnalyzeUnknownKeysInSection(
+                        reportDiagnostic,
+                        item.Value,
+                        elementMetadata,
+                        unknownKeysReported);
+                }
+            }
         }
     }
 

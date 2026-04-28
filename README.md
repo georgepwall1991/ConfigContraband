@@ -241,6 +241,10 @@ After:
 
 `CFG006` is informational because .NET configuration binding allows flexible shapes. It is still useful for catching typos.
 
+The analyser treats visible `appsettings*.json` files as a merged configuration view for unknown-key checks: if a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects and arrays or lists of nested options objects are checked recursively, so typos under `Servers:0:Port`-style data can still be found.
+
+Dictionary entries and scalar array items are treated as values rather than property names. For example, arbitrary keys under `Dictionary<string, string>` and values inside `string[]` are not reported as unknown options properties.
+
 ## Explained Like You're Ten
 
 Think of `appsettings.json` as a list of instructions for your app.
