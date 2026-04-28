@@ -23,7 +23,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Initial MVP analyzer rules for missing sections, missing startup validation, missing DataAnnotations registration, nested validation, and unknown appsettings keys.</PackageReleaseNotes>
+    <PackageReleaseNotes>Initial MVP analyzer rules for missing sections, missing startup validation, missing DataAnnotations registration, nested validation, and unknown appsettings keys, including strongly typed dictionary-value checks.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

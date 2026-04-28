@@ -273,9 +273,9 @@ After:
 
 `CFG006` is informational because .NET configuration binding allows flexible shapes. It is still useful for catching the typos that hide in environment-specific settings.
 
-Visible `appsettings*.json` files are treated as a merged configuration view for unknown-key checks. If a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects and arrays or lists of nested options objects are checked recursively, so typos under `Servers:0:Port`-style data can still be found.
+Visible `appsettings*.json` files are treated as a merged configuration view for unknown-key checks. If a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects, arrays or lists of nested options objects, and strongly typed dictionary values are checked recursively, so typos under `Servers:0:Port` or `Servers:primary:Port`-style data can still be found.
 
-Dictionary entries and scalar array items are treated as values rather than property names. Arbitrary keys under `Dictionary<string, string>` and values inside `string[]` are not reported as unknown options properties.
+Dictionary entry names and scalar array items are treated as values rather than property names. Arbitrary keys under `Dictionary<string, string>` and values inside `string[]` are not reported as unknown options properties.
 
 ## Design Principles
 
