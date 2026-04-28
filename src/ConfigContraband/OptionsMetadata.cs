@@ -23,13 +23,8 @@ internal sealed class OptionsTypeMetadata
     {
         var properties = ImmutableArray.CreateBuilder<BindableProperty>();
 
-        foreach (var member in type.GetMembers().OfType<IPropertySymbol>())
+        foreach (var member in GetBindableProperties(type))
         {
-            if (!IsBindable(member))
-            {
-                continue;
-            }
-
             properties.Add(new BindableProperty(
                 member,
                 GetConfigurationNames(member).ToImmutableArray(),
@@ -159,6 +154,20 @@ internal sealed class OptionsTypeMetadata
                property.Parameters.Length == 0;
     }
 
+    private static IEnumerable<IPropertySymbol> GetBindableProperties(INamedTypeSymbol type)
+    {
+        for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
+            {
+                if (IsBindable(property))
+                {
+                    yield return property;
+                }
+            }
+        }
+    }
+
     private static IEnumerable<string> GetConfigurationNames(IPropertySymbol property)
     {
         yield return property.Name;
@@ -192,13 +201,8 @@ internal sealed class OptionsTypeMetadata
             return false;
         }
 
-        foreach (var property in namedType.GetMembers().OfType<IPropertySymbol>())
+        foreach (var property in GetBindableProperties(namedType))
         {
-            if (!IsBindable(property))
-            {
-                continue;
-            }
-
             if (HasValidationAttribute(property))
             {
                 return true;

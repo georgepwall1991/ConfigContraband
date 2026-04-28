@@ -117,6 +117,50 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg004_fix_appends_data_annotations_for_inherited_data_annotations()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateOnStart()|};
+            """, optionsTypes: """
+            public class BaseStripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+
+            public sealed class StripeOptions : BaseStripeOptions
+            {
+                public string WebhookSecret { get; set; } = "";
+            }
+            """);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateOnStart().ValidateDataAnnotations();
+            """, optionsTypes: """
+            public class BaseStripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+
+            public sealed class StripeOptions : BaseStripeOptions
+            {
+                public string WebhookSecret { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_fix_appends_validate_on_start_for_split_validation_chain()
     {
         var source = OptionsSource("""

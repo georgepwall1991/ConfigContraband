@@ -141,6 +141,7 @@ services.AddOptions<StripeOptions>()
 ### `CFG004`: DataAnnotations Must Be Switched On
 
 Attributes such as `[Required]` do nothing for options unless `ValidateDataAnnotations()` is registered.
+Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration.
 
 Before:
 
