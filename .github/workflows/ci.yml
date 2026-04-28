@@ -29,7 +29,14 @@ jobs:
         run: dotnet build ConfigContraband.slnx --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test ConfigContraband.slnx --configuration Release --no-build --logger trx --results-directory TestResults
+        run: dotnet test ConfigContraband.slnx --configuration Release --no-build --logger trx --results-directory TestResults --collect:"XPlat Code Coverage"
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          directory: TestResults
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Pack
         run: dotnet pack src/ConfigContraband/ConfigContraband.csproj --configuration Release --no-build --output artifacts/packages
