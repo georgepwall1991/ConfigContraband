@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/ci.yml/badge.svg)](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/codeql.yml/badge.svg)](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/codeql.yml)
+[![codecov](https://codecov.io/gh/georgepwall1991/ConfigContraband/branch/main/graph/badge.svg)](https://codecov.io/gh/georgepwall1991/ConfigContraband)
 
 Stop smuggling broken `appsettings` into production.
 

@@ -107,6 +107,55 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg001_ignores_bind_configuration_on_unrelated_type()
+    {
+        var source = """
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    new Binder().BindConfiguration("Stripe");
+                }
+            }
+
+            public sealed class Binder
+            {
+                public void BindConfiguration(string section)
+                {
+                }
+            }
+            """;
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg001_ignores_non_constant_and_empty_section_paths()
+    {
+        var source = OptionsSource("""
+            var sectionName = GetSectionName();
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration(sectionName)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("  ")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraMembers: """
+            private static string GetSectionName()
+            {
+                return "Stripe";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_validation_without_validate_on_start()
     {
         var source = OptionsSource("""
@@ -182,6 +231,45 @@ public sealed class ConfigContrabandAnalyzerTests
             public sealed class StripeOptions : BaseStripeOptions
             {
                 public string WebhookSecret { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_honors_chained_split_local_registration_chain()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<PlainOptions>()
+                .BindConfiguration("Plain");
+            optionsBuilder.Validate(options => true).ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class PlainOptions
+            {
+                public string Value { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_stops_split_local_scan_at_unrelated_invocation()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<PlainOptions>()
+                .BindConfiguration("Plain");
+            Validate(optionsBuilder);
+            optionsBuilder.ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", extraMembers: """
+            private static void Validate(OptionsBuilder<PlainOptions> optionsBuilder)
+            {
+            }
+            """, optionsTypes: """
+            public sealed class PlainOptions
+            {
+                public string Value { get; set; } = "";
             }
             """);
 
@@ -755,7 +843,11 @@ public sealed class ConfigContrabandAnalyzerTests
             expected);
     }
 
-    private static string OptionsSource(string registration, string extraUsings = "", string? optionsTypes = null)
+    private static string OptionsSource(
+        string registration,
+        string extraUsings = "",
+        string extraMembers = "",
+        string? optionsTypes = null)
     {
         optionsTypes ??= """
             public sealed class StripeOptions
@@ -778,6 +870,8 @@ public sealed class ConfigContrabandAnalyzerTests
                 {
                     {{registration}}
                 }
+
+                {{extraMembers}}
             }
 
             {{optionsTypes}}
