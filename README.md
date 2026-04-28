@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/configcontraband-icon.png" width="96" height="96" alt="ConfigContraband icon">
+</p>
+
 # ConfigContraband
 
 [![CI](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/ci.yml/badge.svg)](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/ci.yml)
