@@ -1,6 +1,4 @@
-using System.Threading.Tasks;
 using ConfigContraband.Tests.Infrastructure;
-using Xunit;
 
 namespace ConfigContraband.Tests;
 
@@ -180,6 +178,65 @@ public sealed class ConfigContrabandCodeFixTests
             .WithLocation(0)
             .WithLocation(1)
             .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_fix_adds_validate_enumerated_items()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public List<ServerOptions> {|#1:Servers|} { get; set; } = [];
+            }
+
+            public sealed class ServerOptions
+            {
+                [Required]
+                public string Host { get; set; } = "";
+            }
+            """);
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using System.Collections.Generic;
+            using Microsoft.Extensions.Options;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+                }
+            }
+
+            public sealed class AppOptions
+            {
+                [ValidateEnumeratedItems]
+                public List<ServerOptions> Servers { get; set; } = [];
+            }
+
+            public sealed class ServerOptions
+            {
+                [Required]
+                public string Host { get; set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Servers");
 
         await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
     }

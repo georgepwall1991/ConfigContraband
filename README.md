@@ -145,7 +145,7 @@ services.AddOptions<StripeOptions>()
 
 ### `CFG005`: Nested Options Need Recursive Validation
 
-DataAnnotations do not automatically walk into child objects or collection items. If a nested type has validation attributes, mark the parent property so it is checked too.
+DataAnnotations do not automatically walk into child objects or collection items. If a nested class or collection item has validation attributes anywhere in its bindable object graph, mark each parent property that should be checked recursively.
 
 Before:
 
@@ -180,7 +180,7 @@ public sealed class DatabaseOptions
 }
 ```
 
-For collections, use `[ValidateEnumeratedItems]`.
+For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. `CFG005` does not report interface-typed nested properties or system scalar types because the options validator cannot safely infer a concrete object graph for those shapes.
 
 ### `CFG006`: Config Keys Should Match Options Properties
 

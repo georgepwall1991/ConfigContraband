@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
@@ -109,7 +108,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 registration.OutermostInvocation.GetLocation(),
                 propertyLocation is null ? null : new[] { propertyLocation },
                 properties,
-                registration.OptionsType.Name,
+                candidate.Property.Symbol.ContainingType.Name,
                 candidate.Property.Symbol.Name));
         }
     }

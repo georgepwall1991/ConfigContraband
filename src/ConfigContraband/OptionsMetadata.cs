@@ -82,16 +82,26 @@ internal sealed class OptionsTypeMetadata
     public ImmutableArray<NestedValidationCandidate> GetNestedValidationCandidates()
     {
         var builder = ImmutableArray.CreateBuilder<NestedValidationCandidate>();
+        AddNestedValidationCandidates(builder, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default));
+        return builder.ToImmutable();
+    }
+
+    private void AddNestedValidationCandidates(
+        ImmutableArray<NestedValidationCandidate>.Builder builder,
+        HashSet<ITypeSymbol> visited)
+    {
         foreach (var property in BindableProperties)
         {
             if (TryGetCollectionElementType(property.Symbol.Type, out var elementType))
             {
-                if (ContainsValidationAttributes(elementType, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default)) &&
+                if (IsPotentialNestedObject(elementType) &&
+                    ContainsValidationAttributes(elementType, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default)) &&
                     !HasAttribute(property.Symbol, "Microsoft.Extensions.Options.ValidateEnumeratedItemsAttribute"))
                 {
                     builder.Add(new NestedValidationCandidate(property, "ValidateEnumeratedItems", isCollection: true));
                 }
 
+                AddNestedValidationCandidates(elementType, builder, visited);
                 continue;
             }
 
@@ -101,9 +111,24 @@ internal sealed class OptionsTypeMetadata
             {
                 builder.Add(new NestedValidationCandidate(property, "ValidateObjectMembers", isCollection: false));
             }
+
+            AddNestedValidationCandidates(property.Symbol.Type, builder, visited);
+        }
+    }
+
+    private static void AddNestedValidationCandidates(
+        ITypeSymbol type,
+        ImmutableArray<NestedValidationCandidate>.Builder builder,
+        HashSet<ITypeSymbol> visited)
+    {
+        if (!IsPotentialNestedObject(type) ||
+            type is not INamedTypeSymbol namedType ||
+            !visited.Add(namedType))
+        {
+            return;
         }
 
-        return builder.ToImmutable();
+        Create(namedType).AddNestedValidationCandidates(builder, visited);
     }
 
     private static bool IsBindable(IPropertySymbol property)
@@ -157,6 +182,23 @@ internal sealed class OptionsTypeMetadata
             }
 
             if (HasValidationAttribute(property))
+            {
+                return true;
+            }
+
+            if (TryGetCollectionElementType(property.Type, out var elementType))
+            {
+                if (IsPotentialNestedObject(elementType) &&
+                    ContainsValidationAttributes(elementType, visited))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (IsPotentialNestedObject(property.Type) &&
+                ContainsValidationAttributes(property.Type, visited))
             {
                 return true;
             }
