@@ -567,6 +567,143 @@ public sealed class ConfigContrabandAnalyzerTests
             """));
     }
 
+    [Fact]
+    public async Task Cfg006_reports_unknown_key_under_collection_item_object()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public List<ServerOptions> Servers { get; set; } = [];
+            }
+
+            public sealed class ServerOptions
+            {
+                public string Host { get; set; } = "";
+
+                public int Port { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 6, 9, 6, 14)
+            .WithArguments("App:Servers:0:Prt", "ServerOptions", ". Did you mean \"Port\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Servers": [
+                  {
+                    "Host": "api",
+                    "Prt": 443
+                  }
+                ]
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_does_not_report_scalar_array_items()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class AppOptions
+            {
+                public string[] AllowedHosts { get; set; } = [];
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "AllowedHosts": [
+                  "api.example.com",
+                  "admin.example.com"
+                ]
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg006_does_not_report_dictionary_entries_as_unknown_properties()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<string, string> Labels { get; set; } = [];
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Labels": {
+                  "tier": "gold",
+                  "region": "eu"
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg006_checks_every_matching_section_across_appsettings_files()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.Production.json", 3, 5, 3, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            new[]
+            {
+                ("appsettings.json", """
+                {
+                  "Stripe": {
+                    "ApiKey": "secret"
+                  }
+                }
+                """),
+                ("appsettings.Production.json", """
+                {
+                  "Stripe": {
+                    "WebookSecret": "typo"
+                  }
+                }
+                """)
+            },
+            expected);
+    }
+
     private static string OptionsSource(string registration, string extraUsings = "", string? optionsTypes = null)
     {
         optionsTypes ??= """

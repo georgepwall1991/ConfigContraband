@@ -8,11 +8,15 @@ namespace ConfigContraband;
 
 internal sealed class OptionsTypeMetadata
 {
-    private OptionsTypeMetadata(ImmutableArray<BindableProperty> bindableProperties)
+    private OptionsTypeMetadata(INamedTypeSymbol type, ImmutableArray<BindableProperty> bindableProperties)
     {
+        TypeName = type.Name;
+        TypeKey = type.ToDisplayString();
         BindableProperties = bindableProperties;
     }
 
+    public string TypeName { get; }
+    public string TypeKey { get; }
     public ImmutableArray<BindableProperty> BindableProperties { get; }
 
     public static OptionsTypeMetadata Create(INamedTypeSymbol type)
@@ -32,7 +36,7 @@ internal sealed class OptionsTypeMetadata
                 HasValidationAttribute(member)));
         }
 
-        return new OptionsTypeMetadata(properties.ToImmutable());
+        return new OptionsTypeMetadata(type, properties.ToImmutable());
     }
 
     public bool HasAnyDataAnnotations()
@@ -62,6 +66,20 @@ internal sealed class OptionsTypeMetadata
     {
         if (IsPotentialNestedObject(property.Symbol.Type) &&
             property.Symbol.Type is INamedTypeSymbol namedType)
+        {
+            metadata = Create(namedType);
+            return true;
+        }
+
+        metadata = null!;
+        return false;
+    }
+
+    public bool TryCreateCollectionElementMetadata(BindableProperty property, out OptionsTypeMetadata metadata)
+    {
+        if (TryGetCollectionElementType(property.Symbol.Type, out var elementType) &&
+            IsPotentialNestedObject(elementType) &&
+            elementType is INamedTypeSymbol namedType)
         {
             metadata = Create(namedType);
             return true;

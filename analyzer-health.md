@@ -29,7 +29,7 @@ Importance * 0.25 + Precision * 0.25 + TestDepth * 0.20 + FixSafety * 0.15 + Doc
 | CFG003 Validation not on startup | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local validation chains with deterministic fixes. |
 | CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local startup-validation chains with deterministic fixes. |
 | CFG005 Nested validation not recursive | Warning | 5 | 4 | 4 | 4 | 4 | 4 | 4.25 | P1 | Recurses through nested object graphs, honors existing recursive attributes, and covers arrays, nullable properties, collections, and interface boundaries. |
-| CFG006 Unknown configuration key | Info | 4 | 3 | 4 | 5 | 2 | 4 | 3.65 | P2 | Good test base after nested-key work; needs arrays, dictionaries, and multi-file merge semantics. |
+| CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 4 | 4 | 4.35 | P2 | Checks nested object-array keys across every matching appsettings section while leaving scalar arrays and dictionary entries conservative. |
 
 ## Selection Policy
 
@@ -44,18 +44,17 @@ Do not raise severity, rename analyzer IDs, or broaden diagnostics unless tests 
 
 ## Current Shortlist
 
-1. `CFG006` nested key follow-up:
-   - Add array and dictionary boundary tests.
-   - Decide and document whether multiple appsettings files are treated as merged configuration or independent snapshots.
-   - Keep as Info until false-positive boundaries are stronger.
-
-2. `CFG004` inherited DataAnnotations follow-up:
+1. `CFG004` inherited DataAnnotations follow-up:
    - Add inherited-property coverage.
    - Keep code fixes narrow when validation chains are split across locals.
 
-3. `CFG001` duplicate-section follow-up:
+2. `CFG001` duplicate-section follow-up:
    - Add explicit duplicate-section tests if future merge semantics become more precise.
    - Preserve conservative diagnostics when no appsettings files are available.
+
+3. `CFG006` dictionary-value follow-up:
+   - Consider whether strongly typed dictionary values can be checked without reporting arbitrary dictionary entry names.
+   - Keep as Info because configuration binding remains intentionally flexible.
 
 ## Rule Notes
 
@@ -103,9 +102,10 @@ Reports an appsettings key under a bound section when it does not match any bind
 
 Known gaps:
 
-- Arrays and dictionaries need explicit boundary tests.
-- Multi-file configuration merge semantics need a design decision.
-- Documentation should explain why the rule is Info and when it may be suppressed.
+- Object arrays and lists are checked recursively, and scalar arrays are treated as values.
+- Visible appsettings files are treated as a merged view for unknown-key checks; every matching bound section can produce diagnostics.
+- Dictionary entry names are intentionally treated as dynamic keys and are not reported as unknown properties.
+- Strongly typed dictionary values may become checkable later if the analyzer can avoid flagging dynamic entry names.
 
 ## Verification Baseline
 
