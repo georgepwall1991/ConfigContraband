@@ -26,8 +26,8 @@ Importance * 0.25 + Precision * 0.25 + TestDepth * 0.20 + FixSafety * 0.15 + Doc
 | Rule | Severity | Importance | Precision | Test Depth | Fix Safety | Docs | Release | Score | Priority | Status |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
 | CFG001 Missing configuration section | Warning | 5 | 4 | 3 | 4 | 2 | 4 | 4.00 | P1 | Useful and shippable, but needs more section-path and multi-file tests. |
-| CFG003 Validation not on startup | Warning | 4 | 3 | 2 | 3 | 2 | 4 | 3.15 | P1 | Needs chain-shape coverage and fix formatting hardening. |
-| CFG004 DataAnnotations not enabled | Warning | 4 | 3 | 2 | 3 | 2 | 4 | 3.15 | P1 | Needs boundary tests for non-options annotations and existing `ValidateOnStart()`. |
+| CFG003 Validation not on startup | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local validation chains with deterministic fixes. |
+| CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local startup-validation chains with deterministic fixes. |
 | CFG005 Nested validation not recursive | Warning | 5 | 3 | 3 | 3 | 2 | 4 | 3.55 | P1 | High value; needs recursive/nested depth and existing-attribute safety coverage. |
 | CFG006 Unknown configuration key | Info | 4 | 3 | 4 | 5 | 2 | 4 | 3.65 | P2 | Good test base after nested-key work; needs arrays, dictionaries, and multi-file merge semantics. |
 
@@ -44,22 +44,17 @@ Do not raise severity, rename analyzer IDs, or broaden diagnostics unless tests 
 
 ## Current Shortlist
 
-1. `CFG003` and `CFG004` invocation-chain hardening:
-   - Add tests for registrations split across fluent chains and terminal invocations.
-   - Ensure fix output remains compilable and deterministic.
-   - Confirm custom validation delegates count for `CFG003` without triggering `CFG004`.
-
-2. `CFG005` nested validation precision:
+1. `CFG005` nested validation precision:
    - Add tests for already annotated nested object and collection properties.
    - Add tests for recursive depth, nullable nested properties, arrays, and interfaces.
    - Keep fixer narrow to adding only the missing recursive validation attribute.
 
-3. `CFG001` section lookup hardening:
+2. `CFG001` section lookup hardening:
    - Add nested section-path tests such as `Features:Stripe`.
    - Add multi-file appsettings coverage and duplicate-section behavior.
    - Preserve conservative diagnostics when no appsettings files are available.
 
-4. `CFG006` nested key follow-up:
+3. `CFG006` nested key follow-up:
    - Add array and dictionary boundary tests.
    - Decide and document whether multiple appsettings files are treated as merged configuration or independent snapshots.
    - Keep as Info until false-positive boundaries are stronger.
@@ -82,8 +77,8 @@ Reports when an options registration has validation but no `ValidateOnStart()`.
 
 Known gaps:
 
-- Fluent chain parsing needs more coverage for unusual but valid chain shapes.
-- Code fix formatting is tested, but not broadly across multi-line and already chained invocations.
+- More complex control-flow and non-local `OptionsBuilder<T>` storage are intentionally not inferred.
+- Code fix formatting is tested for fluent and immediate split chains, but not broadly across every multi-line shape.
 - Documentation should explain why lazy validation is risky.
 
 ### CFG004 DataAnnotations Not Enabled
@@ -93,8 +88,8 @@ Reports when an options type uses DataAnnotations but the registration does not 
 Known gaps:
 
 - More tests are needed for inherited properties and non-bindable annotated properties.
-- Code fix should continue to avoid adding duplicate `ValidateOnStart()`.
-- Documentation should distinguish DataAnnotations from custom validation delegates.
+- Code fix should continue to avoid adding duplicate `ValidateOnStart()` across more chain shapes.
+- Documentation distinguishes DataAnnotations from custom validation delegates, but inherited DataAnnotations need examples.
 
 ### CFG005 Nested Validation Not Recursive
 
