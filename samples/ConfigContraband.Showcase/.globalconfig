@@ -1,0 +1,2 @@
+is_global = true
+dotnet_diagnostic.CFG006.severity = warning
