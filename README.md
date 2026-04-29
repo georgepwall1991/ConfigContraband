@@ -35,7 +35,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.1.4" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.1.6" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -155,7 +155,7 @@ services.AddOptions<StripeOptions>()
 
 For nested typos, the fix keeps the parent path and replaces only the bad leaf section. If the code says `Features:Strpie` and the file contains `Features:Stripe`, the fix changes it to `Features:Stripe`.
 
-The analyzer checks every visible `appsettings*.json` additional file for section existence, including duplicate JSON section members when resolving nested section paths. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
+The analyzer checks every visible `appsettings*.json` additional file for section existence, including commented files and duplicate JSON section members when resolving nested section paths. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
 
 ### `CFG003`: Validation Should Run When The App Starts
 
@@ -291,7 +291,7 @@ After:
 
 `CFG006` is informational because .NET configuration binding allows flexible shapes. It is still useful for catching the typos that hide in environment-specific settings.
 
-Visible `appsettings*.json` files are treated as a merged configuration view for unknown-key checks. If a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects, arrays or lists of nested options objects, strongly typed dictionary values, and dictionary values that bind to collections of nested options objects are checked recursively, so typos under `Servers:0:Port`, `Servers:primary:Port`, or `ServersByRegion:eu:0:Port`-style data can still be found.
+Visible `appsettings*.json` files are treated as a merged configuration view for unknown-key checks, including files with `//` or `/* ... */` comments. If a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects, arrays or lists of nested options objects, strongly typed dictionary values, and dictionary values that bind to collections of nested options objects are checked recursively, so typos under `Servers:0:Port`, `Servers:primary:Port`, or `ServersByRegion:eu:0:Port`-style data can still be found.
 
 Dictionary entry names and scalar array items are treated as values rather than property names. Arbitrary keys under `Dictionary<string, string>` and values inside `string[]` are not reported as unknown options properties.
 
