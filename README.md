@@ -35,7 +35,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.1.3" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.1.4" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -243,7 +243,7 @@ public sealed class DatabaseOptions
 }
 ```
 
-For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. `CFG005` does not report interface-typed nested properties or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
+For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. The code fix updates the file that owns the options property, adds `using Microsoft.Extensions.Options;` when needed, and keeps existing property comments in place. `CFG005` does not report interface-typed nested properties or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
 
 ### `CFG006`: Config Keys Should Match Options Properties
 

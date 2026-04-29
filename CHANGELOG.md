@@ -2,6 +2,11 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.1.4 - 2026-04-29
+
+- Hardened `CFG005` recursive-validation code fixes to update the source document that owns the target options property.
+- Added regression coverage for cross-document `[ValidateObjectMembers]` and `[ValidateEnumeratedItems]` fixes, including existing `Microsoft.Extensions.Options` imports and property comments.
+
 ## 0.1.3 - 2026-04-29
 
 - Hardened the shared `CFG003` and `CFG004` code-fix appender to preserve multiline fluent-chain formatting.

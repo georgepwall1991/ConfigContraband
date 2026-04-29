@@ -451,6 +451,175 @@ public sealed class ConfigContrabandCodeFixTests
         await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
     }
 
+    [Fact]
+    public async Task Cfg005_fix_updates_nested_object_property_in_target_document()
+    {
+        var startupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    {|#0:services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart()|};
+                }
+            }
+            """;
+
+        var optionsSource = """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class AppOptions
+            {
+                // Primary database settings.
+                public DatabaseOptions {|#1:Database|} { get; set; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+            """;
+
+        var fixedStartupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+            """;
+
+        var fixedOptionsSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.Options;
+
+            public sealed class AppOptions
+            {
+                // Primary database settings.
+                [ValidateObjectMembers]
+                public DatabaseOptions Database { get; set; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyCodeFixAsync(
+            [
+                ("Startup.cs", startupSource),
+                ("Options.cs", optionsSource)
+            ],
+            [
+                ("Startup.cs", fixedStartupSource),
+                ("Options.cs", fixedOptionsSource)
+            ],
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_fix_updates_collection_property_in_target_document_without_duplicate_using()
+    {
+        var startupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    {|#0:services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart()|};
+                }
+            }
+            """;
+
+        var optionsSource = """
+            using System.Collections.Generic;
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.Options;
+
+            public sealed class AppOptions
+            {
+                public List<ServerOptions> {|#1:Servers|} { get; set; } = [];
+            }
+
+            public sealed class ServerOptions
+            {
+                [Required]
+                public string Host { get; set; } = "";
+            }
+            """;
+
+        var fixedStartupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+            """;
+
+        var fixedOptionsSource = """
+            using System.Collections.Generic;
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.Options;
+
+            public sealed class AppOptions
+            {
+                [ValidateEnumeratedItems]
+                public List<ServerOptions> Servers { get; set; } = [];
+            }
+
+            public sealed class ServerOptions
+            {
+                [Required]
+                public string Host { get; set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Servers");
+
+        await Verifier.VerifyCodeFixAsync(
+            [
+                ("Startup.cs", startupSource),
+                ("Options.cs", optionsSource)
+            ],
+            [
+                ("Startup.cs", fixedStartupSource),
+                ("Options.cs", fixedOptionsSource)
+            ],
+            expected);
+    }
+
     private static string OptionsSource(string registration, string extraUsings = "", string? optionsTypes = null)
     {
         optionsTypes ??= """

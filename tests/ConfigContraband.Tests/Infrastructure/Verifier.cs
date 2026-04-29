@@ -81,6 +81,30 @@ internal static class Verifier
         await test.RunAsync();
     }
 
+    public static async Task VerifyCodeFixAsync(
+        (string filename, string content)[] sources,
+        (string filename, string content)[] fixedSources,
+        params DiagnosticResult[] expected)
+    {
+        var test = new CSharpCodeFixTest<ConfigContrabandAnalyzer, ConfigContrabandCodeFixProvider, DefaultVerifier>
+        {
+            ReferenceAssemblies = OptionsReferences
+        };
+
+        foreach (var source in sources)
+        {
+            test.TestState.Sources.Add(source);
+        }
+
+        foreach (var fixedSource in fixedSources)
+        {
+            test.FixedState.Sources.Add(fixedSource);
+        }
+
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
     public static DiagnosticResult Diagnostic(Microsoft.CodeAnalysis.DiagnosticDescriptor descriptor)
     {
         return new DiagnosticResult(descriptor);
