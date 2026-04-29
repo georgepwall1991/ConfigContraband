@@ -35,7 +35,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.1.2" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.1.3" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -168,6 +168,8 @@ services.AddOptions<StripeOptions>()
     .ValidateOnStart();
 ```
 
+The code fix appends `ValidateOnStart()` in the same style as the existing registration chain, including multiline chains and immediate same-block local `OptionsBuilder<T>` chains.
+
 ### `CFG004`: DataAnnotations Must Be Switched On
 
 Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration.
@@ -201,6 +203,8 @@ services.AddOptions<StripeOptions>()
 ```
 
 `Validate(...)` counts as validation for `CFG003`, but it does not satisfy `CFG004` when DataAnnotations attributes are present.
+
+The code fix preserves existing fluent-chain formatting, adds `ValidateDataAnnotations()`, and only adds `ValidateOnStart()` when startup validation is not already present.
 
 ### `CFG005`: Nested Options Need Recursive Validation
 

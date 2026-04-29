@@ -2,6 +2,11 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.1.3 - 2026-04-29
+
+- Hardened the shared `CFG003` and `CFG004` code-fix appender to preserve multiline fluent-chain formatting.
+- Added regression coverage for split local chains, custom validation chains, comments inside chains, and single-line chains.
+
 ## 0.1.2 - 2026-04-29
 
 - Hardened `CFG006` to recurse through dictionary values that bind to collections of nested option objects.

@@ -86,7 +86,8 @@ public sealed class ConfigContrabandCodeFixTests
         var fixedSource = OptionsSource("""
             services.AddOptions<StripeOptions>()
                 .BindConfiguration("Stripe")
-                .ValidateDataAnnotations().ValidateOnStart();
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
             """);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
@@ -106,7 +107,9 @@ public sealed class ConfigContrabandCodeFixTests
 
         var fixedSource = OptionsSource("""
             services.AddOptions<StripeOptions>()
-                .BindConfiguration("Stripe").ValidateDataAnnotations().ValidateOnStart();
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
             """);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
@@ -139,7 +142,8 @@ public sealed class ConfigContrabandCodeFixTests
         var fixedSource = OptionsSource("""
             services.AddOptions<StripeOptions>()
                 .BindConfiguration("Stripe")
-                .ValidateOnStart().ValidateDataAnnotations();
+                .ValidateOnStart()
+                .ValidateDataAnnotations();
             """, optionsTypes: """
             public class BaseStripeOptions
             {
@@ -171,7 +175,8 @@ public sealed class ConfigContrabandCodeFixTests
 
         var fixedSource = OptionsSource("""
             var optionsBuilder = services.AddOptions<StripeOptions>()
-                .BindConfiguration("Stripe").ValidateOnStart();
+                .BindConfiguration("Stripe")
+                .ValidateOnStart();
             optionsBuilder.ValidateDataAnnotations();
             """);
 
@@ -193,8 +198,75 @@ public sealed class ConfigContrabandCodeFixTests
 
         var fixedSource = OptionsSource("""
             var optionsBuilder = services.AddOptions<StripeOptions>()
-                .BindConfiguration("Stripe").ValidateDataAnnotations();
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations();
             optionsBuilder.ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_fix_preserves_multiline_custom_validation_chain()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .Validate(options => !string.IsNullOrWhiteSpace(options.ApiKey))
+                .ValidateOnStart()|};
+            """);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .Validate(options => !string.IsNullOrWhiteSpace(options.ApiKey))
+                .ValidateOnStart()
+                .ValidateDataAnnotations();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_fix_preserves_chain_comments()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe") // appsettings section
+                .ValidateDataAnnotations()|};
+            """);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe") // appsettings section
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_fix_keeps_single_line_chain_single_line()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>().BindConfiguration("Stripe")|};
+            """);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>().BindConfiguration("Stripe").ValidateDataAnnotations().ValidateOnStart();
             """);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)

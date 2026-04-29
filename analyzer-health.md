@@ -1,6 +1,10 @@
 # Analyzer Health
 
-This file tracks ConfigContraband rule maturity and drives iterative hardening work. Use it to choose the next focused analyzer improvement, update the score after each change, and keep release readiness visible.
+This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
+
+Last refreshed: 2026-04-29
+Package version: `0.1.3`
+Base audited commit: `0ae55dd`
 
 ## Scoring Rubric
 
@@ -21,22 +25,34 @@ Overall score:
 Importance * 0.25 + Precision * 0.25 + TestDepth * 0.20 + FixSafety * 0.15 + Documentation * 0.10 + ReleaseReadiness * 0.05
 ```
 
+Priority means "next investment priority", not diagnostic severity:
+
+| Priority | Meaning |
+|---|---|
+| P1 | Best next hardening target. |
+| P2 | Worth improving after P1 work or when touching the shared helper. |
+| P3 | Healthy enough; monitor for real-world gaps. |
+
+## Current Posture
+
+The analyzer has a compact, coherent rule set: five diagnostics, four code-fix families, `buildTransitive` appsettings discovery, README rule documentation, changelog/version metadata, and CI that restores, builds, tests, packs, uploads test results, and uploads packages. The biggest remaining quality gap is not rule breadth; it is proving cross-document and formatting behavior for the recursive-validation attribute fixers.
+
 ## Health Baseline
 
-| Rule | Severity | Importance | Precision | Test Depth | Fix Safety | Docs | Release | Score | Priority | Status |
+| Rule | Severity | Importance | Precision | Test Depth | Fix Safety | Docs | Release | Score | Priority | Current read |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
-| CFG001 Missing configuration section | Warning | 5 | 5 | 5 | 4 | 4 | 4 | 4.70 | P1 | Handles nested section-path suggestions with full-path fixes, traverses duplicate JSON section members, and treats appsettings files as a visible set for section lookup. |
-| CFG003 Validation not on startup | Warning | 4 | 4 | 4 | 4 | 3 | 4 | 3.90 | P1 | Handles fluent and immediate split local validation chains with deterministic fixes. |
-| CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P1 | Handles inherited bindable DataAnnotations and fluent or immediate split local startup-validation chains with deterministic fixes. |
-| CFG005 Nested validation not recursive | Warning | 5 | 4 | 4 | 4 | 4 | 4 | 4.25 | P1 | Recurses through nested object graphs, honors existing recursive attributes, and covers arrays, nullable properties, collections, and interface boundaries. |
-| CFG006 Unknown configuration key | Info | 4 | 5 | 5 | 5 | 4 | 5 | 4.65 | P2 | Checks nested object arrays, strongly typed dictionary-value keys, and dictionary values containing nested object collections across every matching appsettings section while leaving scalar arrays and dynamic dictionary entry names conservative. |
+| CFG001 Missing configuration section | Warning | 5 | 5 | 5 | 4 | 5 | 4 | 4.80 | P3 | Strong current shape. Handles nested section paths, full-path suggestions, duplicate JSON section members, and visible appsettings files as one searchable set. |
+| CFG003 Validation not on startup | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P3 | Good analyzer boundary for fluent and immediate same-block local chains; code fixes now preserve multiline formatting, comments, split locals, and single-line chains. |
+| CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P3 | Covers inherited bindable DataAnnotations, avoids duplicate `ValidateOnStart()` in covered shapes, and shares the formatter-safe invocation appender with CFG003. |
+| CFG005 Nested validation not recursive | Warning | 5 | 4 | 4 | 3 | 4 | 4 | 4.10 | P2 | High-impact rule with recursive graph coverage for objects, arrays, lists, nullable properties, and interface suppression. Code-fix coverage still needs cross-document and formatting hardening. |
+| CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 5 | 5 | 4.50 | P3 | Broadest test depth. Recurses through nested objects, object collections, dictionary values, and dictionary values containing collections while keeping scalar arrays and dictionary entry names quiet. |
 
 ## Selection Policy
 
 Pick one focused rule per hardening batch unless two rules share the same helper boundary. Prefer:
 
 1. Warning rules before Info rules when scores are close.
-2. High `Importance` with low `Precision` or `Test Depth`.
+2. High `Importance` with low `Precision`, `Test Depth`, or `Fix Safety`.
 3. Fixable rules with unproven code fixes before manual-only documentation cleanup.
 4. Small changes that can be verified with targeted tests.
 
@@ -44,62 +60,92 @@ Do not raise severity, rename analyzer IDs, or broaden diagnostics unless tests 
 
 ## Current Shortlist
 
-1. Re-audit `CFG003` and `CFG004` code-fix formatting across multi-line chains before broadening diagnostics.
-2. Keep `CFG006` as Info and add only narrowly proven binding-shape coverage if real-world appsettings shapes expose another safe gap.
+1. Add dedicated `CFG005` code-fix coverage for cross-document locations and cleaner formatting around added recursive-validation attributes. The implementation already resolves the target document from the diagnostic location, but the test suite should prove it.
+2. Keep `CFG006` informational. Only add new binding-shape coverage when there is a concrete, narrow shape that can be proven without reporting dynamic configuration data as an unknown property.
+3. Keep `CFG003` and `CFG004` in monitor mode unless real-world chains expose another formatter edge case.
+4. Keep `CFG001` in monitor mode. Future work should be driven by real appsettings/provider-order bugs, not by widening static inference.
 
 ## Rule Notes
 
 ### CFG001 Missing Configuration Section
 
-Reports when a string literal passed to `BindConfiguration()` does not exist in available `appsettings*.json` files. Nested section paths are matched segment by segment, and the code fix replaces the section literal with the full corrected path when a close sibling section name is found.
-
-Known gaps:
-
-- Multi-file section lookup treats visible appsettings files as one searchable set for section existence; it does not model provider ordering.
+Reports when a string literal passed to `BindConfiguration()` does not exist in visible `appsettings*.json` files. Nested section paths are matched segment by segment. The code fix replaces the literal with the full corrected section path when a close sibling section name is found.
 
 Current behavior:
 
-- Duplicate JSON section members are traversed when resolving nested section paths and typo suggestions.
+- Checks top-level and nested section paths across all visible `appsettings*.json` additional files.
+- Traverses duplicate JSON object members when resolving section existence and suggestions.
+- Ignores non-constant, empty, whitespace-only, and non-`OptionsBuilder<T>` `BindConfiguration` calls.
+
+Known gaps:
+
+- Treats visible appsettings files as one searchable set and does not model configuration-provider ordering.
+- Does not infer dynamic section names.
 
 ### CFG003 Validation Not On Startup
 
-Reports when an options registration has validation but no `ValidateOnStart()`.
+Reports when an options registration has validation through `ValidateDataAnnotations()` or `Validate(...)` but no `ValidateOnStart()`.
+
+Current behavior:
+
+- Tracks normal fluent chains after `BindConfiguration(...)`.
+- Tracks immediate same-block local `OptionsBuilder<T>` calls until an unrelated statement breaks the sequence.
+- Offers a fix that appends `ValidateOnStart()` while preserving multiline chain indentation, comments, split locals, and single-line chains.
 
 Known gaps:
 
-- More complex control-flow and non-local `OptionsBuilder<T>` storage are intentionally not inferred.
-- Code fix formatting is tested for fluent and immediate split chains, but not broadly across every multi-line shape.
-- Documentation should explain why lazy validation is risky.
+- Does not infer non-local builder storage, aliases, reassignment, or broader control flow.
+- Future code-fix work should be driven by concrete formatter regressions rather than speculative chain shapes.
+- Documentation explains the rule, but could be clearer about why lazy options validation is operationally risky.
 
 ### CFG004 DataAnnotations Not Enabled
 
-Reports when an options type uses DataAnnotations but the registration does not call `ValidateDataAnnotations()`.
+Reports when an options type has bindable DataAnnotations properties but the options registration does not call `ValidateDataAnnotations()`.
+
+Current behavior:
+
+- Includes inherited public bindable properties.
+- Honors public settable property boundaries to stay aligned with options binding.
+- Treats custom `Validate(...)` as validation for `CFG003`, but not as a substitute for `ValidateDataAnnotations()`.
+- Offers a fix that appends `ValidateDataAnnotations()` and appends `ValidateOnStart()` only when startup validation is missing, using the formatter-safe chain appender shared with `CFG003`.
 
 Known gaps:
 
-- Inherited bindable properties with DataAnnotations are included when deciding whether `ValidateDataAnnotations()` is required.
-- Non-bindable annotated properties remain ignored to match options binding behavior.
-- Code fix should continue to avoid adding duplicate `ValidateOnStart()` across more chain shapes.
-- Documentation distinguishes DataAnnotations from custom validation delegates and inherited annotation shapes.
+- Future code-fix work should be driven by concrete formatter regressions rather than speculative chain shapes.
+- Does not infer annotations on non-bindable members, which is intentional but worth keeping explicit in docs.
 
 ### CFG005 Nested Validation Not Recursive
 
-Reports when nested object or collection item types contain validation attributes but the parent property lacks the required recursive validation attribute.
+Reports when a nested object or collection item type contains validation attributes but the parent property is missing the required recursive validation attribute.
+
+Current behavior:
+
+- Finds nested object graphs and nested collection graphs that contain DataAnnotations.
+- Covers arrays, `IEnumerable<T>` shapes, nullable nested properties, and deep nested properties.
+- Suppresses interface-typed nested properties and already annotated recursive-validation properties.
+- Offers fixes for `[ValidateObjectMembers]` and `[ValidateEnumeratedItems]`.
 
 Known gaps:
 
-- Cross-document code-fix behavior is supported by the implementation but still needs a dedicated regression test when the test harness grows multi-document coverage.
+- Cross-document fix behavior is implemented but not covered by a dedicated regression test.
+- Code-fix output around inserted attributes and usings should be tightened before calling this rule fully mature.
 - More complex custom recursive validation patterns are intentionally not inferred.
 
 ### CFG006 Unknown Configuration Key
 
-Reports an appsettings key under a bound section when it does not match any bindable options property. This rule is currently informational because configuration binding has flexible shapes and false-positive risk is higher.
+Reports an appsettings key under a bound section when the key does not match a bindable options property or `[ConfigurationKeyName]` alias. This rule stays informational because configuration binding is flexible and false-positive cost is higher.
+
+Current behavior:
+
+- Checks every matching bound section across visible appsettings files.
+- Recurses into nested object properties, arrays/lists of nested objects, strongly typed dictionary values, and dictionary values containing nested object collections.
+- Honors `[ConfigurationKeyName]` aliases at the root and nested levels.
+- Treats scalar array items and dictionary entry names as values rather than property names.
 
 Known gaps:
 
-- Object arrays, lists, strongly typed dictionary values, and dictionary values containing nested object collections are checked recursively, while scalar arrays are treated as values.
-- Visible appsettings files are treated as a merged view for unknown-key checks; every matching bound section can produce diagnostics.
-- Dictionary entry names are intentionally treated as dynamic keys and are not reported as unknown properties.
+- Does not model provider precedence or environment-specific override intent.
+- Should not become a warning unless real-world coverage proves the false-positive profile stays low.
 
 ## Verification Baseline
 
@@ -122,4 +168,4 @@ dotnet test ConfigContraband.slnx --configuration Release
 git diff --check
 ```
 
-CI verification is defined in `.github/workflows/ci.yml` and runs restore, build, test, pack, and artifact upload against the SDK from `global.json`.
+CI verification is defined in `.github/workflows/ci.yml` and runs restore, build, test with coverage, pack, test-result upload, and package artifact upload against the SDK from `global.json`.
