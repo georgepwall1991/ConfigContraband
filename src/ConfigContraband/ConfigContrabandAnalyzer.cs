@@ -13,6 +13,7 @@ namespace ConfigContraband;
 public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 {
     internal const string SuggestedSectionPropertyName = "SuggestedSection";
+    internal const string SuggestedSectionReplacementPropertyName = "SuggestedSectionReplacement";
     internal const string HasValidateOnStartPropertyName = "HasValidateOnStart";
     internal const string RecursiveAttributePropertyName = "RecursiveAttribute";
 
@@ -46,7 +47,10 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     }
 
                     AnalyzeRegistrationChain(syntaxContext.ReportDiagnostic, registration);
-                    AnalyzeOptionType(syntaxContext.ReportDiagnostic, registration, nestedValidationReported);
+                    if (registration.SupportsValidationRules)
+                    {
+                        AnalyzeOptionType(syntaxContext.ReportDiagnostic, registration, nestedValidationReported);
+                    }
 
                     if (configuration.HasFiles)
                     {
@@ -60,6 +64,11 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
     private static void AnalyzeRegistrationChain(Action<Diagnostic> reportDiagnostic, OptionsRegistration registration)
     {
+        if (!registration.SupportsValidationRules)
+        {
+            return;
+        }
+
         if (registration.HasValidation && !registration.HasValidateOnStart)
         {
             reportDiagnostic(Diagnostic.Create(
@@ -129,7 +138,12 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         var properties = ImmutableDictionary<string, string?>.Empty;
         if (suggestedSectionPath is not null)
         {
-            properties = properties.Add(SuggestedSectionPropertyName, suggestedSectionPath);
+            var suggestedReplacement = registration.SectionExpressionContainsFullPath
+                ? suggestedSectionPath
+                : suggestion;
+            properties = properties
+                .Add(SuggestedSectionPropertyName, suggestedSectionPath)
+                .Add(SuggestedSectionReplacementPropertyName, suggestedReplacement);
         }
 
         reportDiagnostic(Diagnostic.Create(
@@ -279,8 +293,22 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
     {
         registration = null!;
 
+        if (TryCreateOptionsBuilderRegistration(invocation, semanticModel, out registration))
+        {
+            return true;
+        }
+
+        return TryCreateConfigureRegistration(invocation, semanticModel, out registration);
+    }
+
+    private static bool TryCreateOptionsBuilderRegistration(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        out OptionsRegistration registration)
+    {
+        registration = null!;
+
         if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
-            memberAccess.Name.Identifier.ValueText != "BindConfiguration" ||
             invocation.ArgumentList.Arguments.Count == 0)
         {
             return false;
@@ -296,25 +324,221 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        var sectionExpression = invocation.ArgumentList.Arguments[0].Expression;
-        var constant = semanticModel.GetConstantValue(sectionExpression);
-        if (!constant.HasValue ||
-            constant.Value is not string sectionPath ||
-            string.IsNullOrWhiteSpace(sectionPath))
+        var methodName = memberAccess.Name.Identifier.ValueText;
+        if (!IsOptionsBuilderConfigurationMethod(invocation, semanticModel, methodName))
         {
             return false;
         }
 
-        var chain = InvocationChain.Create(invocation, semanticModel);
+        ExpressionSyntax sectionExpression;
+        string sectionPath;
+        bool sectionExpressionContainsFullPath;
+        if (string.Equals(methodName, "BindConfiguration", StringComparison.Ordinal))
+        {
+            sectionExpression = invocation.ArgumentList.Arguments[0].Expression;
+            if (!TryGetConstantSectionPath(sectionExpression, semanticModel, out sectionPath))
+            {
+                return false;
+            }
+
+            sectionExpressionContainsFullPath = true;
+        }
+        else if (string.Equals(methodName, "Bind", StringComparison.Ordinal))
+        {
+            if (!TryGetConfigurationSectionPath(
+                    invocation.ArgumentList.Arguments[0].Expression,
+                    semanticModel,
+                    out sectionPath,
+                    out sectionExpression,
+                    out sectionExpressionContainsFullPath))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+
+        var chain = InvocationChain.Create(invocation, semanticModel, methodName);
         registration = new OptionsRegistration(
             optionsType,
             sectionPath,
             sectionExpression,
             chain.OutermostInvocation,
+            supportsValidationRules: true,
+            sectionExpressionContainsFullPath,
             chain.MethodNames.Contains("ValidateDataAnnotations"),
             chain.MethodNames.Contains("ValidateOnStart"),
             chain.MethodNames.Any(IsValidationMethod));
         return true;
+    }
+
+    private static bool TryCreateConfigureRegistration(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        out OptionsRegistration registration)
+    {
+        registration = null!;
+
+        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
+            !string.Equals(memberAccess.Name.Identifier.ValueText, "Configure", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+        if (symbol is null ||
+            symbol.TypeArguments.Length != 1 ||
+            symbol.TypeArguments[0] is not INamedTypeSymbol optionsType ||
+            !IsOptionsConfigurationConfigureMethod(symbol))
+        {
+            return false;
+        }
+
+        foreach (var argument in invocation.ArgumentList.Arguments)
+        {
+            if (!TryGetConfigurationSectionPath(
+                    argument.Expression,
+                    semanticModel,
+                    out var sectionPath,
+                    out var sectionExpression,
+                    out var sectionExpressionContainsFullPath))
+            {
+                continue;
+            }
+
+            registration = new OptionsRegistration(
+                optionsType,
+                sectionPath,
+                sectionExpression,
+                invocation,
+                supportsValidationRules: false,
+                sectionExpressionContainsFullPath,
+                hasValidateDataAnnotations: false,
+                hasValidateOnStart: false,
+                hasValidation: false);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetConstantSectionPath(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        out string sectionPath)
+    {
+        var constant = semanticModel.GetConstantValue(expression);
+        if (constant.HasValue &&
+            constant.Value is string value &&
+            !string.IsNullOrWhiteSpace(value))
+        {
+            sectionPath = value;
+            return true;
+        }
+
+        sectionPath = null!;
+        return false;
+    }
+
+    private static bool TryGetConfigurationSectionPath(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        out string sectionPath,
+        out ExpressionSyntax sectionExpression,
+        out bool sectionExpressionContainsFullPath)
+    {
+        sectionPath = null!;
+        sectionExpression = null!;
+        sectionExpressionContainsFullPath = false;
+
+        if (expression is not InvocationExpressionSyntax invocation ||
+            invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
+            invocation.ArgumentList.Arguments.Count == 0 ||
+            !IsConfigurationSectionMethodName(memberAccess.Name.Identifier.ValueText))
+        {
+            return false;
+        }
+
+        var argumentExpression = invocation.ArgumentList.Arguments[0].Expression;
+        if (!TryGetConstantSectionPath(argumentExpression, semanticModel, out var currentSectionPath))
+        {
+            return false;
+        }
+
+        if (TryGetConfigurationSectionPath(
+                memberAccess.Expression,
+                semanticModel,
+                out var parentSectionPath,
+                out _,
+                out _))
+        {
+            sectionPath = parentSectionPath + ":" + currentSectionPath;
+            sectionExpression = argumentExpression;
+            sectionExpressionContainsFullPath = false;
+            return true;
+        }
+
+        if (!IsConfigurationType(semanticModel.GetTypeInfo(memberAccess.Expression).Type))
+        {
+            return false;
+        }
+
+        sectionPath = currentSectionPath;
+        sectionExpression = argumentExpression;
+        sectionExpressionContainsFullPath = true;
+        return true;
+    }
+
+    private static bool IsConfigurationSectionMethodName(string methodName)
+    {
+        return string.Equals(methodName, "GetSection", StringComparison.Ordinal) ||
+               string.Equals(methodName, "GetRequiredSection", StringComparison.Ordinal);
+    }
+
+    private static bool IsConfigurationType(ITypeSymbol? type)
+    {
+        if (type is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(type.ToDisplayString(), "Microsoft.Extensions.Configuration.IConfiguration", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (type is INamedTypeSymbol namedType)
+        {
+            foreach (var iface in namedType.AllInterfaces)
+            {
+                if (string.Equals(iface.ToDisplayString(), "Microsoft.Extensions.Configuration.IConfiguration", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsOptionsConfigurationConfigureMethod(IMethodSymbol method)
+    {
+        var original = method.ReducedFrom ?? method;
+        return string.Equals(original.ContainingType.ToDisplayString(), "Microsoft.Extensions.DependencyInjection.OptionsConfigurationServiceCollectionExtensions", StringComparison.Ordinal);
+    }
+
+    private static bool IsOptionsBuilderConfigurationMethod(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        string methodName)
+    {
+        var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+        var original = symbol?.ReducedFrom ?? symbol;
+        return original is not null &&
+               string.Equals(original.Name, methodName, StringComparison.Ordinal) &&
+               string.Equals(original.ContainingType.ToDisplayString(), "Microsoft.Extensions.DependencyInjection.OptionsBuilderConfigurationExtensions", StringComparison.Ordinal);
     }
 
     private static bool IsValidationMethod(string methodName)
@@ -387,6 +611,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             string sectionPath,
             ExpressionSyntax sectionExpression,
             InvocationExpressionSyntax outermostInvocation,
+            bool supportsValidationRules,
+            bool sectionExpressionContainsFullPath,
             bool hasValidateDataAnnotations,
             bool hasValidateOnStart,
             bool hasValidation)
@@ -395,6 +621,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             SectionPath = sectionPath;
             SectionExpression = sectionExpression;
             OutermostInvocation = outermostInvocation;
+            SupportsValidationRules = supportsValidationRules;
+            SectionExpressionContainsFullPath = sectionExpressionContainsFullPath;
             HasValidateDataAnnotations = hasValidateDataAnnotations;
             HasValidateOnStart = hasValidateOnStart;
             HasValidation = hasValidation;
@@ -404,6 +632,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         public string SectionPath { get; }
         public ExpressionSyntax SectionExpression { get; }
         public InvocationExpressionSyntax OutermostInvocation { get; }
+        public bool SupportsValidationRules { get; }
+        public bool SectionExpressionContainsFullPath { get; }
         public bool HasValidateDataAnnotations { get; }
         public bool HasValidateOnStart { get; }
         public bool HasValidation { get; }
@@ -420,10 +650,10 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         public InvocationExpressionSyntax OutermostInvocation { get; }
         public ImmutableHashSet<string> MethodNames { get; }
 
-        public static InvocationChain Create(InvocationExpressionSyntax bindInvocation, SemanticModel semanticModel)
+        public static InvocationChain Create(InvocationExpressionSyntax bindInvocation, SemanticModel semanticModel, string bindMethodName)
         {
             var methods = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
-            methods.Add("BindConfiguration");
+            methods.Add(bindMethodName);
 
             var current = bindInvocation;
             var outermost = bindInvocation;
