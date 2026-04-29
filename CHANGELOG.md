@@ -2,6 +2,11 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.1.2 - 2026-04-29
+
+- Hardened `CFG006` to recurse through dictionary values that bind to collections of nested option objects.
+- Added regression coverage for unknown and valid keys under `Dictionary<string, List<TOptions>>` configuration shapes.
+
 ## 0.1.1 - 2026-04-28
 
 - Hardened `CFG001` to traverse duplicate JSON section members when resolving nested section paths and typo suggestions.

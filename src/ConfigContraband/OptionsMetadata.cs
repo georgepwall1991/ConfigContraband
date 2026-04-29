@@ -98,6 +98,21 @@ internal sealed class OptionsTypeMetadata
         return false;
     }
 
+    public bool TryCreateDictionaryValueCollectionElementMetadata(BindableProperty property, out OptionsTypeMetadata metadata)
+    {
+        if (TryGetDictionaryValueType(property.Symbol.Type, out var valueType) &&
+            TryGetCollectionElementType(valueType, out var elementType) &&
+            IsPotentialNestedObject(elementType) &&
+            elementType is INamedTypeSymbol namedType)
+        {
+            metadata = Create(namedType);
+            return true;
+        }
+
+        metadata = null!;
+        return false;
+    }
+
     public ImmutableArray<string> GetConfigurationNames()
     {
         return BindableProperties

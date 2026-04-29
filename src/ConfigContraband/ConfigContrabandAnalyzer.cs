@@ -233,6 +233,26 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
+            if (metadata.TryCreateDictionaryValueCollectionElementMetadata(bindableProperty, out var dictionaryValueElementMetadata))
+            {
+                foreach (var entry in property.Value.Properties)
+                {
+                    foreach (var item in entry.Value.Properties)
+                    {
+                        if (!item.Value.Properties.IsDefaultOrEmpty)
+                        {
+                            AnalyzeUnknownKeysInSection(
+                                reportDiagnostic,
+                                item.Value,
+                                dictionaryValueElementMetadata,
+                                unknownKeysReported);
+                        }
+                    }
+                }
+
+                continue;
+            }
+
             if (!metadata.TryCreateCollectionElementMetadata(bindableProperty, out var elementMetadata))
             {
                 continue;
