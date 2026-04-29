@@ -42,6 +42,24 @@ public sealed class ConfigurationModelCoverageTests
     }
 
     [Fact]
+    public void Json_parser_skips_line_and_block_comments()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              // environment-specific overrides are merged at runtime
+              "Stripe": {
+                /* required by StripeOptions */
+                "ApiKey": "secret"
+              }
+            }
+            """));
+
+        Assert.NotNull(root);
+        Assert.True(root!.TryGetProperty("Stripe", out var stripe));
+        Assert.True(stripe.Value.TryGetProperty("ApiKey", out _));
+    }
+
+    [Fact]
     public void Json_parser_keeps_unclosed_array_items()
     {
         var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""

@@ -387,9 +387,43 @@ internal static class JsonConfigurationParser
 
         private void SkipWhitespace()
         {
-            while (!IsEnd && char.IsWhiteSpace(Current))
+            while (!IsEnd)
             {
-                _position++;
+                if (char.IsWhiteSpace(Current))
+                {
+                    _position++;
+                    continue;
+                }
+
+                if (Current == '/' && Peek(1) == '/')
+                {
+                    _position += 2;
+                    while (!IsEnd && Current != '\r' && Current != '\n')
+                    {
+                        _position++;
+                    }
+
+                    continue;
+                }
+
+                if (Current == '/' && Peek(1) == '*')
+                {
+                    _position += 2;
+                    while (!IsEnd)
+                    {
+                        if (Current == '*' && Peek(1) == '/')
+                        {
+                            _position += 2;
+                            break;
+                        }
+
+                        _position++;
+                    }
+
+                    continue;
+                }
+
+                break;
             }
         }
 
@@ -407,6 +441,12 @@ internal static class JsonConfigurationParser
         }
 
         private char Current => _position < _text.Length ? _text[_position] : '\0';
+        private char Peek(int offset)
+        {
+            var position = _position + offset;
+            return position < _text.Length ? _text[position] : '\0';
+        }
+
         private bool IsEnd => _position >= _text.Length;
     }
 }

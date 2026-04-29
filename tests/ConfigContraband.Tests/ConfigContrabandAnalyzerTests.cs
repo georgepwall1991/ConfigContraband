@@ -94,6 +94,29 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg001_does_not_report_section_from_commented_appsettings_file()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              // local development secrets are loaded separately
+              "Stripe": {
+                /* production overrides can replace this value */
+                "ApiKey": "secret"
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg001_does_not_report_nested_section_from_later_duplicate_section()
     {
         var source = OptionsSource("""
@@ -917,6 +940,35 @@ public sealed class ConfigContrabandAnalyzerTests
             {
               "Stripe": {
                 "ApiKey": "secret",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_unknown_key_from_commented_appsettings_file()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 6, 5, 6, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              // comments are accepted by the .NET JSON configuration provider
+              "Stripe": {
+                "ApiKey": "secret",
+                /* typo kept visible to the analyzer */
                 "WebookSecret": "typo"
               }
             }

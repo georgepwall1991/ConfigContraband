@@ -2,6 +2,11 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.1.6 - 2026-04-29
+
+- Hardened appsettings parsing to handle `//` and `/* ... */` comments when resolving sections and unknown keys.
+- Added regression coverage for commented configuration files so `CFG001` and `CFG006` keep matching the configuration shape developers build with.
+
 ## 0.1.5 - 2026-04-29
 
 - Added analyzer coverage for `AddOptions<T>().Bind(configuration.GetSection(...))` and `GetRequiredSection(...)` registrations.

@@ -3,8 +3,8 @@
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
 Last refreshed: 2026-04-29
-Package version: `0.1.5`
-Base audited commit: `29f9a31`
+Package version: `0.1.6`
+Base audited commit: `6a542ae`
 
 ## Scoring Rubric
 
@@ -41,11 +41,11 @@ The analyzer has a compact, coherent rule set: five diagnostics, four code-fix f
 
 | Rule | Severity | Importance | Precision | Test Depth | Fix Safety | Docs | Release | Score | Priority | Current read |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
-| CFG001 Missing configuration section | Warning | 5 | 5 | 5 | 4 | 5 | 4 | 4.80 | P3 | Strong current shape. Handles `BindConfiguration(...)`, `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))`, nested section paths, full-path suggestions, duplicate JSON section members, and visible appsettings files as one searchable set. |
+| CFG001 Missing configuration section | Warning | 5 | 5 | 5 | 4 | 5 | 5 | 4.85 | P3 | Strong current shape. Handles `BindConfiguration(...)`, `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))`, nested section paths, full-path suggestions, duplicate JSON section members, commented appsettings files, and visible appsettings files as one searchable set. |
 | CFG003 Validation not on startup | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P3 | Good analyzer boundary for fluent and immediate same-block local `OptionsBuilder<T>` chains, including `Bind(GetSection(...))`; code fixes preserve multiline formatting, comments, split locals, and single-line chains. |
 | CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P3 | Covers inherited bindable DataAnnotations on supported `OptionsBuilder<T>` bindings, avoids duplicate `ValidateOnStart()` in covered shapes, and shares the formatter-safe invocation appender with CFG003. |
 | CFG005 Nested validation not recursive | Warning | 5 | 4 | 5 | 5 | 5 | 5 | 4.75 | P3 | Strong current shape. Covers recursive object and collection graphs on supported `OptionsBuilder<T>` bindings, suppresses unsafe interface cases, and proves cross-document recursive-attribute fixes. |
-| CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 5 | 5 | 4.50 | P3 | Broadest test depth. Covers `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))`; recurses through nested objects, object collections, dictionary values, and dictionary values containing collections while keeping scalar arrays and dictionary entry names quiet. |
+| CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 5 | 5 | 4.50 | P3 | Broadest test depth. Covers `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))`; recurses through nested objects, object collections, dictionary values, dictionary values containing collections, and commented appsettings files while keeping scalar arrays and dictionary entry names quiet. |
 
 ## Selection Policy
 
@@ -75,6 +75,7 @@ Reports when a supported options binding references a string-literal section pat
 Current behavior:
 
 - Checks top-level and nested section paths across all visible `appsettings*.json` additional files for `BindConfiguration(...)`, `Bind(GetSection(...))`, `Bind(GetRequiredSection(...))`, and direct `Configure<T>(GetSection(...))`.
+- Parses `//` and `/* ... */` comments in appsettings files before resolving section paths.
 - Traverses duplicate JSON object members when resolving section existence and suggestions.
 - Ignores non-constant, empty, whitespace-only, root configuration, and stored `IConfigurationSection` values.
 
@@ -137,6 +138,7 @@ Reports an appsettings key under a bound section when the key does not match a b
 Current behavior:
 
 - Checks every matching bound section across visible appsettings files for supported `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))` registrations.
+- Parses `//` and `/* ... */` comments before walking keys so commented local appsettings files stay analyzable.
 - Recurses into nested object properties, arrays/lists of nested objects, strongly typed dictionary values, and dictionary values containing nested object collections.
 - Honors `[ConfigurationKeyName]` aliases at the root and nested levels.
 - Treats scalar array items and dictionary entry names as values rather than property names.
