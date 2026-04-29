@@ -361,6 +361,9 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         }
 
         var chain = InvocationChain.Create(invocation, semanticModel, methodName);
+        var hasValidateOnStart = chain.MethodNames.Contains("ValidateOnStart") ||
+            HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel);
+
         registration = new OptionsRegistration(
             optionsType,
             sectionPath,
@@ -369,9 +372,39 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             supportsValidationRules: true,
             sectionExpressionContainsFullPath,
             chain.MethodNames.Contains("ValidateDataAnnotations"),
-            chain.MethodNames.Contains("ValidateOnStart"),
+            hasValidateOnStart,
             chain.MethodNames.Any(IsValidationMethod));
         return true;
+    }
+
+    private static bool HasAddOptionsWithValidateOnStartReceiver(
+        InvocationExpressionSyntax bindInvocation,
+        SemanticModel semanticModel)
+    {
+        var current = ((MemberAccessExpressionSyntax)bindInvocation.Expression).Expression;
+        while (current is InvocationExpressionSyntax invocation &&
+               invocation.Expression is MemberAccessExpressionSyntax receiverMemberAccess)
+        {
+            if (IsAddOptionsWithValidateOnStart(invocation, semanticModel))
+            {
+                return true;
+            }
+
+            current = receiverMemberAccess.Expression;
+        }
+
+        return false;
+    }
+
+    private static bool IsAddOptionsWithValidateOnStart(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+        var original = symbol?.ReducedFrom ?? symbol;
+        return original is not null &&
+               string.Equals(original.Name, "AddOptionsWithValidateOnStart", StringComparison.Ordinal) &&
+               string.Equals(original.ContainingType.ToDisplayString(), "Microsoft.Extensions.DependencyInjection.OptionsServiceCollectionExtensions", StringComparison.Ordinal);
     }
 
     private static bool TryCreateConfigureRegistration(
