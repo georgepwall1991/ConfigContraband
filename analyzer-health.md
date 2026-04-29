@@ -3,8 +3,8 @@
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
 Last refreshed: 2026-04-29
-Package version: `0.1.7`
-Base audited commit: `9719088`
+Package version: `0.1.8`
+Base audited commit: `7c79153`
 
 ## Scoring Rubric
 
@@ -43,8 +43,8 @@ The analyzer has a compact, coherent rule set: five diagnostics, four code-fix f
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
 | CFG001 Missing configuration section | Warning | 5 | 5 | 5 | 4 | 5 | 5 | 4.85 | P3 | Strong current shape. Handles `BindConfiguration(...)`, `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))`, nested section paths, full-path suggestions, duplicate JSON section members, commented appsettings files, and visible appsettings files as one searchable set. |
 | CFG003 Validation not on startup | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Good analyzer boundary for fluent and immediate same-block local `OptionsBuilder<T>` chains, including `Bind(GetSection(...))`; honors `AddOptionsWithValidateOnStart<TOptions>()` and code fixes preserve multiline formatting, comments, split locals, and single-line chains. |
-| CFG004 DataAnnotations not enabled | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Covers inherited bindable DataAnnotations on supported `OptionsBuilder<T>` bindings, avoids duplicate `ValidateOnStart()` when startup validation already exists, and shares the formatter-safe invocation appender with CFG003. |
-| CFG005 Nested validation not recursive | Warning | 5 | 4 | 5 | 5 | 5 | 5 | 4.75 | P3 | Strong current shape. Covers recursive object and collection graphs on supported `OptionsBuilder<T>` bindings, suppresses unsafe interface cases, and proves cross-document recursive-attribute fixes. |
+| CFG004 DataAnnotations not enabled | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Covers inherited bindable DataAnnotations and `IValidatableObject` on supported `OptionsBuilder<T>` bindings, avoids duplicate `ValidateOnStart()` when startup validation already exists, and shares the formatter-safe invocation appender with CFG003. |
+| CFG005 Nested validation not recursive | Warning | 5 | 4 | 5 | 5 | 5 | 5 | 4.75 | P3 | Strong current shape. Covers recursive object and collection graphs, including nested `IValidatableObject` types, on supported `OptionsBuilder<T>` bindings; suppresses unsafe interface cases and proves cross-document recursive-attribute fixes. |
 | CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 5 | 5 | 4.50 | P3 | Broadest test depth. Covers `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))`; recurses through nested objects, object collections, dictionary values, dictionary values containing collections, and commented appsettings files while keeping scalar arrays and dictionary entry names quiet. |
 
 ## Selection Policy
@@ -107,7 +107,7 @@ Reports when an options type has bindable DataAnnotations properties but the opt
 
 Current behavior:
 
-- Includes inherited public bindable properties.
+- Includes inherited public bindable properties and options types implementing `IValidatableObject`.
 - Honors public settable property boundaries to stay aligned with options binding.
 - Treats custom `Validate(...)` as validation for `CFG003`, but not as a substitute for `ValidateDataAnnotations()`.
 - Offers a fix that appends `ValidateDataAnnotations()` and appends `ValidateOnStart()` only when startup validation is missing, using the formatter-safe chain appender shared with `CFG003`.
@@ -124,7 +124,7 @@ Reports when a nested object or collection item type contains validation attribu
 
 Current behavior:
 
-- Finds nested object graphs and nested collection graphs that contain DataAnnotations.
+- Finds nested object graphs and nested collection graphs that contain DataAnnotations or implement `IValidatableObject`.
 - Covers arrays, `IEnumerable<T>` shapes, nullable nested properties, and deep nested properties.
 - Suppresses interface-typed nested properties and already annotated recursive-validation properties.
 - Offers fixes for `[ValidateObjectMembers]` and `[ValidateEnumeratedItems]`, including options properties declared in a different source document from the registration diagnostic.

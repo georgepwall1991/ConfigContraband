@@ -2,6 +2,11 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.1.8 - 2026-04-29
+
+- Hardened `CFG004` to treat `IValidatableObject` implementations as DataAnnotations validation that needs `ValidateDataAnnotations()`.
+- Hardened `CFG005` so nested option objects that implement `IValidatableObject` still require recursive validation.
+
 ## 0.1.7 - 2026-04-29
 
 - Hardened `CFG003` and `CFG004` to honor `AddOptionsWithValidateOnStart<TOptions>()` as startup validation.
