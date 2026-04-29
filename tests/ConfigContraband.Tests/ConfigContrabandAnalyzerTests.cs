@@ -445,6 +445,44 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_honors_add_options_with_validate_on_start()
+    {
+        var source = OptionsSource("""
+            services.AddOptionsWithValidateOnStart<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_factory_created_builder_without_validate_on_start()
+    {
+        var source = OptionsSource("""
+            {|#0:new BuilderFactory()
+                .Create<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", extraMembers: """
+            private sealed class BuilderFactory
+            {
+                public OptionsBuilder<TOptions> Create<TOptions>()
+                    where TOptions : class
+                {
+                    throw new System.NotImplementedException();
+                }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_bind_get_section_validation_without_validate_on_start()
     {
         var source = OptionsSource("""

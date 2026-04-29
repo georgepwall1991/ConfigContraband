@@ -236,6 +236,27 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg004_fix_does_not_append_validate_on_start_when_registration_already_starts_validation()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptionsWithValidateOnStart<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            """);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptionsWithValidateOnStart<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg004_fix_appends_data_annotations_after_bind_get_section()
     {
         var source = OptionsSource("""

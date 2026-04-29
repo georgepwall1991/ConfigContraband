@@ -3,8 +3,8 @@
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
 Last refreshed: 2026-04-29
-Package version: `0.1.6`
-Base audited commit: `6a542ae`
+Package version: `0.1.7`
+Base audited commit: `9719088`
 
 ## Scoring Rubric
 
@@ -42,8 +42,8 @@ The analyzer has a compact, coherent rule set: five diagnostics, four code-fix f
 | Rule | Severity | Importance | Precision | Test Depth | Fix Safety | Docs | Release | Score | Priority | Current read |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
 | CFG001 Missing configuration section | Warning | 5 | 5 | 5 | 4 | 5 | 5 | 4.85 | P3 | Strong current shape. Handles `BindConfiguration(...)`, `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))`, nested section paths, full-path suggestions, duplicate JSON section members, commented appsettings files, and visible appsettings files as one searchable set. |
-| CFG003 Validation not on startup | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P3 | Good analyzer boundary for fluent and immediate same-block local `OptionsBuilder<T>` chains, including `Bind(GetSection(...))`; code fixes preserve multiline formatting, comments, split locals, and single-line chains. |
-| CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P3 | Covers inherited bindable DataAnnotations on supported `OptionsBuilder<T>` bindings, avoids duplicate `ValidateOnStart()` in covered shapes, and shares the formatter-safe invocation appender with CFG003. |
+| CFG003 Validation not on startup | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Good analyzer boundary for fluent and immediate same-block local `OptionsBuilder<T>` chains, including `Bind(GetSection(...))`; honors `AddOptionsWithValidateOnStart<TOptions>()` and code fixes preserve multiline formatting, comments, split locals, and single-line chains. |
+| CFG004 DataAnnotations not enabled | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Covers inherited bindable DataAnnotations on supported `OptionsBuilder<T>` bindings, avoids duplicate `ValidateOnStart()` when startup validation already exists, and shares the formatter-safe invocation appender with CFG003. |
 | CFG005 Nested validation not recursive | Warning | 5 | 4 | 5 | 5 | 5 | 5 | 4.75 | P3 | Strong current shape. Covers recursive object and collection graphs on supported `OptionsBuilder<T>` bindings, suppresses unsafe interface cases, and proves cross-document recursive-attribute fixes. |
 | CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 5 | 5 | 4.50 | P3 | Broadest test depth. Covers `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))`; recurses through nested objects, object collections, dictionary values, dictionary values containing collections, and commented appsettings files while keeping scalar arrays and dictionary entry names quiet. |
 
@@ -63,7 +63,7 @@ Do not raise severity, rename analyzer IDs, or broaden diagnostics unless tests 
 1. Keep `CFG006` informational. Only add new binding-shape coverage when there is a concrete, narrow shape that can be proven without reporting dynamic configuration data as an unknown property.
 2. Keep direct `Configure<T>(...)` validation diagnostics out of scope until there is a dedicated, conservative design for named options and separate validation registrations.
 3. Keep `CFG005` in monitor mode. Future code-fix work should be driven by concrete formatter regressions or new recursive-validation APIs.
-4. Keep `CFG003` and `CFG004` in monitor mode unless real-world chains expose another formatter edge case.
+4. Keep `CFG003` and `CFG004` in monitor mode unless real-world chains expose another formatter or framework-registration edge case.
 5. Keep `CFG001` in monitor mode. Future work should be driven by real appsettings/provider-order bugs, not by widening static inference.
 
 ## Rule Notes
@@ -92,6 +92,7 @@ Current behavior:
 
 - Tracks normal fluent chains after `BindConfiguration(...)` and `Bind(GetSection(...))`.
 - Tracks immediate same-block local `OptionsBuilder<T>` calls until an unrelated statement breaks the sequence.
+- Treats `AddOptionsWithValidateOnStart<TOptions>()` as startup validation, so registrations using the framework helper do not need an extra `ValidateOnStart()` call.
 - Offers a fix that appends `ValidateOnStart()` while preserving multiline chain indentation, comments, split locals, and single-line chains.
 
 Known gaps:
@@ -110,6 +111,7 @@ Current behavior:
 - Honors public settable property boundaries to stay aligned with options binding.
 - Treats custom `Validate(...)` as validation for `CFG003`, but not as a substitute for `ValidateDataAnnotations()`.
 - Offers a fix that appends `ValidateDataAnnotations()` and appends `ValidateOnStart()` only when startup validation is missing, using the formatter-safe chain appender shared with `CFG003`.
+- Does not append `ValidateOnStart()` when the registration started with `AddOptionsWithValidateOnStart<TOptions>()`.
 
 Known gaps:
 

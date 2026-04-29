@@ -2,6 +2,11 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.1.7 - 2026-04-29
+
+- Hardened `CFG003` and `CFG004` to honor `AddOptionsWithValidateOnStart<TOptions>()` as startup validation.
+- Added regression coverage so the analyzer stays quiet for startup-validated registrations and the `CFG004` fix does not append a redundant `ValidateOnStart()`.
+
 ## 0.1.6 - 2026-04-29
 
 - Hardened appsettings parsing to handle `//` and `/* ... */` comments when resolving sections and unknown keys.
