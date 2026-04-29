@@ -216,12 +216,15 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             return document.Project.Solution;
         }
 
+        var propertyLeadingTrivia = property.GetLeadingTrivia();
         var attributeList = SyntaxFactory.AttributeList(
                 SyntaxFactory.SingletonSeparatedList(
                     SyntaxFactory.Attribute(SyntaxFactory.ParseName(attributeName))))
+            .WithLeadingTrivia(propertyLeadingTrivia)
             .WithTrailingTrivia(SyntaxFactory.ElasticLineFeed);
 
         var updatedProperty = property
+            .WithLeadingTrivia(SyntaxTriviaList.Empty)
             .WithAttributeLists(property.AttributeLists.Insert(0, attributeList))
             .WithAdditionalAnnotations(Formatter.Annotation);
 
@@ -247,8 +250,6 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         var usingDirective = SyntaxFactory.UsingDirective(SyntaxFactory.ParseName(namespaceName))
             .WithTrailingTrivia(SyntaxFactory.ElasticLineFeed);
 
-        return compilationUnit
-            .WithUsings(compilationUnit.Usings.Add(usingDirective))
-            .WithAdditionalAnnotations(Formatter.Annotation);
+        return compilationUnit.WithUsings(compilationUnit.Usings.Add(usingDirective));
     }
 }

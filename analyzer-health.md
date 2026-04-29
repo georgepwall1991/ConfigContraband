@@ -3,8 +3,8 @@
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
 Last refreshed: 2026-04-29
-Package version: `0.1.3`
-Base audited commit: `0ae55dd`
+Package version: `0.1.4`
+Base audited commit: `29f9a31`
 
 ## Scoring Rubric
 
@@ -35,7 +35,7 @@ Priority means "next investment priority", not diagnostic severity:
 
 ## Current Posture
 
-The analyzer has a compact, coherent rule set: five diagnostics, four code-fix families, `buildTransitive` appsettings discovery, README rule documentation, changelog/version metadata, and CI that restores, builds, tests, packs, uploads test results, and uploads packages. The biggest remaining quality gap is not rule breadth; it is proving cross-document and formatting behavior for the recursive-validation attribute fixers.
+The analyzer has a compact, coherent rule set: five diagnostics, four code-fix families, `buildTransitive` appsettings discovery, README rule documentation, changelog/version metadata, and CI that restores, builds, tests, packs, uploads test results, and uploads packages. The best next improvements should now come from real-world edge cases or adoption polish, not speculative rule widening.
 
 ## Health Baseline
 
@@ -44,7 +44,7 @@ The analyzer has a compact, coherent rule set: five diagnostics, four code-fix f
 | CFG001 Missing configuration section | Warning | 5 | 5 | 5 | 4 | 5 | 4 | 4.80 | P3 | Strong current shape. Handles nested section paths, full-path suggestions, duplicate JSON section members, and visible appsettings files as one searchable set. |
 | CFG003 Validation not on startup | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P3 | Good analyzer boundary for fluent and immediate same-block local chains; code fixes now preserve multiline formatting, comments, split locals, and single-line chains. |
 | CFG004 DataAnnotations not enabled | Warning | 4 | 4 | 5 | 4 | 4 | 4 | 4.20 | P3 | Covers inherited bindable DataAnnotations, avoids duplicate `ValidateOnStart()` in covered shapes, and shares the formatter-safe invocation appender with CFG003. |
-| CFG005 Nested validation not recursive | Warning | 5 | 4 | 4 | 3 | 4 | 4 | 4.10 | P2 | High-impact rule with recursive graph coverage for objects, arrays, lists, nullable properties, and interface suppression. Code-fix coverage still needs cross-document and formatting hardening. |
+| CFG005 Nested validation not recursive | Warning | 5 | 4 | 5 | 5 | 5 | 5 | 4.75 | P3 | Strong current shape. Covers recursive object and collection graphs, suppresses unsafe interface cases, and proves cross-document recursive-attribute fixes. |
 | CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 5 | 5 | 4.50 | P3 | Broadest test depth. Recurses through nested objects, object collections, dictionary values, and dictionary values containing collections while keeping scalar arrays and dictionary entry names quiet. |
 
 ## Selection Policy
@@ -60,8 +60,8 @@ Do not raise severity, rename analyzer IDs, or broaden diagnostics unless tests 
 
 ## Current Shortlist
 
-1. Add dedicated `CFG005` code-fix coverage for cross-document locations and cleaner formatting around added recursive-validation attributes. The implementation already resolves the target document from the diagnostic location, but the test suite should prove it.
-2. Keep `CFG006` informational. Only add new binding-shape coverage when there is a concrete, narrow shape that can be proven without reporting dynamic configuration data as an unknown property.
+1. Keep `CFG006` informational. Only add new binding-shape coverage when there is a concrete, narrow shape that can be proven without reporting dynamic configuration data as an unknown property.
+2. Keep `CFG005` in monitor mode. Future code-fix work should be driven by concrete formatter regressions or new recursive-validation APIs.
 3. Keep `CFG003` and `CFG004` in monitor mode unless real-world chains expose another formatter edge case.
 4. Keep `CFG001` in monitor mode. Future work should be driven by real appsettings/provider-order bugs, not by widening static inference.
 
@@ -123,12 +123,10 @@ Current behavior:
 - Finds nested object graphs and nested collection graphs that contain DataAnnotations.
 - Covers arrays, `IEnumerable<T>` shapes, nullable nested properties, and deep nested properties.
 - Suppresses interface-typed nested properties and already annotated recursive-validation properties.
-- Offers fixes for `[ValidateObjectMembers]` and `[ValidateEnumeratedItems]`.
+- Offers fixes for `[ValidateObjectMembers]` and `[ValidateEnumeratedItems]`, including options properties declared in a different source document from the registration diagnostic.
 
 Known gaps:
 
-- Cross-document fix behavior is implemented but not covered by a dedicated regression test.
-- Code-fix output around inserted attributes and usings should be tightened before calling this rule fully mature.
 - More complex custom recursive validation patterns are intentionally not inferred.
 
 ### CFG006 Unknown Configuration Key
