@@ -2,6 +2,11 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.1.5 - 2026-04-29
+
+- Added analyzer coverage for `AddOptions<T>().Bind(configuration.GetSection(...))` and `GetRequiredSection(...)` registrations.
+- Added section and unknown-key coverage for direct `Configure<T>(configuration.GetSection(...))` registrations while keeping validation diagnostics scoped to `OptionsBuilder<T>` chains.
+
 ## 0.1.4 - 2026-04-29
 
 - Hardened `CFG005` recursive-validation code fixes to update the source document that owns the target options property.

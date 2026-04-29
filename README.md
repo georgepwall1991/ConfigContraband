@@ -26,7 +26,7 @@ Use it when your app relies on strongly typed options and you want configuration
 
 | Area | What ConfigContraband does |
 |------|----------------------------|
-| Section binding | Checks `BindConfiguration("Section")` against visible `appsettings*.json` files. |
+| Section binding | Checks supported options bindings against visible `appsettings*.json` files. |
 | Startup validation | Flags options validation that is registered but not forced to run at startup. |
 | DataAnnotations | Finds `[Required]`, `[Range]`, and inherited validation attributes without `ValidateDataAnnotations()`. |
 | Nested validation | Detects nested options objects and collections that need recursive validation attributes. |
@@ -49,6 +49,16 @@ ConfigContraband analyzes options registrations shaped like this:
 ```csharp
 services.AddOptions<StripeOptions>()
     .BindConfiguration("Stripe");
+```
+
+It also recognizes the common explicit-section style:
+
+```csharp
+services.AddOptions<StripeOptions>()
+    .Bind(configuration.GetSection("Stripe"));
+
+services.Configure<StripeOptions>(
+    configuration.GetSection("Stripe"));
 ```
 
 The section name must be a compile-time string literal. The analyzer follows normal fluent chains:
@@ -298,6 +308,8 @@ ConfigContraband currently focuses on:
 
 - `appsettings*.json` files.
 - `AddOptions<T>().BindConfiguration("Section")` registrations.
+- `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
+- Direct `Configure<T>(configuration.GetSection("Section"))` registrations for section and JSON-key drift.
 - String-literal section names.
 - Public bindable properties on options types, including inherited bindable properties.
 - `[ConfigurationKeyName]` aliases.

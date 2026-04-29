@@ -86,10 +86,15 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             return;
         }
 
+        var replacement = diagnostic.Properties.TryGetValue(ConfigContrabandAnalyzer.SuggestedSectionReplacementPropertyName, out var suggestedReplacement) &&
+            !string.IsNullOrWhiteSpace(suggestedReplacement)
+                ? suggestedReplacement!
+                : suggestion!;
+
         context.RegisterCodeFix(
             CodeAction.Create(
                 $"Use \"{suggestion}\"",
-                cancellationToken => ReplaceSectionAsync(context.Document, diagnostic.Location.SourceSpan, suggestion!, cancellationToken),
+                cancellationToken => ReplaceSectionAsync(context.Document, diagnostic.Location.SourceSpan, replacement, cancellationToken),
                 equivalenceKey: "UseSuggestedSection"),
             diagnostic);
     }

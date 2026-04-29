@@ -75,6 +75,80 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg001_fix_replaces_get_section_literal()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.AddOptions<StripeOptions>()
+                .Bind(configuration.GetSection({|#0:"Strpie"|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var fixedSource = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.AddOptions<StripeOptions>()
+                .Bind(configuration.GetSection("Stripe"))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_fix_replaces_chained_get_section_leaf_literal()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.AddOptions<StripeOptions>()
+                .Bind(configuration.GetSection("Features").GetSection({|#0:"Strpie"|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var fixedSource = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.AddOptions<StripeOptions>()
+                .Bind(configuration.GetSection("Features").GetSection("Stripe"))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg003_fix_appends_validate_on_start()
     {
         var source = OptionsSource("""
@@ -98,6 +172,48 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg003_fix_appends_validate_on_start_after_bind_get_section()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            {|#0:services.AddOptions<StripeOptions>()
+                .Bind(configuration.GetSection("Stripe"))
+                .ValidateDataAnnotations()|};
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    services.AddOptions<StripeOptions>()
+                        .Bind(configuration.GetSection("Stripe"))
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg004_fix_appends_data_annotations_and_validate_on_start()
     {
         var source = OptionsSource("""
@@ -111,6 +227,47 @@ public sealed class ConfigContrabandCodeFixTests
                 .ValidateDataAnnotations()
                 .ValidateOnStart();
             """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_fix_appends_data_annotations_after_bind_get_section()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            {|#0:services.AddOptions<StripeOptions>()
+                .Bind(configuration.GetSection("Stripe"))|};
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    services.AddOptions<StripeOptions>()
+                        .Bind(configuration.GetSection("Stripe"))
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+            """;
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
             .WithLocation(0)
