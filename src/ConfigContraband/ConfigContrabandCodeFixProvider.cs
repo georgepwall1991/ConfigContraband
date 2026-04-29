@@ -140,13 +140,18 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         }
 
         var outermost = FindOutermostInvocation(invocation);
-        ExpressionSyntax replacement = outermost.WithoutTrivia();
+        var dotToken = CreateAppendedInvocationDotToken(outermost);
+
+        ExpressionSyntax replacement = outermost
+            .WithLeadingTrivia(SyntaxTriviaList.Empty)
+            .WithTrailingTrivia(SyntaxTriviaList.Empty);
         foreach (var methodName in methodNames)
         {
             replacement = SyntaxFactory.InvocationExpression(
                 SyntaxFactory.MemberAccessExpression(
                     SyntaxKind.SimpleMemberAccessExpression,
                     replacement,
+                    dotToken,
                     SyntaxFactory.IdentifierName(methodName)),
                 SyntaxFactory.ArgumentList());
         }
@@ -156,6 +161,23 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             .WithAdditionalAnnotations(Formatter.Annotation);
 
         return document.WithSyntaxRoot(root.ReplaceNode(outermost, replacement));
+    }
+
+    private static SyntaxToken CreateAppendedInvocationDotToken(InvocationExpressionSyntax outermost)
+    {
+        var memberAccess = (MemberAccessExpressionSyntax)outermost.Expression;
+        var text = outermost.SyntaxTree.GetText();
+        var line = text.Lines.GetLineFromPosition(memberAccess.OperatorToken.SpanStart);
+        var indentation = text.ToString(TextSpan.FromBounds(line.Start, memberAccess.OperatorToken.SpanStart));
+        if (indentation.All(char.IsWhiteSpace))
+        {
+            return SyntaxFactory.Token(
+                SyntaxFactory.TriviaList(SyntaxFactory.EndOfLine("\n"), SyntaxFactory.Whitespace(indentation)),
+                SyntaxKind.DotToken,
+                SyntaxTriviaList.Empty);
+        }
+
+        return SyntaxFactory.Token(SyntaxKind.DotToken);
     }
 
     private static InvocationExpressionSyntax FindOutermostInvocation(InvocationExpressionSyntax invocation)
