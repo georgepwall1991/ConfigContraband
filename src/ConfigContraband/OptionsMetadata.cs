@@ -8,16 +8,18 @@ namespace ConfigContraband;
 
 internal sealed class OptionsTypeMetadata
 {
-    private OptionsTypeMetadata(INamedTypeSymbol type, ImmutableArray<BindableProperty> bindableProperties)
+    private OptionsTypeMetadata(INamedTypeSymbol type, ImmutableArray<BindableProperty> bindableProperties, bool implementsValidatableObject)
     {
         TypeName = type.Name;
         TypeKey = type.ToDisplayString();
         BindableProperties = bindableProperties;
+        ImplementsValidatableObject = implementsValidatableObject;
     }
 
     public string TypeName { get; }
     public string TypeKey { get; }
     public ImmutableArray<BindableProperty> BindableProperties { get; }
+    public bool ImplementsValidatableObject { get; }
 
     public static OptionsTypeMetadata Create(INamedTypeSymbol type)
     {
@@ -31,12 +33,13 @@ internal sealed class OptionsTypeMetadata
                 HasValidationAttribute(member)));
         }
 
-        return new OptionsTypeMetadata(type, properties.ToImmutable());
+        return new OptionsTypeMetadata(type, properties.ToImmutable(), ImplementsInterface(type, "System.ComponentModel.DataAnnotations.IValidatableObject"));
     }
 
     public bool HasAnyDataAnnotations()
     {
-        return BindableProperties.Any(property => property.HasValidationAttribute);
+        return ImplementsValidatableObject ||
+               BindableProperties.Any(property => property.HasValidationAttribute);
     }
 
     public bool TryGetConfigurationProperty(string key, out BindableProperty bindableProperty)
@@ -230,6 +233,11 @@ internal sealed class OptionsTypeMetadata
             return false;
         }
 
+        if (ImplementsInterface(namedType, "System.ComponentModel.DataAnnotations.IValidatableObject"))
+        {
+            return true;
+        }
+
         foreach (var property in GetBindableProperties(namedType))
         {
             if (HasValidationAttribute(property))
@@ -275,6 +283,12 @@ internal sealed class OptionsTypeMetadata
         }
 
         return false;
+    }
+
+    private static bool ImplementsInterface(INamedTypeSymbol type, string metadataName)
+    {
+        return type.AllInterfaces.Any(iface =>
+            string.Equals(iface.ToDisplayString(), metadataName, StringComparison.Ordinal));
     }
 
     private static bool IsPotentialNestedObject(ITypeSymbol type)

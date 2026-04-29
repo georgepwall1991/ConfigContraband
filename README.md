@@ -35,7 +35,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.1.6" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.1.8" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -88,8 +88,8 @@ When the analyzer cannot prove a configuration shape statically, it stays quiet.
 |----|------|---------|---------|
 | `CFG001` | Bound configuration section does not exist | Warning | `BindConfiguration("Strpie")` when only `Stripe` exists. |
 | `CFG003` | Options validation does not run on startup | Warning | Validation is registered but `ValidateOnStart()` is missing. |
-| `CFG004` | DataAnnotations are not enabled for options validation | Warning | `[Required]`, `[Range]`, and inherited annotations without `ValidateDataAnnotations()`. |
-| `CFG005` | Nested options validation is not recursive | Warning | Nested objects or item types with annotations but no recursive validation attribute. |
+| `CFG004` | DataAnnotations are not enabled for options validation | Warning | `[Required]`, `[Range]`, inherited annotations, or `IValidatableObject` without `ValidateDataAnnotations()`. |
+| `CFG005` | Nested options validation is not recursive | Warning | Nested objects or item types with annotations or `IValidatableObject`, but no recursive validation attribute. |
 | `CFG006` | Unknown configuration key under bound section | Info | JSON keys that do not match bindable options properties or aliases. |
 
 ## Fast Feedback Loop
@@ -182,7 +182,7 @@ The code fix appends `ValidateOnStart()` in the same style as the existing regis
 
 ### `CFG004`: DataAnnotations Must Be Switched On
 
-Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration.
+Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration. `IValidatableObject` is also part of DataAnnotations validation, so options types that implement it need the same registration.
 
 Before:
 
@@ -218,7 +218,7 @@ The code fix preserves existing fluent-chain formatting, adds `ValidateDataAnnot
 
 ### `CFG005`: Nested Options Need Recursive Validation
 
-DataAnnotations do not automatically walk into child objects or collection items. If a nested class or collection item has validation attributes anywhere in its bindable object graph, mark each parent property that should be checked recursively.
+DataAnnotations do not automatically walk into child objects or collection items. If a nested class or collection item has validation attributes or implements `IValidatableObject` anywhere in its bindable object graph, mark each parent property that should be checked recursively.
 
 Before:
 

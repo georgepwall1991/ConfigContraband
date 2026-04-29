@@ -582,6 +582,55 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_reports_validatable_object_without_validate_data_annotations()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateOnStart()|};
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class StripeOptions : IValidatableObject
+            {
+                public string ApiKey { get; set; } = "";
+
+                public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+                {
+                    yield break;
+                }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_does_not_report_validatable_object_when_data_annotations_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class StripeOptions : IValidatableObject
+            {
+                public string ApiKey { get; set; } = "";
+
+                public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+                {
+                    yield break;
+                }
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg003_honors_chained_split_local_registration_chain()
     {
         var source = OptionsSource("""
@@ -688,6 +737,39 @@ public sealed class ConfigContrabandAnalyzerTests
             {
                 [Required]
                 public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_reports_nested_validatable_object_without_recursive_validation()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions {|#1:Database|} { get; set; } = new();
+            }
+
+            public sealed class DatabaseOptions : IValidatableObject
+            {
+                public string ConnectionString { get; set; } = "";
+
+                public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+                {
+                    yield break;
+                }
             }
             """);
 
