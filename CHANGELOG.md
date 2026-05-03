@@ -2,6 +2,15 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.1.9 - 2026-05-03
+
+- Hardened `CFG003` and `CFG004` fluent-chain analysis so validation calls are recognized whether they appear before or after `BindConfiguration(...)` / `Bind(...)`.
+- Added regression coverage for pre-bind `ValidateDataAnnotations()` and `ValidateOnStart()` chains.
+- Hardened appsettings parsing to decode JSON `\uXXXX` string escapes for section and key matching.
+- Added regression coverage so `CFG001` and `CFG006` honor escaped section names and property names.
+- Tightened the nested-options namespace filter so user namespaces like `Systematic.Options` are still analyzed.
+- Added regression coverage for `CFG005` and `CFG006` nested user types whose namespaces start with `System` but are not part of the BCL.
+
 ## 0.1.8 - 2026-04-29
 
 - Hardened `CFG004` to treat `IValidatableObject` implementations as DataAnnotations validation that needs `ValidateDataAnnotations()`.

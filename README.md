@@ -35,7 +35,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.1.8" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.1.9" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -155,7 +155,7 @@ services.AddOptions<StripeOptions>()
 
 For nested typos, the fix keeps the parent path and replaces only the bad leaf section. If the code says `Features:Strpie` and the file contains `Features:Stripe`, the fix changes it to `Features:Stripe`.
 
-The analyzer checks every visible `appsettings*.json` additional file for section existence, including commented files and duplicate JSON section members when resolving nested section paths. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
+The analyzer checks every visible `appsettings*.json` additional file for section existence, including commented files, JSON string escapes, and duplicate JSON section members when resolving nested section paths. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
 
 ### `CFG003`: Validation Should Run When The App Starts
 
@@ -178,7 +178,7 @@ services.AddOptions<StripeOptions>()
     .ValidateOnStart();
 ```
 
-The code fix appends `ValidateOnStart()` in the same style as the existing registration chain, including multiline chains and immediate same-block local `OptionsBuilder<T>` chains. Registrations that start with `AddOptionsWithValidateOnStart<TOptions>()` already run validation at startup, so `CFG003` stays quiet for that shape.
+The analyzer tracks validation calls on the same fluent chain whether they appear before or after the binding call. The code fix appends `ValidateOnStart()` in the same style as the existing registration chain, including multiline chains and immediate same-block local `OptionsBuilder<T>` chains. Registrations that start with `AddOptionsWithValidateOnStart<TOptions>()` already run validation at startup, so `CFG003` stays quiet for that shape.
 
 ### `CFG004`: DataAnnotations Must Be Switched On
 
@@ -214,7 +214,7 @@ services.AddOptions<StripeOptions>()
 
 `Validate(...)` counts as validation for `CFG003`, but it does not satisfy `CFG004` when DataAnnotations attributes are present.
 
-The code fix preserves existing fluent-chain formatting, adds `ValidateDataAnnotations()`, and only adds `ValidateOnStart()` when startup validation is not already present, including registrations started with `AddOptionsWithValidateOnStart<TOptions>()`.
+The analyzer recognizes `ValidateDataAnnotations()` on the same fluent chain before or after the binding call. The code fix preserves existing fluent-chain formatting, adds `ValidateDataAnnotations()`, and only adds `ValidateOnStart()` when startup validation is not already present, including registrations started with `AddOptionsWithValidateOnStart<TOptions>()`.
 
 ### `CFG005`: Nested Options Need Recursive Validation
 
@@ -257,7 +257,7 @@ For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumerat
 
 ### `CFG006`: Config Keys Should Match Options Properties
 
-Keys under a bound section should match public bindable properties, or a `[ConfigurationKeyName]` alias.
+Keys under a bound section should match public bindable properties, or a `[ConfigurationKeyName]` alias. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
 
 Before:
 

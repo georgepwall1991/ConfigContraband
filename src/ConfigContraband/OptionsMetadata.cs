@@ -295,7 +295,14 @@ internal sealed class OptionsTypeMetadata
     {
         return type.TypeKind == TypeKind.Class &&
                type.SpecialType != SpecialType.System_String &&
-               !type.ContainingNamespace.ToDisplayString().StartsWith("System", StringComparison.Ordinal);
+               !IsSystemNamespace(type.ContainingNamespace);
+    }
+
+    private static bool IsSystemNamespace(INamespaceSymbol containingNamespace)
+    {
+        var namespaceName = containingNamespace.ToDisplayString();
+        return string.Equals(namespaceName, "System", StringComparison.Ordinal) ||
+               namespaceName.StartsWith("System.", StringComparison.Ordinal);
     }
 
     private static bool TryGetCollectionElementType(ITypeSymbol type, out ITypeSymbol elementType)

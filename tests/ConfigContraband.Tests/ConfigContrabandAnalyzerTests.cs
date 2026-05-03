@@ -117,6 +117,27 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg001_does_not_report_section_with_json_unicode_escape()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Str\u0069pe": {
+                "ApiKey": "secret"
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg001_does_not_report_nested_section_from_later_duplicate_section()
     {
         var source = OptionsSource("""
@@ -457,6 +478,35 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_honors_validate_on_start_before_bind_configuration()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .ValidateOnStart()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_validation_before_bind_configuration_without_validate_on_start()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .ValidateDataAnnotations()
+                .BindConfiguration("Stripe")|};
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_factory_created_builder_without_validate_on_start()
     {
         var source = OptionsSource("""
@@ -512,6 +562,19 @@ public sealed class ConfigContrabandAnalyzerTests
             .WithArguments("StripeOptions");
 
         await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_honors_validate_data_annotations_before_bind_configuration()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .ValidateDataAnnotations()
+                .BindConfiguration("Stripe")
+                .ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
     }
 
     [Fact]
@@ -1013,6 +1076,38 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg005_reports_nested_object_in_user_namespace_starting_with_system()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, extraUsings: "using Systematic.Options;\n", optionsTypes: """
+            namespace Systematic.Options
+            {
+                public sealed class AppOptions
+                {
+                    public DatabaseOptions {|#1:Database|} { get; set; } = new();
+                }
+
+                public sealed class DatabaseOptions
+                {
+                    [Required]
+                    public string ConnectionString { get; set; } = "";
+                }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg006_reports_unknown_key_under_bound_section()
     {
         var source = OptionsSource("""
@@ -1218,6 +1313,27 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_honors_json_unicode_escapes_in_configuration_keys()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "Api\u004Bey": "secret"
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg006_reports_unknown_key_under_nested_options_object()
     {
         var source = OptionsSource("""
@@ -1234,6 +1350,47 @@ public sealed class ConfigContrabandAnalyzerTests
             public sealed class DatabaseOptions
             {
                 public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 7, 4, 24)
+            .WithArguments("App:Database:ConnetionString", "DatabaseOptions", ". Did you mean \"ConnectionString\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Database": {
+                  "ConnetionString": "Server=.;"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_unknown_key_under_nested_object_in_user_namespace_starting_with_system()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Systematic.Options;\n", optionsTypes: """
+            namespace Systematic.Options
+            {
+                public sealed class AppOptions
+                {
+                    public DatabaseOptions Database { get; set; } = new();
+                }
+
+                public sealed class DatabaseOptions
+                {
+                    public string ConnectionString { get; set; } = "";
+                }
             }
             """);
 
@@ -1306,6 +1463,34 @@ public sealed class ConfigContrabandAnalyzerTests
               "Stripe": {
                 "ApiKey": {
                   "Value": "secret"
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg006_does_not_recurse_into_system_namespace_object_property()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class AppOptions
+            {
+                public System.Uri Endpoint { get; set; } = new("https://example.test");
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Endpoint": {
+                  "Hots": "example.test"
                 }
               }
             }
