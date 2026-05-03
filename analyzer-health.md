@@ -3,8 +3,8 @@
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
 Last refreshed: 2026-05-03
-Package version: `0.1.9`
-Base audited commit: `d3a532a`
+Package version: `0.1.10`
+Base audited commit: `02ae398`
 
 ## Scoring Rubric
 
@@ -44,16 +44,17 @@ The analyzer has a compact, coherent rule set: five diagnostics, four code-fix f
 | 2026-05-03 | 1 | `CFG003`, `CFG004` | The receiver side of a fluent `OptionsBuilder<T>` chain was not included when collecting validation methods, so `ValidateDataAnnotations()` or `ValidateOnStart()` before `BindConfiguration(...)` could create a false positive or false negative. | Collect same-chain receiver invocations before the binding call and added regression coverage for pre-bind validation/startup calls. | Local pre-fix read: `4.35` for both rules if precision is scored as `4`; post-fix read returns both to `4.60` with precision `5`. |
 | 2026-05-03 | 2 | `CFG001`, `CFG006` | The appsettings parser decoded common string escapes but not JSON `\uXXXX` escapes, so escaped section or property names could be treated as missing/unknown even though the runtime provider decodes them. | Decode four-digit unicode escapes in JSON strings and added parser plus analyzer regressions for escaped section and property names. | `CFG001` stays `4.85`; `CFG006` stays `4.50`, but both have stronger parser-edge coverage under Test Depth `5`. |
 | 2026-05-03 | 3 | `CFG005`, `CFG006` | The nested-options type filter excluded every namespace beginning with `System`, including user namespaces such as `Systematic.Options`. That could hide recursive-validation and nested-key diagnostics for user types. | Exclude only `System` and `System.*` namespaces, with analyzer regressions for nested user types in a `Systematic.*` namespace. | `CFG005` precision remains `4` and score remains `4.75`; `CFG006` remains `4.50`, with a narrower false-negative boundary. |
+| 2026-05-03 | 4 | `CFG001`, `CFG006` | JSON configuration is flattened with `:` as the hierarchy delimiter, but the analyzer only walked object nesting. Colon-delimited appsettings keys such as `"Features:Stripe"` could be treated as missing sections, and flattened leaf keys could hide unknown-key typos. | Project colon-delimited appsettings keys into the same hierarchy used by section lookup, suggestions, and unknown-key analysis, with object-key and leaf-key regressions. | `CFG001` stays `4.85`; `CFG006` stays `4.50`, with stronger alignment to runtime configuration-key semantics. |
 
 ## Health Baseline
 
 | Rule | Severity | Importance | Precision | Test Depth | Fix Safety | Docs | Release | Score | Priority | Current read |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
-| CFG001 Missing configuration section | Warning | 5 | 5 | 5 | 4 | 5 | 5 | 4.85 | P3 | Strong current shape. Handles `BindConfiguration(...)`, `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))`, nested section paths, full-path suggestions, duplicate JSON section members, comments, JSON string escapes, and visible appsettings files as one searchable set. |
+| CFG001 Missing configuration section | Warning | 5 | 5 | 5 | 4 | 5 | 5 | 4.85 | P3 | Strong current shape. Handles `BindConfiguration(...)`, `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))`, nested section paths, full-path suggestions, duplicate JSON section members, comments, JSON string escapes, colon-delimited appsettings keys, and visible appsettings files as one searchable set. |
 | CFG003 Validation not on startup | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Good analyzer boundary for fluent and immediate same-block local `OptionsBuilder<T>` chains, including `Bind(GetSection(...))`; tracks validation/startup calls before and after the binding call, honors `AddOptionsWithValidateOnStart<TOptions>()`, and code fixes preserve multiline formatting, comments, split locals, and single-line chains. |
 | CFG004 DataAnnotations not enabled | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Covers inherited bindable DataAnnotations and `IValidatableObject` on supported `OptionsBuilder<T>` bindings, recognizes `ValidateDataAnnotations()` before and after binding, avoids duplicate `ValidateOnStart()` when startup validation already exists, and shares the formatter-safe invocation appender with CFG003. |
 | CFG005 Nested validation not recursive | Warning | 5 | 4 | 5 | 5 | 5 | 5 | 4.75 | P3 | Strong current shape. Covers recursive object and collection graphs, including nested `IValidatableObject` types and user namespaces that merely start with `System`, on supported `OptionsBuilder<T>` bindings; suppresses unsafe interface cases and proves cross-document recursive-attribute fixes. |
-| CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 5 | 5 | 4.50 | P3 | Broadest test depth. Covers `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))`; recurses through nested objects, object collections, dictionary values, dictionary values containing collections, comments, JSON string escapes, and user namespaces that merely start with `System` while keeping scalar arrays and dictionary entry names quiet. |
+| CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 5 | 5 | 4.50 | P3 | Broadest test depth. Covers `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))`; recurses through nested objects, object collections, dictionary values, dictionary values containing collections, comments, JSON string escapes, colon-delimited appsettings keys, and user namespaces that merely start with `System` while keeping scalar arrays and dictionary entry names quiet. |
 
 ## Selection Policy
 
@@ -83,7 +84,7 @@ Reports when a supported options binding references a string-literal section pat
 Current behavior:
 
 - Checks top-level and nested section paths across all visible `appsettings*.json` additional files for `BindConfiguration(...)`, `Bind(GetSection(...))`, `Bind(GetRequiredSection(...))`, and direct `Configure<T>(GetSection(...))`.
-- Parses `//` and `/* ... */` comments and JSON string escapes in appsettings files before resolving section paths.
+- Parses `//` and `/* ... */` comments, JSON string escapes, and colon-delimited JSON keys in appsettings files before resolving section paths.
 - Traverses duplicate JSON object members when resolving section existence and suggestions.
 - Ignores non-constant, empty, whitespace-only, root configuration, and stored `IConfigurationSection` values.
 
@@ -150,7 +151,7 @@ Reports an appsettings key under a bound section when the key does not match a b
 Current behavior:
 
 - Checks every matching bound section across visible appsettings files for supported `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))` registrations.
-- Parses `//` and `/* ... */` comments and JSON string escapes before walking keys so commented local appsettings files stay analyzable.
+- Parses `//` and `/* ... */` comments, JSON string escapes, and colon-delimited JSON keys before walking keys so commented local appsettings files stay analyzable.
 - Recurses into nested object properties, arrays/lists of nested objects, strongly typed dictionary values, and dictionary values containing nested object collections.
 - Honors `[ConfigurationKeyName]` aliases at the root and nested levels.
 - Treats user namespaces such as `Systematic.Options` as analyzable user code while still avoiding BCL `System` / `System.*` nested types.

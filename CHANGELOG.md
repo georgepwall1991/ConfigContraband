@@ -2,6 +2,11 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.1.10 - 2026-05-03
+
+- Hardened `CFG001` and `CFG006` to recognize colon-delimited appsettings keys such as `"Features:Stripe"` and `"Features:Stripe:ApiKey"` as normal configuration hierarchy.
+- Added regression coverage for colon-delimited section existence, typo suggestions, and unknown-key diagnostics in flattened appsettings shapes.
+
 ## 0.1.9 - 2026-05-03
 
 - Hardened `CFG003` and `CFG004` fluent-chain analysis so validation calls are recognized whether they appear before or after `BindConfiguration(...)` / `Bind(...)`.

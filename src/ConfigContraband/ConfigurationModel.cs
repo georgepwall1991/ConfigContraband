@@ -53,15 +53,18 @@ internal sealed class ConfigurationSnapshot
         if (pathParts.Length <= 1)
         {
             return _files
-                .SelectMany(file => file.Root.Properties.Select(property => property.Key))
+                .SelectMany(file => EnumerateProperties(file.Root))
+                .SelectMany(property => SplitPath(property.FullPath).Take(1))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToImmutableArray();
         }
 
-        var parentPath = string.Join(":", pathParts.Take(pathParts.Length - 1));
+        var parentPathParts = pathParts.Take(pathParts.Length - 1).ToArray();
         return _files
-            .SelectMany(file => FindSections(file.Root, parentPath))
-            .SelectMany(node => node.Properties.Select(property => property.Key))
+            .SelectMany(file => EnumerateProperties(file.Root))
+            .SelectMany(property => TryGetChildPathPart(property.FullPath, parentPathParts, out var childPart)
+                ? new[] { childPart }
+                : Array.Empty<string>())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToImmutableArray();
     }
@@ -94,7 +97,15 @@ internal sealed class ConfigurationSnapshot
     private static ImmutableArray<ConfigurationNode> FindSections(ConfigurationNode root, string sectionPath)
     {
         var builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
-        FindSections(root, SplitPath(sectionPath), partIndex: 0, builder);
+        var pathParts = SplitPath(sectionPath);
+        FindSections(root, pathParts, partIndex: 0, builder);
+
+        var projected = ProjectSection(root, pathParts);
+        if (!projected.Properties.IsDefaultOrEmpty)
+        {
+            builder.Add(projected);
+        }
+
         return builder.ToImmutable();
     }
 
@@ -112,9 +123,104 @@ internal sealed class ConfigurationSnapshot
 
         foreach (var property in current.Properties)
         {
-            if (string.Equals(property.Key, pathParts[partIndex], StringComparison.OrdinalIgnoreCase))
+            var keyParts = SplitPath(property.Key);
+            if (PathMatchesAt(pathParts, partIndex, keyParts))
             {
-                FindSections(property.Value, pathParts, partIndex + 1, builder);
+                var nextPartIndex = partIndex + keyParts.Length;
+                if (nextPartIndex >= pathParts.Length)
+                {
+                    builder.Add(property.Value);
+                    continue;
+                }
+
+                FindSections(property.Value, pathParts, nextPartIndex, builder);
+            }
+        }
+    }
+
+    private static ConfigurationNode ProjectSection(ConfigurationNode root, string[] sectionPathParts)
+    {
+        var properties = ImmutableArray.CreateBuilder<ConfigurationProperty>();
+        foreach (var property in EnumerateProperties(root))
+        {
+            var propertyPathParts = SplitPath(property.FullPath);
+            if (propertyPathParts.Length <= sectionPathParts.Length ||
+                !PathMatchesAt(propertyPathParts, 0, sectionPathParts))
+            {
+                continue;
+            }
+
+            properties.Add(CreateProjectedProperty(
+                propertyPathParts,
+                sectionPathParts.Length,
+                string.Join(":", propertyPathParts.Take(sectionPathParts.Length)),
+                property));
+        }
+
+        return new ConfigurationNode(properties.ToImmutable());
+    }
+
+    private static ConfigurationProperty CreateProjectedProperty(
+        string[] propertyPathParts,
+        int partIndex,
+        string parentPath,
+        ConfigurationProperty source)
+    {
+        var key = propertyPathParts[partIndex];
+        var fullPath = string.IsNullOrEmpty(parentPath) ? key : parentPath + ":" + key;
+        var value = partIndex == propertyPathParts.Length - 1
+            ? source.Value
+            : new ConfigurationNode(ImmutableArray.Create(CreateProjectedProperty(
+                propertyPathParts,
+                partIndex + 1,
+                fullPath,
+                source)));
+
+        return new ConfigurationProperty(key, fullPath, value, source.Location);
+    }
+
+    private static bool TryGetChildPathPart(string fullPath, string[] parentPathParts, out string childPart)
+    {
+        var pathParts = SplitPath(fullPath);
+        if (pathParts.Length > parentPathParts.Length &&
+            PathMatchesAt(pathParts, 0, parentPathParts))
+        {
+            childPart = pathParts[parentPathParts.Length];
+            return true;
+        }
+
+        childPart = null!;
+        return false;
+    }
+
+    private static bool PathMatchesAt(string[] pathParts, int partIndex, string[] candidateParts)
+    {
+        if (candidateParts.Length == 0 ||
+            partIndex + candidateParts.Length > pathParts.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < candidateParts.Length; i++)
+        {
+            if (!string.Equals(pathParts[partIndex + i], candidateParts[i], StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static IEnumerable<ConfigurationProperty> EnumerateProperties(ConfigurationNode node)
+    {
+        foreach (var property in node.Properties)
+        {
+            yield return property;
+
+            foreach (var child in EnumerateProperties(property.Value))
+            {
+                yield return child;
             }
         }
     }
