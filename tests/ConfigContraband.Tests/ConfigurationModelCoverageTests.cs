@@ -9,7 +9,7 @@ public sealed class ConfigurationModelCoverageTests
     {
         var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
             {
-              "Escaped\"Quote\\Slash\/Back\bForm\fLine\nReturn\rTab\tOther\q": {
+              "Escaped\"Quote\\Slash\/Back\bForm\fLine\nReturn\rTab\tUnicode\u0041Lower\u006fOther\q": {
                 "Value": "ok"
               }
             }
@@ -25,7 +25,35 @@ public sealed class ConfigurationModelCoverageTests
         Assert.Contains('\n', property.Key);
         Assert.Contains('\r', property.Key);
         Assert.Contains('\t', property.Key);
+        Assert.Contains("UnicodeA", property.Key);
+        Assert.Contains("Lowero", property.Key);
         Assert.Contains("Otherq", property.Key);
+    }
+
+    [Fact]
+    public void Json_parser_keeps_malformed_unicode_escapes_as_literal_text()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              "Bad\u00g1": {
+                "Value": "ok"
+              }
+            }
+            """));
+
+        Assert.NotNull(root);
+        var property = Assert.Single(root!.Properties);
+        Assert.Equal("Badu00g1", property.Key);
+    }
+
+    [Fact]
+    public void Json_parser_keeps_unfinished_unicode_escape_as_literal_text()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("{\"Bad\\u"));
+
+        Assert.NotNull(root);
+        var property = Assert.Single(root!.Properties);
+        Assert.Equal("Badu", property.Key);
     }
 
     [Fact]

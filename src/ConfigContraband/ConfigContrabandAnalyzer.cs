@@ -687,6 +687,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             var methods = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
             methods.Add(bindMethodName);
+            AddReceiverInvocations(bindInvocation, methods);
 
             var current = bindInvocation;
             var outermost = bindInvocation;
@@ -703,6 +704,20 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             AddSubsequentLocalInvocations(bindInvocation, semanticModel, methods);
 
             return new InvocationChain(outermost, methods.ToImmutable());
+        }
+
+        private static void AddReceiverInvocations(
+            InvocationExpressionSyntax invocation,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            var current = invocation;
+            while (current.Expression is MemberAccessExpressionSyntax memberAccess &&
+                   memberAccess.Expression is InvocationExpressionSyntax receiverInvocation &&
+                   receiverInvocation.Expression is MemberAccessExpressionSyntax receiverMemberAccess)
+            {
+                methods.Add(receiverMemberAccess.Name.Identifier.ValueText);
+                current = receiverInvocation;
+            }
         }
 
         private static void AddSubsequentLocalInvocations(

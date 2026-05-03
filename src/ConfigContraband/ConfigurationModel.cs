@@ -352,6 +352,12 @@ internal static class JsonConfigurationParser
 
                 var escaped = Current;
                 _position++;
+                if (escaped == 'u' && TryReadUnicodeEscape(out var unicodeChar))
+                {
+                    chars.Add(unicodeChar);
+                    continue;
+                }
+
                 chars.Add(escaped switch
                 {
                     '"' => '"',
@@ -367,6 +373,51 @@ internal static class JsonConfigurationParser
             }
 
             return new string(chars.ToArray());
+        }
+
+        private bool TryReadUnicodeEscape(out char value)
+        {
+            value = '\0';
+            if (_position + 4 > _text.Length)
+            {
+                return false;
+            }
+
+            var codePoint = 0;
+            for (var i = 0; i < 4; i++)
+            {
+                var hexValue = HexValue(Peek(i));
+                if (hexValue < 0)
+                {
+                    return false;
+                }
+
+                codePoint = (codePoint * 16) + hexValue;
+            }
+
+            _position += 4;
+            value = (char)codePoint;
+            return true;
+        }
+
+        private static int HexValue(char value)
+        {
+            if (value >= '0' && value <= '9')
+            {
+                return value - '0';
+            }
+
+            if (value >= 'a' && value <= 'f')
+            {
+                return value - 'a' + 10;
+            }
+
+            if (value >= 'A' && value <= 'F')
+            {
+                return value - 'A' + 10;
+            }
+
+            return -1;
         }
 
         private void SkipScalar()
