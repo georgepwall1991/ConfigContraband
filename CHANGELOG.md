@@ -10,6 +10,7 @@ All notable changes to ConfigContraband will be documented in this file.
 - Hardened split local `OptionsBuilder<TOptions>` chain analysis so adjacent validation calls before a later local bind statement are recognized without scanning past unrelated statements.
 - Hardened split local `OptionsBuilder<TOptions>` chain analysis so adjacent builder initializer calls such as `AddOptionsWithValidateOnStart<TOptions>()` and `.ValidateDataAnnotations()` are recognized before a later local bind statement.
 - Added code-fix regression coverage for the expanded split local validation-chain shapes, including pre-bind validation and initializer startup validation.
+- Synced NuGet package release notes with the `0.1.11` analyzer hardening surface.
 - Added formatting verification to PR CI so whitespace and formatter drift fail before merge.
 - Added formatting verification to the NuGet publish workflow so release packaging uses the same formatter gate as PR CI.
 - Synced analyzer release tracking so diagnostics shipped since `0.1.0` are recorded in `AnalyzerReleases.Shipped.md` instead of remaining marked as unshipped.
