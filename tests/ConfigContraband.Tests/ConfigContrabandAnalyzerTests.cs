@@ -1717,6 +1717,41 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_keeps_projected_object_when_later_colon_delimited_scalar_uses_same_path()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions Database { get; set; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                public string Host { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 2, 3, 2, 22)
+            .WithArguments("App:Database:Hots", "DatabaseOptions", ". Did you mean \"Host\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App:Database:Hots": "api",
+              "App:Database": "ignored scalar"
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_reports_unknown_key_under_nested_object_in_user_namespace_starting_with_system()
     {
         var source = OptionsSource("""

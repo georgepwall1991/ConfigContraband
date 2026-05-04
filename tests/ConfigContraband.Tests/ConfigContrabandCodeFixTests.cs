@@ -73,6 +73,40 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg001_fix_escapes_quotes_in_verbatim_section_literal()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:@"Strpie""Quoted"|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration(@"Stripe""Quoted")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie\"Quoted", ". Did you mean \"Stripe\"Quoted\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json", """
+            {
+              "Stripe\"Quoted": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg001_fix_preserves_raw_section_literal()
     {
         var source = OptionsSource(""""
@@ -88,6 +122,76 @@ public sealed class ConfigContrabandCodeFixTests
                 .ValidateDataAnnotations()
                 .ValidateOnStart();
             """");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_fix_preserves_raw_section_literal_with_quotes()
+    {
+        var source = OptionsSource(""""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:"""Strpie"Quoted"""|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """");
+
+        var fixedSource = OptionsSource(""""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("""Stripe"Quoted""")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie\"Quoted", ". Did you mean \"Stripe\"Quoted\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json", """
+            {
+              "Stripe\"Quoted": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_fix_replaces_constant_section_identifier()
+    {
+        var source = OptionsSource("""
+            const string SectionName = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:SectionName|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var fixedSource = OptionsSource("""
+            const string SectionName = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
             .WithLocation(0)
