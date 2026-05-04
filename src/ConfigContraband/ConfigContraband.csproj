@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Harden validation-chain recognition, recursive-validation fixes, appsettings discovery, colon-delimited key projection, ConfigurationKeyName matching, and section typo literal preservation.</PackageReleaseNotes>
+    <PackageReleaseNotes>Harden validation-chain recognition, nested DataAnnotations detection, recursive-validation fixes, appsettings discovery, colon-delimited key projection, ConfigurationKeyName matching, and section typo literal preservation.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

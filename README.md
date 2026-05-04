@@ -184,7 +184,7 @@ The analyzer tracks validation calls on the same fluent chain whether they appea
 
 ### `CFG004`: DataAnnotations Must Be Switched On
 
-Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration. `IValidatableObject` is also part of DataAnnotations validation, so options types that implement it need the same registration.
+Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration. Nested options graphs count as well: if a nested object or collection item has DataAnnotations and is part of the bindable options graph, the root registration still needs `ValidateDataAnnotations()`. `IValidatableObject` is also part of DataAnnotations validation, so options types that implement it need the same registration.
 
 Before:
 

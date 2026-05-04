@@ -875,6 +875,34 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_reports_nested_data_annotations_without_validate_data_annotations()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateOnStart()|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                [ValidateObjectMembers]
+                public DatabaseOptions Database { get; set; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg004_does_not_report_validatable_object_when_data_annotations_enabled()
     {
         var source = OptionsSource("""

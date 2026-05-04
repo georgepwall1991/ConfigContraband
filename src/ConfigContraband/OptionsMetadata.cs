@@ -8,12 +8,19 @@ namespace ConfigContraband;
 
 internal sealed class OptionsTypeMetadata
 {
-    private OptionsTypeMetadata(INamedTypeSymbol type, ImmutableArray<BindableProperty> bindableProperties, bool implementsValidatableObject)
+    private readonly bool _hasAnyDataAnnotations;
+
+    private OptionsTypeMetadata(
+        INamedTypeSymbol type,
+        ImmutableArray<BindableProperty> bindableProperties,
+        bool implementsValidatableObject,
+        bool hasAnyDataAnnotations)
     {
         TypeName = type.Name;
         TypeKey = type.ToDisplayString();
         BindableProperties = bindableProperties;
         ImplementsValidatableObject = implementsValidatableObject;
+        _hasAnyDataAnnotations = hasAnyDataAnnotations;
     }
 
     public string TypeName { get; }
@@ -33,13 +40,16 @@ internal sealed class OptionsTypeMetadata
                 HasValidationAttribute(member)));
         }
 
-        return new OptionsTypeMetadata(type, properties.ToImmutable(), ImplementsInterface(type, "System.ComponentModel.DataAnnotations.IValidatableObject"));
+        return new OptionsTypeMetadata(
+            type,
+            properties.ToImmutable(),
+            ImplementsInterface(type, "System.ComponentModel.DataAnnotations.IValidatableObject"),
+            ContainsValidationAttributes(type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default)));
     }
 
     public bool HasAnyDataAnnotations()
     {
-        return ImplementsValidatableObject ||
-               BindableProperties.Any(property => property.HasValidationAttribute);
+        return _hasAnyDataAnnotations;
     }
 
     public bool TryGetConfigurationProperty(string key, out BindableProperty bindableProperty)

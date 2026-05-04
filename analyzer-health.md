@@ -52,6 +52,7 @@ The analyzer has a compact, coherent rule set: five diagnostics, four code-fix f
 | 2026-05-04 | 9 | `CFG001` | The section typo code fix recreated replacements as normal string literals, so verbatim and raw section literals lost their original style. | Preserve verbatim and raw string literal tokens when replacing suggested section names, with focused code-fix regressions. | `CFG001` stays `4.85`, with more style-preserving automatic fixes. |
 | 2026-05-04 | 10 | `CFG001`, `CFG006` | File discovery accepted any `appsettings*.json`, so lookalike files such as `appsettingsBackup.json` or `appsettingsSchema.json` could suppress missing-section diagnostics or create unknown-key noise. | Restrict analyzer and buildTransitive discovery to `appsettings.json` plus dot-qualified `appsettings.*.json`, while proving `appsettings.Development.local.json` remains visible. | `CFG001` stays `4.85`; `CFG006` stays `4.50`, with a lower false-positive/false-negative file-selection boundary. |
 | 2026-05-04 | 11 | `CFG006` | `[ConfigurationKeyName]` was treated as an extra accepted key instead of the runtime binding key override, so JSON using the CLR property name could hide an unbound option value. | Match the configured key name instead of the CLR property name when an alias is present, with root and nested regressions. | `CFG006` stays `4.50`, with stronger runtime binder alignment. |
+| 2026-05-04 | 12 | `CFG004` | Only root-level DataAnnotations triggered missing `ValidateDataAnnotations()`, so a recursively annotated nested graph could still miss the DataAnnotations registration when the root type had no direct annotations. | Reuse the nested validation graph walk for `CFG004` and added analyzer/code-fix regressions for nested-only DataAnnotations. | `CFG004` stays `4.60`, with a closed false-negative around recursive validation setup. |
 
 ## Health Baseline
 
@@ -59,7 +60,7 @@ The analyzer has a compact, coherent rule set: five diagnostics, four code-fix f
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
 | CFG001 Missing configuration section | Warning | 5 | 5 | 5 | 4 | 5 | 5 | 4.85 | P3 | Strong current shape. Handles `BindConfiguration(...)`, `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))`, nested section paths, full-path suggestions, duplicate JSON section members, comments, JSON string escapes, colon-delimited appsettings keys, style-preserving section-literal fixes, and visible `appsettings.json` / `appsettings.*.json` files as one searchable set. |
 | CFG003 Validation not on startup | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Good analyzer boundary for fluent and immediate same-block local `OptionsBuilder<T>` chains, including `Bind(GetSection(...))`; tracks symbol-checked framework validation/startup calls before and after the binding call, honors `AddOptionsWithValidateOnStart<TOptions>()`, and code fixes preserve multiline formatting, comments, split locals, and single-line chains. |
-| CFG004 DataAnnotations not enabled | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Covers inherited bindable DataAnnotations and `IValidatableObject` on supported `OptionsBuilder<T>` bindings, recognizes the framework `ValidateDataAnnotations()` before and after binding, avoids duplicate `ValidateOnStart()` when startup validation already exists, and shares the formatter-safe invocation appender with CFG003. |
+| CFG004 DataAnnotations not enabled | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Covers root, inherited, and nested bindable DataAnnotations plus `IValidatableObject` on supported `OptionsBuilder<T>` bindings, recognizes the framework `ValidateDataAnnotations()` before and after binding, avoids duplicate `ValidateOnStart()` when startup validation already exists, and shares the formatter-safe invocation appender with CFG003. |
 | CFG005 Nested validation not recursive | Warning | 5 | 4 | 5 | 5 | 5 | 5 | 4.75 | P3 | Strong current shape. Covers recursive object and collection graphs, including nested `IValidatableObject` types and user namespaces that merely start with `System`, on supported `OptionsBuilder<T>` bindings; suppresses unsafe interface cases and proves cross-document recursive-attribute fixes, including namespace-local using handling and local attribute-name conflicts. |
 | CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 5 | 5 | 4.50 | P3 | Broadest test depth. Covers `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))`; recurses through nested objects, object collections, dictionary values, dictionary values containing collections, comments, JSON string escapes, `[ConfigurationKeyName]` key overrides, merged colon-delimited appsettings keys, dot-qualified appsettings file names, and user namespaces that merely start with `System` while keeping scalar arrays and dictionary entry names quiet. |
 
@@ -121,11 +122,11 @@ Known gaps:
 
 ### CFG004 DataAnnotations Not Enabled
 
-Reports when an options type has bindable DataAnnotations properties but the options registration does not call `ValidateDataAnnotations()`.
+Reports when an options type has bindable DataAnnotations anywhere in its supported options graph but the options registration does not call `ValidateDataAnnotations()`.
 
 Current behavior:
 
-- Includes inherited public bindable properties and options types implementing `IValidatableObject`.
+- Includes root, inherited, and nested public bindable properties, plus options types implementing `IValidatableObject`.
 - Honors public settable property boundaries to stay aligned with options binding.
 - Treats framework `Validate(...)` predicate registrations as validation for `CFG003`, but not as a substitute for `ValidateDataAnnotations()`.
 - Tracks the framework `ValidateDataAnnotations()` before and after the binding call in the same fluent chain.
