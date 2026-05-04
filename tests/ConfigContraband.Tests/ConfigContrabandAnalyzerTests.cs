@@ -645,6 +645,22 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_reports_named_options_builder_validation_without_validate_on_start()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>("tenant")
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()|};
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_honors_add_options_with_validate_on_start()
     {
         var source = OptionsSource("""
@@ -796,6 +812,22 @@ public sealed class ConfigContrabandAnalyzerTests
         var source = OptionsSource("""
             {|#0:services.AddOptions<StripeOptions>()
                 .BindConfiguration("Stripe")|};
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_reports_named_options_builder_data_annotations_without_validate_data_annotations()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>("tenant")
+                .BindConfiguration("Stripe")
+                .ValidateOnStart()|};
             """);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
@@ -1863,6 +1895,33 @@ public sealed class ConfigContrabandAnalyzerTests
     {
         var source = OptionsSource("""
             services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_unknown_key_from_named_options_builder()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>("tenant")
                 .BindConfiguration("Stripe")
                 .ValidateDataAnnotations()
                 .ValidateOnStart();

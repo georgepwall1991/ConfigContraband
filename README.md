@@ -51,6 +51,15 @@ services.AddOptions<StripeOptions>()
     .BindConfiguration("Stripe");
 ```
 
+Named options use the same supported `OptionsBuilder<T>` shape:
+
+```csharp
+services.AddOptions<StripeOptions>("tenant")
+    .BindConfiguration("Stripe")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+```
+
 It also recognizes the common explicit-section style:
 
 ```csharp
