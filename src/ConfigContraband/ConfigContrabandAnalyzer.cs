@@ -837,9 +837,15 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             }
 
             var expressionIndex = expressionBlock.Statements.IndexOf(expressionStatement);
-            AddPreviousLocalInvocations(
+            var previousBoundaryIndex = AddPreviousLocalInvocations(
                 expressionBlock,
                 expressionIndex - 1,
+                receiverLocalSymbol,
+                semanticModel,
+                methods);
+            AddLocalInitializerInvocations(
+                expressionBlock,
+                previousBoundaryIndex,
                 receiverLocalSymbol,
                 semanticModel,
                 methods);
@@ -852,7 +858,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 methods);
         }
 
-        private static void AddPreviousLocalInvocations(
+        private static int AddPreviousLocalInvocations(
             BlockSyntax block,
             int startIndex,
             ILocalSymbol localSymbol,
@@ -865,8 +871,63 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     expressionStatement.Expression is not InvocationExpressionSyntax invocation ||
                     !TryCollectLocalInvocationChain(invocation, localSymbol, semanticModel, methods))
                 {
-                    break;
+                    return i;
                 }
+            }
+
+            return -1;
+        }
+
+        private static void AddLocalInitializerInvocations(
+            BlockSyntax block,
+            int statementIndex,
+            ILocalSymbol localSymbol,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            if (statementIndex < 0 ||
+                statementIndex >= block.Statements.Count ||
+                block.Statements[statementIndex] is not LocalDeclarationStatementSyntax declarationStatement)
+            {
+                return;
+            }
+
+            foreach (var declarator in declarationStatement.Declaration.Variables)
+            {
+                if (semanticModel.GetDeclaredSymbol(declarator) is not ILocalSymbol declaredLocal ||
+                    !SymbolEqualityComparer.Default.Equals(declaredLocal, localSymbol) ||
+                    declarator.Initializer?.Value is not InvocationExpressionSyntax initializerInvocation)
+                {
+                    continue;
+                }
+
+                AddRecognizedInitializerInvocation(initializerInvocation, semanticModel, methods);
+                return;
+            }
+        }
+
+        private static void AddRecognizedInitializerInvocation(
+            InvocationExpressionSyntax invocation,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            var current = invocation;
+            while (true)
+            {
+                AddRecognizedOptionsBuilderMethod(current, semanticModel, methods);
+                if (IsAddOptionsWithValidateOnStart(current, semanticModel))
+                {
+                    methods.Add("ValidateOnStart");
+                }
+
+                if (current.Expression is not MemberAccessExpressionSyntax memberAccess ||
+                    memberAccess.Expression is not InvocationExpressionSyntax receiverInvocation ||
+                    receiverInvocation.Expression is not MemberAccessExpressionSyntax)
+                {
+                    return;
+                }
+
+                current = receiverInvocation;
             }
         }
 

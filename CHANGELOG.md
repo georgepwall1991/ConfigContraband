@@ -8,6 +8,7 @@ All notable changes to ConfigContraband will be documented in this file.
 - Added regression coverage for custom same-name extension methods that previously could hide missing `ValidateOnStart()` / `ValidateDataAnnotations()` diagnostics or create a validation false positive.
 - Hardened split local `OptionsBuilder<TOptions>` chain analysis so validation calls after a separate local `BindConfiguration(...)` / `Bind(...)` statement are recognized.
 - Hardened split local `OptionsBuilder<TOptions>` chain analysis so adjacent validation calls before a later local bind statement are recognized without scanning past unrelated statements.
+- Hardened split local `OptionsBuilder<TOptions>` chain analysis so adjacent builder initializer calls such as `AddOptionsWithValidateOnStart<TOptions>()` and `.ValidateDataAnnotations()` are recognized before a later local bind statement.
 - Hardened `BindNonPublicProperties` handling so explicit binder options make private-set options properties visible to validation and unknown-key analysis.
 - Hardened bindable-property detection so initialized get-only object, collection, and dictionary properties align with the runtime configuration binder.
 - Hardened `CFG004` so nested object graphs that contain DataAnnotations still require `ValidateDataAnnotations()` even when the root options type has no direct annotations.

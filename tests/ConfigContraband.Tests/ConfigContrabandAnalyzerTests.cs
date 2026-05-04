@@ -1211,6 +1211,69 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_honors_validate_on_start_from_local_builder_initializer_before_later_bind_statement()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptionsWithValidateOnStart<StripeOptions>();
+            optionsBuilder.BindConfiguration("Stripe");
+            optionsBuilder.ValidateDataAnnotations();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg004_honors_data_annotations_from_local_builder_initializer_before_later_bind_statement()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>()
+                .ValidateDataAnnotations();
+            optionsBuilder.BindConfiguration("Stripe");
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_local_builder_initializer_validation_without_validate_on_start()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>()
+                .ValidateDataAnnotations();
+            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_does_not_scan_local_builder_initializer_across_unrelated_statement()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>()
+                .ValidateDataAnnotations();
+            Validate(optionsBuilder);
+            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            optionsBuilder.ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", extraMembers: """
+            private static void Validate(OptionsBuilder<StripeOptions> optionsBuilder)
+            {
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_split_custom_validation_without_validate_on_start()
     {
         var source = OptionsSource("""
