@@ -2438,6 +2438,77 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_does_not_report_private_set_configuration_key_name_alias_when_bind_non_public_properties_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options => options.BindNonPublicProperties = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public sealed class StripeOptions
+            {
+                public StripeOptions(string apiKey)
+                {
+                    ApiKey = apiKey;
+                }
+
+                [ConfigurationKeyName("api_key")]
+                public string ApiKey { get; private set; }
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "constructor",
+                "api_key": "setter"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_private_set_configuration_key_name_alias_when_bind_non_public_properties_disabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public sealed class StripeOptions
+            {
+                public StripeOptions(string apiKey)
+                {
+                    ApiKey = apiKey;
+                }
+
+                [ConfigurationKeyName("api_key")]
+                public string ApiKey { get; private set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 14)
+            .WithArguments("Stripe:api_key", "StripeOptions", ". Did you mean \"ApiKey\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "constructor",
+                "api_key": "setter"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_reports_get_only_property_when_public_parameterless_constructor_wins()
     {
         var source = OptionsSource("""
