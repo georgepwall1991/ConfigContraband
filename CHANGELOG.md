@@ -17,6 +17,7 @@ All notable changes to ConfigContraband will be documented in this file.
 - Hardened bindable-property detection so constructor-bound options records and immutable classes align with the runtime configuration binder, including nested validation and unknown-key analysis.
 - Hardened the `CFG005` recursive-validation code fix so constructor-bound record properties receive property-targeted recursive validation attributes.
 - Added `CFG005` code-fix regression coverage proving constructor-bound record collections receive property-targeted `[ValidateEnumeratedItems]`.
+- Added `CFG005` code-fix regression coverage proving constructor-bound record collection fixes fully qualify `[ValidateEnumeratedItems]` when a local attribute name conflicts.
 - Hardened bindable-property detection so initialized get-only object, collection, and dictionary properties align with the runtime configuration binder.
 - Hardened `CFG004` so nested object graphs that contain DataAnnotations still require `ValidateDataAnnotations()` even when the root options type has no direct annotations.
 - Hardened the `CFG005` recursive-validation code fix to reuse namespace-local `Microsoft.Extensions.Options` imports and add new imports to the namespace-local using block when that is the file style.

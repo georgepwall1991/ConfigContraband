@@ -1693,6 +1693,92 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg005_fix_qualifies_constructor_bound_collection_attribute_when_local_attribute_name_conflicts()
+    {
+        var startupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    {|#0:services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart()|};
+                }
+            }
+            """;
+
+        var optionsSource = """
+            namespace MyApp
+            {
+                using System;
+                using System.Collections.Generic;
+                using System.ComponentModel.DataAnnotations;
+
+                public sealed class ValidateEnumeratedItemsAttribute : Attribute
+                {
+                }
+
+                public sealed record AppOptions(List<ServerOptions> {|#1:Servers|});
+
+                public sealed record ServerOptions([property: Required] string Host);
+            }
+            """;
+
+        var fixedStartupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+            """;
+
+        var fixedOptionsSource = """
+            namespace MyApp
+            {
+                using System;
+                using System.Collections.Generic;
+                using System.ComponentModel.DataAnnotations;
+
+                public sealed class ValidateEnumeratedItemsAttribute : Attribute
+                {
+                }
+
+                public sealed record AppOptions([property: global::Microsoft.Extensions.Options.ValidateEnumeratedItemsAttribute] List<ServerOptions> Servers);
+
+                public sealed record ServerOptions([property: Required] string Host);
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Servers");
+
+        await Verifier.VerifyCodeFixAsync(
+            [
+                ("Startup.cs", startupSource),
+                ("Options.cs", optionsSource)
+            ],
+            [
+                ("Startup.cs", fixedStartupSource),
+                ("Options.cs", fixedOptionsSource)
+            ],
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg005_fix_qualifies_collection_attribute_when_local_attribute_name_conflicts()
     {
         var startupSource = """
