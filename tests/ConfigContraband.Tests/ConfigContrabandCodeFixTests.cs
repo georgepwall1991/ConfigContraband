@@ -344,6 +344,29 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg003_fix_appends_validate_on_start_for_named_options_builder()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>("tenant")
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()|};
+            """);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>("tenant")
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_fix_appends_validate_on_start_after_bind_get_section()
     {
         var source = OptionsSource("""
@@ -395,6 +418,28 @@ public sealed class ConfigContrabandCodeFixTests
 
         var fixedSource = OptionsSource("""
             services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_fix_appends_data_annotations_and_validate_on_start_for_named_options_builder()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>("tenant")
+                .BindConfiguration("Stripe")|};
+            """);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>("tenant")
                 .BindConfiguration("Stripe")
                 .ValidateDataAnnotations()
                 .ValidateOnStart();

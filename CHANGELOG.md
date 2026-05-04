@@ -6,6 +6,7 @@ All notable changes to ConfigContraband will be documented in this file.
 
 - Hardened `CFG003` and `CFG004` chain analysis so only the real framework `OptionsBuilder<TOptions>` validation APIs count as validation or startup validation.
 - Added regression coverage proving named `AddOptions<TOptions>("name")` builder chains keep section, validation, and unknown-key diagnostics.
+- Added code-fix regression coverage proving named `AddOptions<TOptions>("name")` builder chains receive the same `ValidateOnStart()` and `ValidateDataAnnotations()` fixes.
 - Added regression coverage for custom same-name extension methods that previously could hide missing `ValidateOnStart()` / `ValidateDataAnnotations()` diagnostics or create a validation false positive.
 - Hardened split local `OptionsBuilder<TOptions>` chain analysis so validation calls after a separate local `BindConfiguration(...)` / `Bind(...)` statement are recognized.
 - Hardened split local `OptionsBuilder<TOptions>` chain analysis so adjacent validation calls before a later local bind statement are recognized without scanning past unrelated statements.
