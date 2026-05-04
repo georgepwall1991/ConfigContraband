@@ -446,6 +446,11 @@ internal sealed class OptionsTypeMetadata
             return true;
         }
 
+        if (HasValidationAttribute(namedType))
+        {
+            return true;
+        }
+
         foreach (var candidate in GetBindableProperties(namedType, bindsNonPublicProperties))
         {
             var property = candidate.Property;

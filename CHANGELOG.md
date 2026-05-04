@@ -9,6 +9,7 @@ All notable changes to ConfigContraband will be documented in this file.
 - Added code-fix regression coverage proving named `AddOptions<TOptions>("name")` builder chains receive the same `ValidateOnStart()` and `ValidateDataAnnotations()` fixes.
 - Hardened constructor-bound bindable-property detection so derived options constructors can map to inherited public properties, matching runtime binder behaviour for validation and unknown-key analysis.
 - Hardened constructor-bound bindable-property detection to ignore ambiguous types with multiple public parameterized constructors, matching the runtime binder.
+- Hardened `CFG004` and `CFG005` so type-level `ValidationAttribute`s on root or nested options types are treated as DataAnnotations validation.
 - Hardened `CFG006` so `[ConfigurationKeyName]` aliases on settable constructor-bound properties are accepted only when the constructor parameter key is present in the same section.
 - Hardened `CFG006` so `[ConfigurationKeyName]` aliases on settable constructor-bound properties are also accepted when the matching constructor parameter has a default value.
 - Added `CFG006` regression coverage for private-set constructor-bound aliases with and without `BindNonPublicProperties`.

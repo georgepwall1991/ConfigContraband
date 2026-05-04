@@ -1066,6 +1066,37 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_reports_type_level_validation_attribute_without_validate_data_annotations()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateOnStart()|};
+            """, extraUsings: "using System;\n", optionsTypes: """
+            [AttributeUsage(AttributeTargets.Class)]
+            public sealed class ValidStripeOptionsAttribute : ValidationAttribute
+            {
+                protected override ValidationResult IsValid(object value, ValidationContext validationContext)
+                {
+                    return ValidationResult.Success!;
+                }
+            }
+
+            [ValidStripeOptions]
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg004_reports_nested_data_annotations_without_validate_data_annotations()
     {
         var source = OptionsSource("""
@@ -1770,6 +1801,44 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg005_reports_nested_type_level_validation_attribute_without_recursive_validation()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, extraUsings: "using System;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions {|#1:Database|} { get; set; } = new();
+            }
+
+            [AttributeUsage(AttributeTargets.Class)]
+            public sealed class ValidDatabaseOptionsAttribute : ValidationAttribute
+            {
+                protected override ValidationResult IsValid(object value, ValidationContext validationContext)
+                {
+                    return ValidationResult.Success!;
+                }
+            }
+
+            [ValidDatabaseOptions]
+            public sealed class DatabaseOptions
+            {
+                public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg005_reports_bind_get_section_nested_object_without_recursive_validation()
     {
         var source = OptionsSource("""
@@ -1816,6 +1885,44 @@ public sealed class ConfigContrabandAnalyzerTests
             public sealed class ServerOptions
             {
                 [Required]
+                public string Host { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Servers");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_reports_nested_collection_type_level_validation_attribute_without_recursive_validation()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public List<ServerOptions> {|#1:Servers|} { get; set; } = [];
+            }
+
+            [AttributeUsage(AttributeTargets.Class)]
+            public sealed class ValidServerOptionsAttribute : ValidationAttribute
+            {
+                protected override ValidationResult IsValid(object value, ValidationContext validationContext)
+                {
+                    return ValidationResult.Success!;
+                }
+            }
+
+            [ValidServerOptions]
+            public sealed class ServerOptions
+            {
                 public string Host { get; set; } = "";
             }
             """);
