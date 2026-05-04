@@ -812,17 +812,46 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             ImmutableHashSet<string>.Builder methods)
         {
             var declarator = bindInvocation.FirstAncestorOrSelf<VariableDeclaratorSyntax>();
-            if (declarator?.Initializer?.Value is null ||
-                !declarator.Initializer.Value.Span.Contains(bindInvocation.Span) ||
-                declarator.Parent?.Parent is not LocalDeclarationStatementSyntax declarationStatement ||
-                declarationStatement.Parent is not BlockSyntax block ||
-                semanticModel.GetDeclaredSymbol(declarator) is not ILocalSymbol localSymbol)
+            if (declarator?.Initializer?.Value is not null &&
+                declarator.Initializer.Value.Span.Contains(bindInvocation.Span) &&
+                declarator.Parent?.Parent is LocalDeclarationStatementSyntax declarationStatement &&
+                declarationStatement.Parent is BlockSyntax declarationBlock &&
+                semanticModel.GetDeclaredSymbol(declarator) is ILocalSymbol declaredLocalSymbol)
+            {
+                AddSubsequentLocalInvocations(
+                    declarationBlock,
+                    declarationBlock.Statements.IndexOf(declarationStatement) + 1,
+                    declaredLocalSymbol,
+                    semanticModel,
+                    methods);
+                return;
+            }
+
+            if (bindInvocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
+                semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol is not ILocalSymbol receiverLocalSymbol ||
+                bindInvocation.FirstAncestorOrSelf<ExpressionStatementSyntax>() is not ExpressionStatementSyntax expressionStatement ||
+                !expressionStatement.Expression.Span.Contains(bindInvocation.Span) ||
+                expressionStatement.Parent is not BlockSyntax expressionBlock)
             {
                 return;
             }
 
-            var declarationIndex = block.Statements.IndexOf(declarationStatement);
-            for (var i = declarationIndex + 1; i < block.Statements.Count; i++)
+            AddSubsequentLocalInvocations(
+                expressionBlock,
+                expressionBlock.Statements.IndexOf(expressionStatement) + 1,
+                receiverLocalSymbol,
+                semanticModel,
+                methods);
+        }
+
+        private static void AddSubsequentLocalInvocations(
+            BlockSyntax block,
+            int startIndex,
+            ILocalSymbol localSymbol,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            for (var i = startIndex; i < block.Statements.Count; i++)
             {
                 if (block.Statements[i] is not ExpressionStatementSyntax expressionStatement ||
                     expressionStatement.Expression is not InvocationExpressionSyntax invocation ||

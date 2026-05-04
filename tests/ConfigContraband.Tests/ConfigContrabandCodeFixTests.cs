@@ -608,6 +608,50 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg003_fix_appends_validate_on_start_for_later_local_bind_statement_chain()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+                    {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+                    optionsBuilder.ValidateDataAnnotations();
+            """);
+
+        var fixedSource = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+                    optionsBuilder.BindConfiguration("Stripe").ValidateOnStart();
+                    optionsBuilder.ValidateDataAnnotations();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_fix_appends_data_annotations_for_later_local_bind_statement_chain()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+                    {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+                    optionsBuilder.ValidateOnStart();
+            """);
+
+        var fixedSource = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+                    optionsBuilder.BindConfiguration("Stripe").ValidateDataAnnotations();
+                    optionsBuilder.ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg004_fix_preserves_multiline_custom_validation_chain()
     {
         var source = OptionsSource("""
