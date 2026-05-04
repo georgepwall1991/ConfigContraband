@@ -24,6 +24,22 @@ internal static class Verifier
     }
 
     public static async Task VerifyAnalyzerAsync(
+        (string filename, string content)[] sources,
+        (string filename, string content) additionalFile,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateAnalyzerTest();
+        foreach (var source in sources)
+        {
+            test.TestState.Sources.Add(source);
+        }
+
+        test.TestState.AdditionalFiles.Add(additionalFile);
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
+    public static async Task VerifyAnalyzerAsync(
         string source,
         (string filename, string content) additionalFile,
         params DiagnosticResult[] expected)
@@ -112,9 +128,15 @@ internal static class Verifier
 
     private static CSharpAnalyzerTest<ConfigContrabandAnalyzer, DefaultVerifier> CreateAnalyzerTest(string source)
     {
+        var test = CreateAnalyzerTest();
+        test.TestCode = source;
+        return test;
+    }
+
+    private static CSharpAnalyzerTest<ConfigContrabandAnalyzer, DefaultVerifier> CreateAnalyzerTest()
+    {
         return new CSharpAnalyzerTest<ConfigContrabandAnalyzer, DefaultVerifier>
         {
-            TestCode = source,
             ReferenceAssemblies = OptionsReferences
         };
     }

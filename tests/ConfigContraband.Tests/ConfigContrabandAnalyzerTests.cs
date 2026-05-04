@@ -594,6 +594,41 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Analyzer_ignores_generated_file_names()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Strpie")
+                        .ValidateDataAnnotations();
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+            """;
+
+        await Verifier.VerifyAnalyzerAsync(
+            [("GeneratedOptions.g.cs", source)],
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg003_reports_validation_without_validate_on_start()
     {
         var source = OptionsSource("""
