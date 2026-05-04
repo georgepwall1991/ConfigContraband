@@ -41,6 +41,7 @@ internal sealed class OptionsTypeMetadata
                 member.Property,
                 GetConfigurationNames(member.Property, member.IsConstructorBound).ToImmutableArray(),
                 member.IsConstructorBound,
+                member.ConstructorParameterCanUseDefault,
                 HasValidationAttribute(member.Property)));
         }
 
@@ -84,7 +85,7 @@ internal sealed class OptionsTypeMetadata
         {
             if (!property.IsConstructorBound ||
                 !CanBindPropertyAfterConstruction(property.Symbol, _bindsNonPublicProperties) ||
-                !section.TryGetProperty(property.Symbol.Name, out _) ||
+                (!property.ConstructorParameterCanUseDefault && !section.TryGetProperty(property.Symbol.Name, out _)) ||
                 !HasConfigurationAlias(property.Symbol, key))
             {
                 continue;
@@ -219,9 +220,11 @@ internal sealed class OptionsTypeMetadata
         IPropertySymbol property,
         INamedTypeSymbol rootType,
         bool bindsNonPublicProperties,
-        out bool isConstructorBound)
+        out bool isConstructorBound,
+        out bool constructorParameterCanUseDefault)
     {
         isConstructorBound = false;
+        constructorParameterCanUseDefault = false;
         if (property.IsStatic ||
             property.DeclaredAccessibility != Accessibility.Public ||
             property.GetMethod is null ||
@@ -230,18 +233,23 @@ internal sealed class OptionsTypeMetadata
             return false;
         }
 
-        var constructorBound = IsConstructorBoundProperty(property, rootType);
+        var constructorBound = TryGetConstructorBoundProperty(
+            property,
+            rootType,
+            out var constructorParameterCanUseDefaultValue);
         if (property.SetMethod is not null &&
             (property.SetMethod.DeclaredAccessibility == Accessibility.Public ||
              bindsNonPublicProperties))
         {
             isConstructorBound = constructorBound;
+            constructorParameterCanUseDefault = constructorParameterCanUseDefaultValue;
             return true;
         }
 
         if (constructorBound)
         {
             isConstructorBound = true;
+            constructorParameterCanUseDefault = constructorParameterCanUseDefaultValue;
             return true;
         }
 
@@ -258,15 +266,27 @@ internal sealed class OptionsTypeMetadata
     {
         foreach (var property in GetProperties(type))
         {
-            if (IsBindable(property, type, bindsNonPublicProperties, out var isConstructorBound))
+            if (IsBindable(
+                    property,
+                    type,
+                    bindsNonPublicProperties,
+                    out var isConstructorBound,
+                    out var constructorParameterCanUseDefault))
             {
-                yield return new BindablePropertyCandidate(property, isConstructorBound);
+                yield return new BindablePropertyCandidate(
+                    property,
+                    isConstructorBound,
+                    constructorParameterCanUseDefault);
             }
         }
     }
 
-    private static bool IsConstructorBoundProperty(IPropertySymbol property, INamedTypeSymbol rootType)
+    private static bool TryGetConstructorBoundProperty(
+        IPropertySymbol property,
+        INamedTypeSymbol rootType,
+        out bool constructorParameterCanUseDefault)
     {
+        constructorParameterCanUseDefault = false;
         if (rootType.InstanceConstructors.Any(static constructor =>
                 constructor.DeclaredAccessibility == Accessibility.Public &&
                 constructor.Parameters.Length == 0))
@@ -274,6 +294,8 @@ internal sealed class OptionsTypeMetadata
             return false;
         }
 
+        var isConstructorBound = false;
+        var allMatchingConstructorParametersCanUseDefault = true;
         foreach (var constructor in rootType.InstanceConstructors)
         {
             if (constructor.DeclaredAccessibility != Accessibility.Public ||
@@ -287,12 +309,15 @@ internal sealed class OptionsTypeMetadata
             {
                 if (IsConstructorParameterForProperty(parameter, property))
                 {
-                    return true;
+                    isConstructorBound = true;
+                    allMatchingConstructorParametersCanUseDefault &=
+                        CanUseDefaultConstructorParameterValue(parameter);
                 }
             }
         }
 
-        return false;
+        constructorParameterCanUseDefault = isConstructorBound && allMatchingConstructorParametersCanUseDefault;
+        return isConstructorBound;
     }
 
     private static bool TryFindMatchingConstructorProperty(
@@ -321,6 +346,11 @@ internal sealed class OptionsTypeMetadata
                property.Parameters.Length == 0 &&
                string.Equals(parameter.Name, property.Name, StringComparison.OrdinalIgnoreCase) &&
                SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type);
+    }
+
+    private static bool CanUseDefaultConstructorParameterValue(IParameterSymbol parameter)
+    {
+        return parameter.IsOptional || parameter.HasExplicitDefaultValue;
     }
 
     private static IEnumerable<string> GetConfigurationNames(IPropertySymbol property, bool isConstructorBound)
@@ -578,14 +608,19 @@ internal sealed class OptionsTypeMetadata
 
     private readonly struct BindablePropertyCandidate
     {
-        public BindablePropertyCandidate(IPropertySymbol property, bool isConstructorBound)
+        public BindablePropertyCandidate(
+            IPropertySymbol property,
+            bool isConstructorBound,
+            bool constructorParameterCanUseDefault)
         {
             Property = property;
             IsConstructorBound = isConstructorBound;
+            ConstructorParameterCanUseDefault = constructorParameterCanUseDefault;
         }
 
         public IPropertySymbol Property { get; }
         public bool IsConstructorBound { get; }
+        public bool ConstructorParameterCanUseDefault { get; }
     }
 }
 
@@ -595,17 +630,20 @@ internal sealed class BindableProperty
         IPropertySymbol symbol,
         ImmutableArray<string> configurationNames,
         bool isConstructorBound,
+        bool constructorParameterCanUseDefault,
         bool hasValidationAttribute)
     {
         Symbol = symbol;
         ConfigurationNames = configurationNames;
         IsConstructorBound = isConstructorBound;
+        ConstructorParameterCanUseDefault = constructorParameterCanUseDefault;
         HasValidationAttribute = hasValidationAttribute;
     }
 
     public IPropertySymbol Symbol { get; }
     public ImmutableArray<string> ConfigurationNames { get; }
     public bool IsConstructorBound { get; }
+    public bool ConstructorParameterCanUseDefault { get; }
     public bool HasValidationAttribute { get; }
 }
 
