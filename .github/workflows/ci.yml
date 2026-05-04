@@ -29,6 +29,9 @@ jobs:
       - name: Build
         run: dotnet build ConfigContraband.slnx --configuration Release --no-restore
 
+      - name: Verify formatting
+        run: dotnet format ConfigContraband.slnx --verify-no-changes --no-restore --verbosity minimal
+
       - name: Test
         run: dotnet test ConfigContraband.slnx --configuration Release --no-build --logger trx --results-directory TestResults --collect:"XPlat Code Coverage"
 

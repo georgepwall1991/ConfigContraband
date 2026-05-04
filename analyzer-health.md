@@ -59,6 +59,7 @@ The analyzer has a compact, coherent rule set: five diagnostics, four code-fix f
 | 2026-05-04 | 16 | `CFG003`, `CFG004` | Later local binding statements scanned only forward, so adjacent `builder.ValidateDataAnnotations(); builder.BindConfiguration(...); builder.ValidateOnStart();` could still produce a false `CFG004`. | Scan adjacent prior same-local invocation statements before a local binding expression, stopping at unrelated statements, with no-diagnostic, `CFG003`, and break-guard regressions. | Both rules stay at `4.60`, with split-local validation tracking now symmetric around the local bind statement. |
 | 2026-05-04 | 17 | `CFG003`, `CFG004` | Later local binding statements did not read the adjacent builder initializer, so `AddOptionsWithValidateOnStart<T>()` or `.ValidateDataAnnotations()` in the declaration could be ignored before `builder.BindConfiguration(...)`. | Fold recognized initializer invocations into the local chain only when the declaration is still adjacent through same-local statements, with startup, DataAnnotations, diagnostic, and unrelated-statement regressions. | Both rules stay at `4.60`, with split-local startup and DataAnnotations tracking aligned to the documented immediate-chain boundary. |
 | 2026-05-04 | 18 | `CFG003`, `CFG004` | The new pre-bind and initializer local-chain recognition had analyzer coverage but did not yet prove the automatic fixes append to the intended bind invocation without duplicate startup validation. | Added code-fix regressions for pre-bind local validation, initializer `ValidateDataAnnotations()`, and initializer `AddOptionsWithValidateOnStart<TOptions>()` before a later local bind. | Both rules stay at `4.60`, with stronger fix-safety evidence for the expanded local-chain boundary. |
+| 2026-05-04 | 19 | CI | PR CI restored, built, tested, packed, and uploaded coverage, but did not enforce the formatting gate used during local release-grade verification. | Added `dotnet format ConfigContraband.slnx --verify-no-changes --no-restore --verbosity minimal` to CI after build and before tests. | Release confidence improves because formatting drift now fails PR CI instead of relying on local discipline. |
 
 ## Health Baseline
 
@@ -202,7 +203,8 @@ Full local verification:
 
 ```bash
 dotnet test ConfigContraband.slnx --configuration Release
+dotnet format ConfigContraband.slnx --verify-no-changes --no-restore --verbosity minimal
 git diff --check
 ```
 
-CI verification is defined in `.github/workflows/ci.yml` and runs restore, build, test with coverage, pack, test-result upload, and package artifact upload against the SDK from `global.json`.
+CI verification is defined in `.github/workflows/ci.yml` and runs restore, build, formatting verification, test with coverage, pack, test-result upload, and package artifact upload against the SDK from `global.json`.
