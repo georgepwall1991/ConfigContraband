@@ -184,7 +184,7 @@ The analyzer tracks validation calls on the same fluent chain whether they appea
 
 ### `CFG004`: DataAnnotations Must Be Switched On
 
-Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration. Nested options graphs count as well: if a nested object or collection item has DataAnnotations and is part of the bindable options graph, the root registration still needs `ValidateDataAnnotations()`. `IValidatableObject` is also part of DataAnnotations validation, so options types that implement it need the same registration.
+Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration. Nested options graphs count as well: if a nested object or list-style collection item has DataAnnotations and is part of the bindable options graph, including initialized get-only object or collection properties, the root registration still needs `ValidateDataAnnotations()`. `IValidatableObject` is also part of DataAnnotations validation, so options types that implement it need the same registration.
 
 Before:
 
@@ -222,7 +222,7 @@ Like `CFG003`, `CFG004` symbol-checks the framework validation extension methods
 
 ### `CFG005`: Nested Options Need Recursive Validation
 
-DataAnnotations do not automatically walk into child objects or collection items. If a nested class or collection item has validation attributes or implements `IValidatableObject` anywhere in its bindable object graph, mark each parent property that should be checked recursively.
+DataAnnotations do not automatically walk into child objects or collection items. If a nested class or list-style collection item has validation attributes or implements `IValidatableObject` anywhere in its bindable object graph, mark each parent property that should be checked recursively. Initialized get-only object and mutable collection properties count because the configuration binder can populate their existing instances.
 
 Before:
 
@@ -261,7 +261,7 @@ For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumerat
 
 ### `CFG006`: Config Keys Should Match Options Properties
 
-Keys under a bound section should match public bindable properties. If a property uses `[ConfigurationKeyName]`, that configured name replaces the CLR property name for matching. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
+Keys under a bound section should match public bindable properties. Public settable properties are bindable, and initialized get-only object or mutable collection properties are treated as bindable because the runtime binder can populate them. If a property uses `[ConfigurationKeyName]`, that configured name replaces the CLR property name for matching. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
 
 Before:
 

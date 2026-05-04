@@ -903,6 +903,58 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_reports_initialized_get_only_nested_data_annotations_without_validate_data_annotations()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateOnStart()|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                [ValidateObjectMembers]
+                public DatabaseOptions Database { get; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_ignores_uninitialized_get_only_nested_data_annotations()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                [ValidateObjectMembers]
+                public DatabaseOptions Database { get; }
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg004_does_not_report_validatable_object_when_data_annotations_enabled()
     {
         var source = OptionsSource("""
@@ -1041,6 +1093,59 @@ public sealed class ConfigContrabandAnalyzerTests
             .WithArguments("AppOptions", "Database");
 
         await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_reports_initialized_get_only_nested_object_without_recursive_validation()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions {|#1:Database|} { get; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_ignores_uninitialized_get_only_nested_object()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions Database { get; }
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
     }
 
     [Fact]
@@ -2020,6 +2125,49 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_reports_unknown_key_under_initialized_get_only_collection_item_object()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public List<ServerOptions> Servers { get; } = [];
+            }
+
+            public sealed class ServerOptions
+            {
+                public string Host { get; set; } = "";
+
+                public int Port { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 6, 9, 6, 14)
+            .WithArguments("App:Servers:0:Prt", "ServerOptions", ". Did you mean \"Port\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Servers": [
+                  {
+                    "Host": "api",
+                    "Prt": 443
+                  }
+                ]
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_does_not_report_scalar_array_items()
     {
         var source = OptionsSource("""
@@ -2031,6 +2179,35 @@ public sealed class ConfigContrabandAnalyzerTests
             public sealed class AppOptions
             {
                 public string[] AllowedHosts { get; set; } = [];
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "AllowedHosts": [
+                  "api.example.com",
+                  "admin.example.com"
+                ]
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg006_does_not_report_initialized_get_only_scalar_collection_items()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public List<string> AllowedHosts { get; } = [];
             }
             """);
 
@@ -2089,6 +2266,49 @@ public sealed class ConfigContrabandAnalyzerTests
             public sealed class AppOptions
             {
                 public Dictionary<string, ServerOptions> Servers { get; set; } = [];
+            }
+
+            public sealed class ServerOptions
+            {
+                public string Host { get; set; } = "";
+
+                public int Port { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 6, 9, 6, 14)
+            .WithArguments("App:Servers:primary:Prt", "ServerOptions", ". Did you mean \"Port\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Servers": {
+                  "primary": {
+                    "Host": "example.test",
+                    "Prt": 443
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_unknown_key_under_initialized_get_only_dictionary_value_object()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<string, ServerOptions> Servers { get; } = [];
             }
 
             public sealed class ServerOptions

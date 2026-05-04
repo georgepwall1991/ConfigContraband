@@ -188,12 +188,21 @@ internal sealed class OptionsTypeMetadata
 
     private static bool IsBindable(IPropertySymbol property)
     {
-        return !property.IsStatic &&
-               property.DeclaredAccessibility == Accessibility.Public &&
-               property.GetMethod is not null &&
-               property.SetMethod is not null &&
-               property.SetMethod.DeclaredAccessibility == Accessibility.Public &&
-               property.Parameters.Length == 0;
+        if (property.IsStatic ||
+            property.DeclaredAccessibility != Accessibility.Public ||
+            property.GetMethod is null ||
+            property.Parameters.Length != 0)
+        {
+            return false;
+        }
+
+        if (property.SetMethod is not null)
+        {
+            return property.SetMethod.DeclaredAccessibility == Accessibility.Public;
+        }
+
+        return HasPropertyInitializer(property) &&
+               (IsPotentialNestedObject(property.Type) || IsMutableCollectionType(property.Type));
     }
 
     private static IEnumerable<IPropertySymbol> GetBindableProperties(INamedTypeSymbol type)
@@ -311,6 +320,39 @@ internal sealed class OptionsTypeMetadata
         return type.TypeKind == TypeKind.Class &&
                type.SpecialType != SpecialType.System_String &&
                !IsSystemNamespace(type.ContainingNamespace);
+    }
+
+    private static bool HasPropertyInitializer(IPropertySymbol property)
+    {
+        return property.DeclaringSyntaxReferences
+            .Select(reference => reference.GetSyntax())
+            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.PropertyDeclarationSyntax>()
+            .Any(declaration => declaration.Initializer is not null);
+    }
+
+    private static bool IsMutableCollectionType(ITypeSymbol type)
+    {
+        if (type is not INamedTypeSymbol namedType)
+        {
+            return false;
+        }
+
+        foreach (var iface in namedType.AllInterfaces.Concat(new[] { namedType }))
+        {
+            if (!iface.IsGenericType)
+            {
+                continue;
+            }
+
+            var originalDefinition = iface.OriginalDefinition.ToDisplayString();
+            if (originalDefinition == "System.Collections.Generic.ICollection<T>" ||
+                originalDefinition == "System.Collections.Generic.IDictionary<TKey, TValue>")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsSystemNamespace(INamespaceSymbol containingNamespace)
