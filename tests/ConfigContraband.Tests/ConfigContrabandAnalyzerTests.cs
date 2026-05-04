@@ -1160,6 +1160,57 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_and_cfg004_honor_validation_before_later_local_bind_statement()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.ValidateDataAnnotations();
+            optionsBuilder.BindConfiguration("Stripe");
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_validation_before_later_local_bind_statement_without_validate_on_start()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.ValidateDataAnnotations();
+            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_stops_later_local_bind_statement_prior_scan_at_unrelated_statement()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.ValidateDataAnnotations();
+            Validate(optionsBuilder);
+            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            optionsBuilder.ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", extraMembers: """
+            private static void Validate(OptionsBuilder<StripeOptions> optionsBuilder)
+            {
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_split_custom_validation_without_validate_on_start()
     {
         var source = OptionsSource("""

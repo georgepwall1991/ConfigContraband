@@ -836,12 +836,38 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-            AddSubsequentLocalInvocations(
+            var expressionIndex = expressionBlock.Statements.IndexOf(expressionStatement);
+            AddPreviousLocalInvocations(
                 expressionBlock,
-                expressionBlock.Statements.IndexOf(expressionStatement) + 1,
+                expressionIndex - 1,
                 receiverLocalSymbol,
                 semanticModel,
                 methods);
+
+            AddSubsequentLocalInvocations(
+                expressionBlock,
+                expressionIndex + 1,
+                receiverLocalSymbol,
+                semanticModel,
+                methods);
+        }
+
+        private static void AddPreviousLocalInvocations(
+            BlockSyntax block,
+            int startIndex,
+            ILocalSymbol localSymbol,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            for (var i = startIndex; i >= 0; i--)
+            {
+                if (block.Statements[i] is not ExpressionStatementSyntax expressionStatement ||
+                    expressionStatement.Expression is not InvocationExpressionSyntax invocation ||
+                    !TryCollectLocalInvocationChain(invocation, localSymbol, semanticModel, methods))
+                {
+                    break;
+                }
+            }
         }
 
         private static void AddSubsequentLocalInvocations(

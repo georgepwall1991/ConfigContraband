@@ -89,6 +89,8 @@ optionsBuilder.ValidateDataAnnotations();
 optionsBuilder.ValidateOnStart();
 ```
 
+Adjacent validation calls on that same local builder may appear before or after the bind statement. The scan stops at unrelated statements instead of guessing across wider control flow.
+
 When the analyzer cannot prove a configuration shape statically, it stays quiet. The goal is high-signal feedback, not noisy guesses.
 
 ## Rules
@@ -187,7 +189,7 @@ services.AddOptions<StripeOptions>()
     .ValidateOnStart();
 ```
 
-The analyzer tracks validation calls on the same fluent chain whether they appear before or after the binding call. The code fix appends `ValidateOnStart()` in the same style as the existing registration chain, including multiline chains and immediate same-block local `OptionsBuilder<T>` chains where binding happens in the initializer or a later local statement. Registrations that start with `AddOptionsWithValidateOnStart<TOptions>()` already run validation at startup, so `CFG003` stays quiet for that shape.
+The analyzer tracks validation calls on the same fluent chain whether they appear before or after the binding call. The code fix appends `ValidateOnStart()` in the same style as the existing registration chain, including multiline chains and immediate same-block local `OptionsBuilder<T>` chains where binding happens in the initializer or a later local statement. For later local bind statements, adjacent validation calls on the same local are recognized before and after the bind. Registrations that start with `AddOptionsWithValidateOnStart<TOptions>()` already run validation at startup, so `CFG003` stays quiet for that shape.
 
 `CFG003` only treats the framework `OptionsBuilder<TOptions>.Validate(...)`, `ValidateDataAnnotations()`, and `ValidateOnStart()` APIs as validation signals. Custom extension methods with the same names are ignored unless they call the framework APIs in a shape the analyzer can see.
 
