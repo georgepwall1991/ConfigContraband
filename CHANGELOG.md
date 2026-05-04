@@ -12,6 +12,7 @@ All notable changes to ConfigContraband will be documented in this file.
 - Added code-fix regression coverage for the expanded split local validation-chain shapes, including pre-bind validation and initializer startup validation.
 - Added formatting verification to PR CI so whitespace and formatter drift fail before merge.
 - Added formatting verification to the NuGet publish workflow so release packaging uses the same formatter gate as PR CI.
+- Added regression coverage proving analyzer diagnostics stay quiet in generated source files.
 - Hardened `BindNonPublicProperties` handling so explicit binder options make private-set options properties visible to validation and unknown-key analysis.
 - Hardened bindable-property detection so initialized get-only object, collection, and dictionary properties align with the runtime configuration binder.
 - Hardened `CFG004` so nested object graphs that contain DataAnnotations still require `ValidateDataAnnotations()` even when the root options type has no direct annotations.
