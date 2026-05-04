@@ -296,11 +296,19 @@ internal sealed class OptionsTypeMetadata
 
         var isConstructorBound = false;
         var allMatchingConstructorParametersCanUseDefault = true;
-        foreach (var constructor in rootType.InstanceConstructors)
+        var bindableConstructors = rootType.InstanceConstructors
+            .Where(static constructor =>
+                constructor.DeclaredAccessibility == Accessibility.Public &&
+                constructor.Parameters.Length > 0)
+            .ToArray();
+        if (bindableConstructors.Length != 1)
         {
-            if (constructor.DeclaredAccessibility != Accessibility.Public ||
-                constructor.Parameters.Length == 0 ||
-                !constructor.Parameters.All(parameter => TryFindMatchingConstructorProperty(rootType, parameter, out _)))
+            return false;
+        }
+
+        foreach (var constructor in bindableConstructors)
+        {
+            if (!constructor.Parameters.All(parameter => TryFindMatchingConstructorProperty(rootType, parameter, out _)))
             {
                 continue;
             }
