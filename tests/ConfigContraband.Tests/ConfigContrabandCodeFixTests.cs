@@ -898,6 +898,49 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg005_fix_adds_validate_object_members_to_constructor_bound_record_property()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, optionsTypes: """
+            public sealed record AppOptions(DatabaseOptions {|#1:Database|});
+
+            public sealed record DatabaseOptions([property: Required] string ConnectionString);
+            """);
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+                }
+            }
+
+            public sealed record AppOptions([property: ValidateObjectMembers] DatabaseOptions Database);
+
+            public sealed record DatabaseOptions([property: Required] string ConnectionString);
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg005_fix_adds_validate_object_members_to_private_set_property_when_bind_non_public_properties_enabled()
     {
         var source = OptionsSource("""
@@ -1501,6 +1544,90 @@ public sealed class ConfigContrabandCodeFixTests
                     [Required]
                     public string ConnectionString { get; set; } = "";
                 }
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyCodeFixAsync(
+            [
+                ("Startup.cs", startupSource),
+                ("Options.cs", optionsSource)
+            ],
+            [
+                ("Startup.cs", fixedStartupSource),
+                ("Options.cs", fixedOptionsSource)
+            ],
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_fix_qualifies_constructor_bound_attribute_when_local_attribute_name_conflicts()
+    {
+        var startupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    {|#0:services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart()|};
+                }
+            }
+            """;
+
+        var optionsSource = """
+            namespace MyApp
+            {
+                using System;
+                using System.ComponentModel.DataAnnotations;
+
+                public sealed class ValidateObjectMembersAttribute : Attribute
+                {
+                }
+
+                public sealed record AppOptions(DatabaseOptions {|#1:Database|});
+
+                public sealed record DatabaseOptions([property: Required] string ConnectionString);
+            }
+            """;
+
+        var fixedStartupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+            """;
+
+        var fixedOptionsSource = """
+            namespace MyApp
+            {
+                using System;
+                using System.ComponentModel.DataAnnotations;
+
+                public sealed class ValidateObjectMembersAttribute : Attribute
+                {
+                }
+
+                public sealed record AppOptions([property: global::Microsoft.Extensions.Options.ValidateObjectMembersAttribute] DatabaseOptions Database);
+
+                public sealed record DatabaseOptions([property: Required] string ConnectionString);
             }
             """;
 

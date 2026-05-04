@@ -273,17 +273,44 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             return document.Project.Solution;
         }
 
-        var property = root.FindNode(location.SourceSpan).FirstAncestorOrSelf<PropertyDeclarationSyntax>();
-        if (property is null)
-        {
-            return document.Project.Solution;
-        }
+        var targetNode = root.FindNode(location.SourceSpan, getInnermostNodeForTie: true);
 
         var semanticModel = await targetDocument.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
-        var attributeSyntaxName = ShouldFullyQualifyRecursiveAttribute(property, semanticModel, attributeName)
+        var targetPosition = targetNode.SpanStart;
+        var attributeSyntaxName = ShouldFullyQualifyRecursiveAttribute(targetPosition, semanticModel, attributeName)
             ? $"global::Microsoft.Extensions.Options.{attributeName}Attribute"
             : attributeName;
 
+        if (targetNode.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { } property)
+        {
+            return AddRecursiveValidationAttributeToProperty(
+                targetDocument,
+                root,
+                property,
+                attributeSyntaxName,
+                attributeName);
+        }
+
+        if (targetNode.FirstAncestorOrSelf<ParameterSyntax>() is { } parameter)
+        {
+            return AddRecursiveValidationAttributeToParameter(
+                targetDocument,
+                root,
+                parameter,
+                attributeSyntaxName,
+                attributeName);
+        }
+
+        return document.Project.Solution;
+    }
+
+    private static Solution AddRecursiveValidationAttributeToProperty(
+        Document targetDocument,
+        SyntaxNode root,
+        PropertyDeclarationSyntax property,
+        string attributeSyntaxName,
+        string attributeName)
+    {
         var propertyLeadingTrivia = property.GetLeadingTrivia();
         var attributeList = SyntaxFactory.AttributeList(
                 SyntaxFactory.SingletonSeparatedList(
@@ -316,8 +343,45 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             updatedRoot.ReplaceNode(currentProperty, updatedProperty));
     }
 
+    private static Solution AddRecursiveValidationAttributeToParameter(
+        Document targetDocument,
+        SyntaxNode root,
+        ParameterSyntax parameter,
+        string attributeSyntaxName,
+        string attributeName)
+    {
+        var attributeList = SyntaxFactory.AttributeList(
+                SyntaxFactory.AttributeTargetSpecifier(SyntaxFactory.Token(SyntaxKind.PropertyKeyword)),
+                SyntaxFactory.SingletonSeparatedList(
+                    SyntaxFactory.Attribute(SyntaxFactory.ParseName(attributeSyntaxName))))
+            .WithTrailingTrivia(SyntaxFactory.Space);
+
+        var updatedRoot = root.TrackNodes(parameter);
+        if (attributeSyntaxName == attributeName)
+        {
+            updatedRoot = EnsureUsing(
+                updatedRoot,
+                parameter,
+                "Microsoft.Extensions.Options");
+        }
+
+        var currentParameter = updatedRoot.GetCurrentNode(parameter);
+        if (currentParameter is null)
+        {
+            return targetDocument.Project.Solution.WithDocumentSyntaxRoot(targetDocument.Id, updatedRoot);
+        }
+
+        var updatedParameter = currentParameter
+            .WithAttributeLists(currentParameter.AttributeLists.Insert(0, attributeList))
+            .WithAdditionalAnnotations(Formatter.Annotation);
+
+        return targetDocument.Project.Solution.WithDocumentSyntaxRoot(
+            targetDocument.Id,
+            updatedRoot.ReplaceNode(currentParameter, updatedParameter));
+    }
+
     private static bool ShouldFullyQualifyRecursiveAttribute(
-        PropertyDeclarationSyntax property,
+        int position,
         SemanticModel? semanticModel,
         string attributeName)
     {
@@ -327,8 +391,8 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         }
 
         var expectedMetadataName = $"Microsoft.Extensions.Options.{attributeName}Attribute";
-        return HasConflictingTypeInScope(semanticModel, property.SpanStart, attributeName, expectedMetadataName) ||
-               HasConflictingTypeInScope(semanticModel, property.SpanStart, attributeName + "Attribute", expectedMetadataName);
+        return HasConflictingTypeInScope(semanticModel, position, attributeName, expectedMetadataName) ||
+               HasConflictingTypeInScope(semanticModel, position, attributeName + "Attribute", expectedMetadataName);
     }
 
     private static bool HasConflictingTypeInScope(
@@ -348,18 +412,34 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         PropertyDeclarationSyntax property,
         string namespaceName)
     {
+        return EnsureUsing(root, (SyntaxNode)property, namespaceName);
+    }
+
+    private static SyntaxNode EnsureUsing(
+        SyntaxNode root,
+        ParameterSyntax parameter,
+        string namespaceName)
+    {
+        return EnsureUsing(root, (SyntaxNode)parameter, namespaceName);
+    }
+
+    private static SyntaxNode EnsureUsing(
+        SyntaxNode root,
+        SyntaxNode target,
+        string namespaceName)
+    {
         if (root is not CompilationUnitSyntax compilationUnit)
         {
             return root;
         }
 
-        var currentProperty = root.GetCurrentNode(property);
-        if (currentProperty is null)
+        var currentTarget = root.GetCurrentNode(target);
+        if (currentTarget is null)
         {
             return root;
         }
 
-        var namespaceAncestors = currentProperty
+        var namespaceAncestors = currentTarget
             .Ancestors()
             .OfType<BaseNamespaceDeclarationSyntax>()
             .ToArray();

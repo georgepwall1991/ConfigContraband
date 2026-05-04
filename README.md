@@ -268,7 +268,7 @@ public sealed class DatabaseOptions
 }
 ```
 
-For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. Constructor-bound nested records/classes are included when their public constructor parameters map to public properties. The code fix updates the file that owns the options property, adds `using Microsoft.Extensions.Options;` when needed, respects namespace-local using blocks, avoids project-local attribute name conflicts, and keeps existing property comments in place. `CFG005` does not report interface-typed nested properties or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
+For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. Constructor-bound nested records/classes are included when their public constructor parameters map to public properties. The code fix updates the file that owns the options property, uses a `property:` attribute target for record constructor parameters, adds `using Microsoft.Extensions.Options;` when needed, respects namespace-local using blocks, avoids project-local attribute name conflicts, and keeps existing property comments in place. `CFG005` does not report interface-typed nested properties or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
 
 ### `CFG006`: Config Keys Should Match Options Properties
 
