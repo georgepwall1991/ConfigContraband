@@ -38,9 +38,9 @@ internal sealed class OptionsTypeMetadata
         foreach (var member in GetBindableProperties(type, bindsNonPublicProperties))
         {
             properties.Add(new BindableProperty(
-                member,
-                GetConfigurationNames(member).ToImmutableArray(),
-                HasValidationAttribute(member)));
+                member.Property,
+                GetConfigurationNames(member.Property, member.IsConstructorBound).ToImmutableArray(),
+                HasValidationAttribute(member.Property)));
         }
 
         return new OptionsTypeMetadata(
@@ -191,8 +191,13 @@ internal sealed class OptionsTypeMetadata
         Create(namedType, bindsNonPublicProperties).AddNestedValidationCandidates(builder, visited);
     }
 
-    private static bool IsBindable(IPropertySymbol property, bool bindsNonPublicProperties)
+    private static bool IsBindable(
+        IPropertySymbol property,
+        INamedTypeSymbol rootType,
+        bool bindsNonPublicProperties,
+        out bool isConstructorBound)
     {
+        isConstructorBound = false;
         if (property.IsStatic ||
             property.DeclaredAccessibility != Accessibility.Public ||
             property.GetMethod is null ||
@@ -201,32 +206,111 @@ internal sealed class OptionsTypeMetadata
             return false;
         }
 
-        if (property.SetMethod is not null)
+        var constructorBound = IsConstructorBoundProperty(property, rootType);
+        if (property.SetMethod is not null &&
+            (property.SetMethod.DeclaredAccessibility == Accessibility.Public ||
+             bindsNonPublicProperties))
         {
-            return property.SetMethod.DeclaredAccessibility == Accessibility.Public ||
-                   bindsNonPublicProperties;
+            isConstructorBound = constructorBound;
+            return true;
         }
 
-        return HasPropertyInitializer(property) &&
-               (IsPotentialNestedObject(property.Type) || IsMutableCollectionType(property.Type));
+        if (constructorBound)
+        {
+            isConstructorBound = true;
+            return true;
+        }
+
+        if (HasPropertyInitializer(property) &&
+            (IsPotentialNestedObject(property.Type) || IsMutableCollectionType(property.Type)))
+        {
+            return true;
+        }
+
+        return false;
     }
 
-    private static IEnumerable<IPropertySymbol> GetBindableProperties(INamedTypeSymbol type, bool bindsNonPublicProperties)
+    private static IEnumerable<BindablePropertyCandidate> GetBindableProperties(INamedTypeSymbol type, bool bindsNonPublicProperties)
     {
         for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
         {
             foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
             {
-                if (IsBindable(property, bindsNonPublicProperties))
+                if (IsBindable(property, type, bindsNonPublicProperties, out var isConstructorBound))
                 {
-                    yield return property;
+                    yield return new BindablePropertyCandidate(property, isConstructorBound);
                 }
             }
         }
     }
 
-    private static IEnumerable<string> GetConfigurationNames(IPropertySymbol property)
+    private static bool IsConstructorBoundProperty(IPropertySymbol property, INamedTypeSymbol rootType)
     {
+        if (!SymbolEqualityComparer.Default.Equals(property.ContainingType, rootType) ||
+            rootType.InstanceConstructors.Any(static constructor =>
+                constructor.DeclaredAccessibility == Accessibility.Public &&
+                constructor.Parameters.Length == 0))
+        {
+            return false;
+        }
+
+        foreach (var constructor in rootType.InstanceConstructors)
+        {
+            if (constructor.DeclaredAccessibility != Accessibility.Public ||
+                constructor.Parameters.Length == 0 ||
+                !constructor.Parameters.All(parameter => TryFindMatchingConstructorProperty(rootType, parameter, out _)))
+            {
+                continue;
+            }
+
+            foreach (var parameter in constructor.Parameters)
+            {
+                if (IsConstructorParameterForProperty(parameter, property))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryFindMatchingConstructorProperty(
+        INamedTypeSymbol type,
+        IParameterSymbol parameter,
+        out IPropertySymbol property)
+    {
+        foreach (var candidate in type.GetMembers().OfType<IPropertySymbol>())
+        {
+            if (IsConstructorParameterForProperty(parameter, candidate))
+            {
+                property = candidate;
+                return true;
+            }
+        }
+
+        property = null!;
+        return false;
+    }
+
+    private static bool IsConstructorParameterForProperty(IParameterSymbol parameter, IPropertySymbol property)
+    {
+        return !property.IsStatic &&
+               property.DeclaredAccessibility == Accessibility.Public &&
+               property.GetMethod is not null &&
+               property.Parameters.Length == 0 &&
+               string.Equals(parameter.Name, property.Name, StringComparison.OrdinalIgnoreCase) &&
+               SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type);
+    }
+
+    private static IEnumerable<string> GetConfigurationNames(IPropertySymbol property, bool isConstructorBound)
+    {
+        if (isConstructorBound)
+        {
+            yield return property.Name;
+            yield break;
+        }
+
         var hasAlias = false;
         foreach (var attribute in property.GetAttributes())
         {
@@ -271,8 +355,9 @@ internal sealed class OptionsTypeMetadata
             return true;
         }
 
-        foreach (var property in GetBindableProperties(namedType, bindsNonPublicProperties))
+        foreach (var candidate in GetBindableProperties(namedType, bindsNonPublicProperties))
         {
+            var property = candidate.Property;
             if (HasValidationAttribute(property))
             {
                 return true;
@@ -425,6 +510,18 @@ internal sealed class OptionsTypeMetadata
 
         valueType = null!;
         return false;
+    }
+
+    private readonly struct BindablePropertyCandidate
+    {
+        public BindablePropertyCandidate(IPropertySymbol property, bool isConstructorBound)
+        {
+            Property = property;
+            IsConstructorBound = isConstructorBound;
+        }
+
+        public IPropertySymbol Property { get; }
+        public bool IsConstructorBound { get; }
     }
 }
 

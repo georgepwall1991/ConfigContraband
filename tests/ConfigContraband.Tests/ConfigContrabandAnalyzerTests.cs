@@ -771,6 +771,24 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_reports_constructor_bound_data_annotations_without_validate_data_annotations()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateOnStart()|};
+            """, optionsTypes: """
+            public sealed record StripeOptions([property: Required] string ApiKey);
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg004_does_not_treat_custom_validate_data_annotations_extension_as_data_annotations_validation()
     {
         var source = OptionsSource("""
@@ -1405,6 +1423,28 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg005_reports_constructor_bound_nested_object_without_recursive_validation()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, optionsTypes: """
+            public sealed record AppOptions(DatabaseOptions {|#1:Database|});
+
+            public sealed record DatabaseOptions([property: Required] string ConnectionString);
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg005_ignores_uninitialized_get_only_nested_object()
     {
         var source = OptionsSource("""
@@ -2028,6 +2068,125 @@ public sealed class ConfigContrabandAnalyzerTests
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
             .WithSpan("appsettings.json", 3, 5, 3, 13)
             .WithArguments("Stripe:ApiKey", "StripeOptions", ". Did you mean \"api_key\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_does_not_report_constructor_bound_record_property()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed record StripeOptions(string ApiKey);
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg006_does_not_report_nested_constructor_bound_record_property()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed record AppOptions(DatabaseOptions Database);
+
+            public sealed record DatabaseOptions(string ConnectionString);
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Database": {
+                  "ConnectionString": "Server=.;"
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_configuration_key_name_alias_on_constructor_bound_property()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public sealed record StripeOptions([property: ConfigurationKeyName("api_key")] string ApiKey);
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 3, 5, 3, 14)
+            .WithArguments("Stripe:api_key", "StripeOptions", ". Did you mean \"ApiKey\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "api_key": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_get_only_property_when_public_parameterless_constructor_wins()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class StripeOptions
+            {
+                public StripeOptions()
+                {
+                    ApiKey = "";
+                }
+
+                public StripeOptions(string apiKey)
+                {
+                    ApiKey = apiKey;
+                }
+
+                public string ApiKey { get; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 3, 5, 3, 13)
+            .WithArguments("Stripe:ApiKey", "StripeOptions", ".");
 
         await Verifier.VerifyAnalyzerAsync(
             source,

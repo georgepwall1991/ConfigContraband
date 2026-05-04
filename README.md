@@ -195,7 +195,7 @@ The analyzer tracks validation calls on the same fluent chain whether they appea
 
 ### `CFG004`: DataAnnotations Must Be Switched On
 
-Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration. Nested options graphs count as well: if a nested object or list-style collection item has DataAnnotations and is part of the bindable options graph, including initialized get-only object or collection properties, the root registration still needs `ValidateDataAnnotations()`. If a binding call explicitly sets `BindNonPublicProperties = true`, public properties with private setters are counted too. `IValidatableObject` is also part of DataAnnotations validation, so options types that implement it need the same registration.
+Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration. Nested options graphs count as well: if a nested object or list-style collection item has DataAnnotations and is part of the bindable options graph, including constructor-bound records/classes or initialized get-only object or collection properties, the root registration still needs `ValidateDataAnnotations()`. If a binding call explicitly sets `BindNonPublicProperties = true`, public properties with private setters are counted too. `IValidatableObject` is also part of DataAnnotations validation, so options types that implement it need the same registration.
 
 Before:
 
@@ -268,11 +268,11 @@ public sealed class DatabaseOptions
 }
 ```
 
-For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. The code fix updates the file that owns the options property, adds `using Microsoft.Extensions.Options;` when needed, respects namespace-local using blocks, avoids project-local attribute name conflicts, and keeps existing property comments in place. `CFG005` does not report interface-typed nested properties or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
+For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. Constructor-bound nested records/classes are included when their public constructor parameters map to public properties. The code fix updates the file that owns the options property, adds `using Microsoft.Extensions.Options;` when needed, respects namespace-local using blocks, avoids project-local attribute name conflicts, and keeps existing property comments in place. `CFG005` does not report interface-typed nested properties or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
 
 ### `CFG006`: Config Keys Should Match Options Properties
 
-Keys under a bound section should match public bindable properties. Public settable properties are bindable, and initialized get-only object or mutable collection properties are treated as bindable because the runtime binder can populate them. Public private-set properties are treated as bindable only when the registration explicitly sets `BindNonPublicProperties = true`. If a property uses `[ConfigurationKeyName]`, that configured name replaces the CLR property name for matching. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
+Keys under a bound section should match public bindable properties. Public settable properties are bindable, constructor-bound records/classes are bindable when public constructor parameters map to public properties, and initialized get-only object or mutable collection properties are treated as bindable because the runtime binder can populate them. Public private-set properties are treated as bindable only when the registration explicitly sets `BindNonPublicProperties = true`. If a property-bound option uses `[ConfigurationKeyName]`, that configured name replaces the CLR property name for matching. Constructor-bound properties use constructor parameter keys, matching the runtime binder. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
 
 Before:
 
@@ -326,7 +326,7 @@ ConfigContraband currently focuses on:
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
 - Direct `Configure<T>(configuration.GetSection("Section"))` registrations for section and JSON-key drift.
 - String-literal section names.
-- Public bindable properties on options types, including inherited bindable properties.
+- Public bindable properties on options types, including inherited and constructor-bound bindable properties.
 - `[ConfigurationKeyName]` key-name overrides.
 - Normal fluent chains and immediate same-block local `OptionsBuilder<T>` chains.
 
