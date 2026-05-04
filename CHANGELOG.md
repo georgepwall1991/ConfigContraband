@@ -12,6 +12,7 @@ All notable changes to ConfigContraband will be documented in this file.
 - Added code-fix regression coverage for the expanded split local validation-chain shapes, including pre-bind validation and initializer startup validation.
 - Added formatting verification to PR CI so whitespace and formatter drift fail before merge.
 - Added formatting verification to the NuGet publish workflow so release packaging uses the same formatter gate as PR CI.
+- Synced analyzer release tracking so diagnostics shipped since `0.1.0` are recorded in `AnalyzerReleases.Shipped.md` instead of remaining marked as unshipped.
 - Added regression coverage proving analyzer diagnostics stay quiet in generated source files.
 - Added regression coverage proving analyzer diagnostics stay quiet in generated `.g.cs` source files.
 - Hardened `BindNonPublicProperties` handling so explicit binder options make private-set options properties visible to validation and unknown-key analysis.
