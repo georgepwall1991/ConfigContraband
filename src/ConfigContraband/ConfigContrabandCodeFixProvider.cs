@@ -120,10 +120,68 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
 
         var replacement = SyntaxFactory.LiteralExpression(
                 SyntaxKind.StringLiteralExpression,
-                SyntaxFactory.Literal(suggestion))
+                CreateReplacementStringLiteral(expression, suggestion))
             .WithTriviaFrom(expression);
 
         return document.WithSyntaxRoot(root.ReplaceNode(expression, replacement));
+    }
+
+    private static SyntaxToken CreateReplacementStringLiteral(ExpressionSyntax expression, string suggestion)
+    {
+        if (expression is not LiteralExpressionSyntax literalExpression ||
+            !literalExpression.IsKind(SyntaxKind.StringLiteralExpression))
+        {
+            return SyntaxFactory.Literal(suggestion);
+        }
+
+        var tokenText = literalExpression.Token.Text;
+        if (tokenText.StartsWith("@\"", StringComparison.Ordinal))
+        {
+            return SyntaxFactory.Literal("@\"" + suggestion.Replace("\"", "\"\"") + "\"", suggestion);
+        }
+
+        if (TryGetRawStringDelimiterLength(tokenText, out var delimiterLength))
+        {
+            var delimiter = new string('"', Math.Max(delimiterLength, LongestQuoteRun(suggestion) + 1));
+            return SyntaxFactory.Token(
+                SyntaxTriviaList.Empty,
+                SyntaxKind.SingleLineRawStringLiteralToken,
+                delimiter + suggestion + delimiter,
+                suggestion,
+                SyntaxTriviaList.Empty);
+        }
+
+        return SyntaxFactory.Literal(suggestion);
+    }
+
+    private static bool TryGetRawStringDelimiterLength(string tokenText, out int delimiterLength)
+    {
+        delimiterLength = 0;
+        while (delimiterLength < tokenText.Length && tokenText[delimiterLength] == '"')
+        {
+            delimiterLength++;
+        }
+
+        return delimiterLength >= 3;
+    }
+
+    private static int LongestQuoteRun(string value)
+    {
+        var longest = 0;
+        var current = 0;
+        foreach (var ch in value)
+        {
+            if (ch == '"')
+            {
+                current++;
+                longest = Math.Max(longest, current);
+                continue;
+            }
+
+            current = 0;
+        }
+
+        return longest;
     }
 
     private static async Task<Document> AppendInvocationsAsync(
@@ -221,33 +279,93 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             return document.Project.Solution;
         }
 
+        var semanticModel = await targetDocument.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+        var attributeSyntaxName = ShouldFullyQualifyRecursiveAttribute(property, semanticModel, attributeName)
+            ? $"global::Microsoft.Extensions.Options.{attributeName}Attribute"
+            : attributeName;
+
         var propertyLeadingTrivia = property.GetLeadingTrivia();
         var attributeList = SyntaxFactory.AttributeList(
                 SyntaxFactory.SingletonSeparatedList(
-                    SyntaxFactory.Attribute(SyntaxFactory.ParseName(attributeName))))
+                    SyntaxFactory.Attribute(SyntaxFactory.ParseName(attributeSyntaxName))))
             .WithLeadingTrivia(propertyLeadingTrivia)
             .WithTrailingTrivia(SyntaxFactory.ElasticLineFeed);
 
-        var updatedProperty = property
+        var updatedRoot = root.TrackNodes(property);
+        if (attributeSyntaxName == attributeName)
+        {
+            updatedRoot = EnsureUsing(
+                updatedRoot,
+                property,
+                "Microsoft.Extensions.Options");
+        }
+
+        var currentProperty = updatedRoot.GetCurrentNode(property);
+        if (currentProperty is null)
+        {
+            return targetDocument.Project.Solution.WithDocumentSyntaxRoot(targetDocument.Id, updatedRoot);
+        }
+
+        var updatedProperty = currentProperty
             .WithLeadingTrivia(SyntaxTriviaList.Empty)
-            .WithAttributeLists(property.AttributeLists.Insert(0, attributeList))
+            .WithAttributeLists(currentProperty.AttributeLists.Insert(0, attributeList))
             .WithAdditionalAnnotations(Formatter.Annotation);
 
-        var updatedRoot = root.ReplaceNode(property, updatedProperty);
-        updatedRoot = EnsureUsing(updatedRoot, "Microsoft.Extensions.Options");
-
-        return targetDocument.Project.Solution.WithDocumentSyntaxRoot(targetDocument.Id, updatedRoot);
+        return targetDocument.Project.Solution.WithDocumentSyntaxRoot(
+            targetDocument.Id,
+            updatedRoot.ReplaceNode(currentProperty, updatedProperty));
     }
 
-    private static SyntaxNode EnsureUsing(SyntaxNode root, string namespaceName)
+    private static bool ShouldFullyQualifyRecursiveAttribute(
+        PropertyDeclarationSyntax property,
+        SemanticModel? semanticModel,
+        string attributeName)
+    {
+        if (semanticModel is null)
+        {
+            return false;
+        }
+
+        var expectedMetadataName = $"Microsoft.Extensions.Options.{attributeName}Attribute";
+        return HasConflictingTypeInScope(semanticModel, property.SpanStart, attributeName, expectedMetadataName) ||
+               HasConflictingTypeInScope(semanticModel, property.SpanStart, attributeName + "Attribute", expectedMetadataName);
+    }
+
+    private static bool HasConflictingTypeInScope(
+        SemanticModel semanticModel,
+        int position,
+        string name,
+        string expectedMetadataName)
+    {
+        return semanticModel
+            .LookupSymbols(position, name: name)
+            .OfType<INamedTypeSymbol>()
+            .Any(symbol => !string.Equals(symbol.ToDisplayString(), expectedMetadataName, StringComparison.Ordinal));
+    }
+
+    private static SyntaxNode EnsureUsing(
+        SyntaxNode root,
+        PropertyDeclarationSyntax property,
+        string namespaceName)
     {
         if (root is not CompilationUnitSyntax compilationUnit)
         {
             return root;
         }
 
-        if (compilationUnit.Usings.Any(usingDirective =>
-                string.Equals(usingDirective.Name?.ToString(), namespaceName, StringComparison.Ordinal)))
+        var currentProperty = root.GetCurrentNode(property);
+        if (currentProperty is null)
+        {
+            return root;
+        }
+
+        var namespaceAncestors = currentProperty
+            .Ancestors()
+            .OfType<BaseNamespaceDeclarationSyntax>()
+            .ToArray();
+
+        if (HasUsing(compilationUnit.Usings, namespaceName) ||
+            namespaceAncestors.Any(namespaceDeclaration => HasUsing(namespaceDeclaration.Usings, namespaceName)))
         {
             return root;
         }
@@ -255,6 +373,22 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         var usingDirective = SyntaxFactory.UsingDirective(SyntaxFactory.ParseName(namespaceName))
             .WithTrailingTrivia(SyntaxFactory.ElasticLineFeed);
 
+        var namespaceWithUsings = namespaceAncestors.FirstOrDefault(namespaceDeclaration => namespaceDeclaration.Usings.Count > 0);
+        if (namespaceWithUsings is not null)
+        {
+            return root.ReplaceNode(
+                namespaceWithUsings,
+                namespaceWithUsings.WithUsings(namespaceWithUsings.Usings.Add(usingDirective)));
+        }
+
         return compilationUnit.WithUsings(compilationUnit.Usings.Add(usingDirective));
+    }
+
+    private static bool HasUsing(SyntaxList<UsingDirectiveSyntax> usings, string namespaceName)
+    {
+        return usings.Any(usingDirective =>
+            usingDirective.Alias is null &&
+            !usingDirective.StaticKeyword.IsKind(SyntaxKind.StaticKeyword) &&
+            string.Equals(usingDirective.Name?.ToString(), namespaceName, StringComparison.Ordinal));
     }
 }

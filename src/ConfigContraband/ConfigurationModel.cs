@@ -150,14 +150,62 @@ internal sealed class ConfigurationSnapshot
                 continue;
             }
 
-            properties.Add(CreateProjectedProperty(
-                propertyPathParts,
-                sectionPathParts.Length,
-                string.Join(":", propertyPathParts.Take(sectionPathParts.Length)),
-                property));
+            AddProjectedProperty(
+                properties,
+                CreateProjectedProperty(
+                    propertyPathParts,
+                    sectionPathParts.Length,
+                    string.Join(":", propertyPathParts.Take(sectionPathParts.Length)),
+                    property));
         }
 
         return new ConfigurationNode(properties.ToImmutable());
+    }
+
+    private static void AddProjectedProperty(
+        ImmutableArray<ConfigurationProperty>.Builder properties,
+        ConfigurationProperty property)
+    {
+        for (var i = 0; i < properties.Count; i++)
+        {
+            if (!string.Equals(properties[i].Key, property.Key, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(properties[i].FullPath, property.FullPath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            properties[i] = MergeProjectedProperties(properties[i], property);
+            return;
+        }
+
+        properties.Add(property);
+    }
+
+    private static ConfigurationProperty MergeProjectedProperties(
+        ConfigurationProperty existing,
+        ConfigurationProperty incoming)
+    {
+        if (existing.Value.Properties.IsDefaultOrEmpty)
+        {
+            return incoming.Value.Properties.IsDefaultOrEmpty ? existing : incoming;
+        }
+
+        if (incoming.Value.Properties.IsDefaultOrEmpty)
+        {
+            return existing;
+        }
+
+        var properties = existing.Value.Properties.ToBuilder();
+        foreach (var property in incoming.Value.Properties)
+        {
+            AddProjectedProperty(properties, property);
+        }
+
+        return new ConfigurationProperty(
+            existing.Key,
+            existing.FullPath,
+            new ConfigurationNode(properties.ToImmutable()),
+            existing.Location);
     }
 
     private static ConfigurationProperty CreateProjectedProperty(
@@ -233,7 +281,8 @@ internal sealed class ConfigurationSnapshot
     private static bool IsAppSettingsFile(string path)
     {
         var fileName = System.IO.Path.GetFileName(path);
-        return fileName.StartsWith("appsettings", StringComparison.OrdinalIgnoreCase) &&
+        return (string.Equals(fileName, "appsettings.json", StringComparison.OrdinalIgnoreCase) ||
+                fileName.StartsWith("appsettings.", StringComparison.OrdinalIgnoreCase)) &&
                fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
     }
 }

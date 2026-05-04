@@ -94,6 +94,48 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg001_keeps_appsettings_dot_qualified_files_visible()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.Development.local.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg001_ignores_non_dot_qualified_appsettings_like_files()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettingsBackup.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg001_does_not_report_section_from_commented_appsettings_file()
     {
         var source = OptionsSource("""
@@ -557,6 +599,40 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_does_not_treat_custom_validate_on_start_extension_as_startup_validation()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart("noop")|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: """
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+
+            public static class CustomOptionsBuilderExtensions
+            {
+                public static OptionsBuilder<TOptions> ValidateOnStart<TOptions>(
+                    this OptionsBuilder<TOptions> builder,
+                    string marker)
+                    where TOptions : class
+                {
+                    return builder;
+                }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_validation_before_bind_configuration_without_validate_on_start()
     {
         var source = OptionsSource("""
@@ -616,11 +692,73 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_does_not_treat_custom_validate_extension_as_options_validation()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<PlainOptions>()
+                .BindConfiguration("Plain")
+                .Validate("noop");
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: """
+            public sealed class PlainOptions
+            {
+                public string Value { get; set; } = "";
+            }
+
+            public static class CustomOptionsBuilderExtensions
+            {
+                public static OptionsBuilder<TOptions> Validate<TOptions>(
+                    this OptionsBuilder<TOptions> builder,
+                    string marker)
+                    where TOptions : class
+                {
+                    return builder;
+                }
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg004_reports_data_annotations_without_validate_data_annotations()
     {
         var source = OptionsSource("""
             {|#0:services.AddOptions<StripeOptions>()
                 .BindConfiguration("Stripe")|};
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_does_not_treat_custom_validate_data_annotations_extension_as_data_annotations_validation()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations("noop")
+                .ValidateOnStart()|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: """
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+
+            public static class CustomOptionsBuilderExtensions
+            {
+                public static OptionsBuilder<TOptions> ValidateDataAnnotations<TOptions>(
+                    this OptionsBuilder<TOptions> builder,
+                    string marker)
+                    where TOptions : class
+                {
+                    return builder;
+                }
+            }
             """);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
@@ -1258,6 +1396,27 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_ignores_non_dot_qualified_appsettings_like_files()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettingsSchema.json", """
+            {
+              "Stripe": {
+                "WebookSecret": "typo"
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Configure_reports_missing_section_without_validation_diagnostics()
     {
         var source = OptionsSource("""
@@ -1513,6 +1672,48 @@ public sealed class ConfigContrabandAnalyzerTests
             }
             """),
             expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_checks_sibling_colon_delimited_nested_keys_under_one_projected_object()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions Database { get; set; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                public string Host { get; set; } = "";
+
+                public int Port { get; set; }
+            }
+            """);
+
+        var expectedHost = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 2, 3, 2, 22)
+            .WithArguments("App:Database:Hots", "DatabaseOptions", ". Did you mean \"Host\"?");
+
+        var expectedPort = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 3, 3, 3, 21)
+            .WithArguments("App:Database:Prt", "DatabaseOptions", ". Did you mean \"Port\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App:Database:Hots": "api",
+              "App:Database:Prt": 443
+            }
+            """),
+            expectedHost,
+            expectedPort);
     }
 
     [Fact]

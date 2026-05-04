@@ -39,6 +39,74 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg001_fix_preserves_verbatim_section_literal()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:@"Strpie"|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration(@"Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_fix_preserves_raw_section_literal()
+    {
+        var source = OptionsSource(""""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:"""Strpie"""|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """");
+
+        var fixedSource = OptionsSource(""""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("""Stripe""")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg001_fix_replaces_nested_section_literal_with_full_path()
     {
         var source = OptionsSource("""
@@ -778,6 +846,387 @@ public sealed class ConfigContrabandCodeFixTests
             {
                 [Required]
                 public string Host { get; set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Servers");
+
+        await Verifier.VerifyCodeFixAsync(
+            [
+                ("Startup.cs", startupSource),
+                ("Options.cs", optionsSource)
+            ],
+            [
+                ("Startup.cs", fixedStartupSource),
+                ("Options.cs", fixedOptionsSource)
+            ],
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_fix_reuses_namespace_local_options_using()
+    {
+        var startupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    {|#0:services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart()|};
+                }
+            }
+            """;
+
+        var optionsSource = """
+            namespace MyApp
+            {
+                using System.ComponentModel.DataAnnotations;
+                using Microsoft.Extensions.Options;
+
+                public sealed class AppOptions
+                {
+                    public DatabaseOptions {|#1:Database|} { get; set; } = new();
+                }
+
+                public sealed class DatabaseOptions
+                {
+                    [Required]
+                    public string ConnectionString { get; set; } = "";
+                }
+            }
+            """;
+
+        var fixedStartupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+            """;
+
+        var fixedOptionsSource = """
+            namespace MyApp
+            {
+                using System.ComponentModel.DataAnnotations;
+                using Microsoft.Extensions.Options;
+
+                public sealed class AppOptions
+                {
+                    [ValidateObjectMembers]
+                    public DatabaseOptions Database { get; set; } = new();
+                }
+
+                public sealed class DatabaseOptions
+                {
+                    [Required]
+                    public string ConnectionString { get; set; } = "";
+                }
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyCodeFixAsync(
+            [
+                ("Startup.cs", startupSource),
+                ("Options.cs", optionsSource)
+            ],
+            [
+                ("Startup.cs", fixedStartupSource),
+                ("Options.cs", fixedOptionsSource)
+            ],
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_fix_adds_options_using_to_namespace_local_usings()
+    {
+        var startupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    {|#0:services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart()|};
+                }
+            }
+            """;
+
+        var optionsSource = """
+            namespace MyApp
+            {
+                using System.ComponentModel.DataAnnotations;
+
+                public sealed class AppOptions
+                {
+                    public DatabaseOptions {|#1:Database|} { get; set; } = new();
+                }
+
+                public sealed class DatabaseOptions
+                {
+                    [Required]
+                    public string ConnectionString { get; set; } = "";
+                }
+            }
+            """;
+
+        var fixedStartupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+            """;
+
+        var fixedOptionsSource = """
+            namespace MyApp
+            {
+                using System.ComponentModel.DataAnnotations;
+                using Microsoft.Extensions.Options;
+
+                public sealed class AppOptions
+                {
+                    [ValidateObjectMembers]
+                    public DatabaseOptions Database { get; set; } = new();
+                }
+
+                public sealed class DatabaseOptions
+                {
+                    [Required]
+                    public string ConnectionString { get; set; } = "";
+                }
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyCodeFixAsync(
+            [
+                ("Startup.cs", startupSource),
+                ("Options.cs", optionsSource)
+            ],
+            [
+                ("Startup.cs", fixedStartupSource),
+                ("Options.cs", fixedOptionsSource)
+            ],
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_fix_qualifies_attribute_when_local_attribute_name_conflicts()
+    {
+        var startupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    {|#0:services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart()|};
+                }
+            }
+            """;
+
+        var optionsSource = """
+            namespace MyApp
+            {
+                using System;
+                using System.ComponentModel.DataAnnotations;
+
+                public sealed class ValidateObjectMembersAttribute : Attribute
+                {
+                }
+
+                public sealed class AppOptions
+                {
+                    public DatabaseOptions {|#1:Database|} { get; set; } = new();
+                }
+
+                public sealed class DatabaseOptions
+                {
+                    [Required]
+                    public string ConnectionString { get; set; } = "";
+                }
+            }
+            """;
+
+        var fixedStartupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+            """;
+
+        var fixedOptionsSource = """
+            namespace MyApp
+            {
+                using System;
+                using System.ComponentModel.DataAnnotations;
+
+                public sealed class ValidateObjectMembersAttribute : Attribute
+                {
+                }
+
+                public sealed class AppOptions
+                {
+                    [global::Microsoft.Extensions.Options.ValidateObjectMembersAttribute]
+                    public DatabaseOptions Database { get; set; } = new();
+                }
+
+                public sealed class DatabaseOptions
+                {
+                    [Required]
+                    public string ConnectionString { get; set; } = "";
+                }
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyCodeFixAsync(
+            [
+                ("Startup.cs", startupSource),
+                ("Options.cs", optionsSource)
+            ],
+            [
+                ("Startup.cs", fixedStartupSource),
+                ("Options.cs", fixedOptionsSource)
+            ],
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_fix_qualifies_collection_attribute_when_local_attribute_name_conflicts()
+    {
+        var startupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    {|#0:services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart()|};
+                }
+            }
+            """;
+
+        var optionsSource = """
+            namespace MyApp
+            {
+                using System;
+                using System.Collections.Generic;
+                using System.ComponentModel.DataAnnotations;
+
+                public sealed class ValidateEnumeratedItemsAttribute : Attribute
+                {
+                }
+
+                public sealed class AppOptions
+                {
+                    public List<ServerOptions> {|#1:Servers|} { get; set; } = [];
+                }
+
+                public sealed class ServerOptions
+                {
+                    [Required]
+                    public string Host { get; set; } = "";
+                }
+            }
+            """;
+
+        var fixedStartupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+            using MyApp;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+            """;
+
+        var fixedOptionsSource = """
+            namespace MyApp
+            {
+                using System;
+                using System.Collections.Generic;
+                using System.ComponentModel.DataAnnotations;
+
+                public sealed class ValidateEnumeratedItemsAttribute : Attribute
+                {
+                }
+
+                public sealed class AppOptions
+                {
+                    [global::Microsoft.Extensions.Options.ValidateEnumeratedItemsAttribute]
+                    public List<ServerOptions> Servers { get; set; } = [];
+                }
+
+                public sealed class ServerOptions
+                {
+                    [Required]
+                    public string Host { get; set; } = "";
+                }
             }
             """;
 

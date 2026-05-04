@@ -26,7 +26,7 @@ Use it when your app relies on strongly typed options and you want configuration
 
 | Area | What ConfigContraband does |
 |------|----------------------------|
-| Section binding | Checks supported options bindings against visible `appsettings*.json` files. |
+| Section binding | Checks supported options bindings against visible `appsettings.json` and `appsettings.*.json` files. |
 | Startup validation | Flags options validation that is registered but not forced to run at startup. |
 | DataAnnotations | Finds `[Required]`, `[Range]`, and inherited validation attributes without `ValidateDataAnnotations()`. |
 | Nested validation | Detects nested options objects and collections that need recursive validation attributes. |
@@ -35,10 +35,10 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.1.10" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.1.11" PrivateAssets="all" />
 ```
 
-The package includes `buildTransitive` props that pass visible `appsettings*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
+The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
 
 No runtime dependency is added to your app. ConfigContraband runs as an analyzer during build and in supported IDEs.
 
@@ -106,7 +106,7 @@ The sample stays out of the main solution so normal development builds remain cl
 
 ### `CFG001`: The Section Must Exist
 
-If your code binds `"Stripe"`, a visible `appsettings*.json` file should contain a matching `Stripe` section.
+If your code binds `"Stripe"`, a visible `appsettings.json` or `appsettings.*.json` file should contain a matching `Stripe` section.
 
 Before:
 
@@ -134,7 +134,7 @@ services.AddOptions<StripeOptions>()
     .ValidateOnStart();
 ```
 
-When ConfigContraband sees a likely typo, it can offer a code fix. Nested section paths use the same colon-separated shape as .NET configuration:
+When ConfigContraband sees a likely typo, it can offer a code fix. The fix keeps regular, verbatim, and raw string literal style when replacing the section name. Nested section paths use the same colon-separated shape as .NET configuration:
 
 ```csharp
 services.AddOptions<StripeOptions>()
@@ -155,7 +155,7 @@ services.AddOptions<StripeOptions>()
 
 For nested typos, the fix keeps the parent path and replaces only the bad leaf section. If the code says `Features:Strpie` and the file contains `Features:Stripe`, the fix changes it to `Features:Stripe`.
 
-The analyzer checks every visible `appsettings*.json` additional file for section existence, including commented files, JSON string escapes, colon-delimited keys such as `"Features:Stripe"`, and duplicate JSON section members when resolving nested section paths. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
+The analyzer checks every visible `appsettings.json` and `appsettings.*.json` additional file for section existence, including commented files, JSON string escapes, colon-delimited keys such as `"Features:Stripe"`, and duplicate JSON section members when resolving nested section paths. Lookalike files such as `appsettingsBackup.json` are ignored. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
 
 ### `CFG003`: Validation Should Run When The App Starts
 
@@ -179,6 +179,8 @@ services.AddOptions<StripeOptions>()
 ```
 
 The analyzer tracks validation calls on the same fluent chain whether they appear before or after the binding call. The code fix appends `ValidateOnStart()` in the same style as the existing registration chain, including multiline chains and immediate same-block local `OptionsBuilder<T>` chains. Registrations that start with `AddOptionsWithValidateOnStart<TOptions>()` already run validation at startup, so `CFG003` stays quiet for that shape.
+
+`CFG003` only treats the framework `OptionsBuilder<TOptions>.Validate(...)`, `ValidateDataAnnotations()`, and `ValidateOnStart()` APIs as validation signals. Custom extension methods with the same names are ignored unless they call the framework APIs in a shape the analyzer can see.
 
 ### `CFG004`: DataAnnotations Must Be Switched On
 
@@ -215,6 +217,8 @@ services.AddOptions<StripeOptions>()
 `Validate(...)` counts as validation for `CFG003`, but it does not satisfy `CFG004` when DataAnnotations attributes are present.
 
 The analyzer recognizes `ValidateDataAnnotations()` on the same fluent chain before or after the binding call. The code fix preserves existing fluent-chain formatting, adds `ValidateDataAnnotations()`, and only adds `ValidateOnStart()` when startup validation is not already present, including registrations started with `AddOptionsWithValidateOnStart<TOptions>()`.
+
+Like `CFG003`, `CFG004` symbol-checks the framework validation extension methods. A project-local helper named `ValidateDataAnnotations(...)` does not satisfy the rule by name alone.
 
 ### `CFG005`: Nested Options Need Recursive Validation
 
@@ -253,7 +257,7 @@ public sealed class DatabaseOptions
 }
 ```
 
-For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. The code fix updates the file that owns the options property, adds `using Microsoft.Extensions.Options;` when needed, and keeps existing property comments in place. `CFG005` does not report interface-typed nested properties or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
+For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. The code fix updates the file that owns the options property, adds `using Microsoft.Extensions.Options;` when needed, respects namespace-local using blocks, avoids project-local attribute name conflicts, and keeps existing property comments in place. `CFG005` does not report interface-typed nested properties or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
 
 ### `CFG006`: Config Keys Should Match Options Properties
 
@@ -291,7 +295,7 @@ After:
 
 `CFG006` is informational because .NET configuration binding allows flexible shapes. It is still useful for catching the typos that hide in environment-specific settings.
 
-Visible `appsettings*.json` files are treated as a merged configuration view for unknown-key checks, including files with `//` or `/* ... */` comments and files that use colon-delimited keys such as `"Features:Stripe:WebhookSecret"`. If a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects, arrays or lists of nested options objects, strongly typed dictionary values, and dictionary values that bind to collections of nested options objects are checked recursively, so typos under `Servers:0:Port`, `Servers:primary:Port`, or `ServersByRegion:eu:0:Port`-style data can still be found.
+Visible `appsettings.json` and `appsettings.*.json` files are treated as a merged configuration view for unknown-key checks, including files with `//` or `/* ... */` comments and files that use colon-delimited keys such as `"Features:Stripe:WebhookSecret"`. Sibling flattened keys under the same nested object are projected into one logical configuration node before analysis. If a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects, arrays or lists of nested options objects, strongly typed dictionary values, and dictionary values that bind to collections of nested options objects are checked recursively, so typos under `Servers:0:Port`, `Servers:primary:Port`, or `ServersByRegion:eu:0:Port`-style data can still be found.
 
 Dictionary entry names and scalar array items are treated as values rather than property names. Arbitrary keys under `Dictionary<string, string>` and values inside `string[]` are not reported as unknown options properties.
 
@@ -300,13 +304,13 @@ Dictionary entry names and scalar array items are treated as values rather than 
 - Prefer warnings for configuration failures that are likely to break production.
 - Keep flexible binding shapes quiet when static proof is weak.
 - Offer fixes only when the rewrite is narrow and deterministic.
-- Treat `appsettings*.json` as the contract your options classes are supposed to honor.
+- Treat `appsettings.json` and `appsettings.*.json` as the contract your options classes are supposed to honor.
 
 ## Current Scope
 
 ConfigContraband currently focuses on:
 
-- `appsettings*.json` files.
+- `appsettings.json` and `appsettings.*.json` files.
 - `AddOptions<T>().BindConfiguration("Section")` registrations.
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
 - Direct `Configure<T>(configuration.GetSection("Section"))` registrations for section and JSON-key drift.

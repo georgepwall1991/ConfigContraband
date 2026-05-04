@@ -687,7 +687,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             var methods = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
             methods.Add(bindMethodName);
-            AddReceiverInvocations(bindInvocation, methods);
+            AddReceiverInvocations(bindInvocation, semanticModel, methods);
 
             var current = bindInvocation;
             var outermost = bindInvocation;
@@ -696,7 +696,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                    memberAccess.Expression == current &&
                    memberAccess.Parent is InvocationExpressionSyntax nextInvocation)
             {
-                methods.Add(memberAccess.Name.Identifier.ValueText);
+                AddRecognizedOptionsBuilderMethod(nextInvocation, semanticModel, methods);
                 outermost = nextInvocation;
                 current = nextInvocation;
             }
@@ -708,14 +708,15 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
         private static void AddReceiverInvocations(
             InvocationExpressionSyntax invocation,
+            SemanticModel semanticModel,
             ImmutableHashSet<string>.Builder methods)
         {
             var current = invocation;
             while (current.Expression is MemberAccessExpressionSyntax memberAccess &&
                    memberAccess.Expression is InvocationExpressionSyntax receiverInvocation &&
-                   receiverInvocation.Expression is MemberAccessExpressionSyntax receiverMemberAccess)
+                   receiverInvocation.Expression is MemberAccessExpressionSyntax)
             {
-                methods.Add(receiverMemberAccess.Name.Identifier.ValueText);
+                AddRecognizedOptionsBuilderMethod(receiverInvocation, semanticModel, methods);
                 current = receiverInvocation;
             }
         }
@@ -760,7 +761,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
             if (IsLocalReference(memberAccess.Expression, localSymbol, semanticModel))
             {
-                methods.Add(memberAccess.Name.Identifier.ValueText);
+                AddRecognizedOptionsBuilderMethod(invocation, semanticModel, methods);
                 return true;
             }
 
@@ -770,8 +771,57 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 return false;
             }
 
-            methods.Add(memberAccess.Name.Identifier.ValueText);
+            AddRecognizedOptionsBuilderMethod(invocation, semanticModel, methods);
             return true;
+        }
+
+        private static void AddRecognizedOptionsBuilderMethod(
+            InvocationExpressionSyntax invocation,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+            var original = symbol?.ReducedFrom ?? symbol;
+            if (original is null)
+            {
+                return;
+            }
+
+            if (IsOptionsBuilderValidateMethod(original))
+            {
+                methods.Add("Validate");
+                return;
+            }
+
+            if (IsOptionsBuilderValidateOnStartMethod(original))
+            {
+                methods.Add("ValidateOnStart");
+                return;
+            }
+
+            if (IsOptionsBuilderValidateDataAnnotationsMethod(original))
+            {
+                methods.Add("ValidateDataAnnotations");
+            }
+        }
+
+        private static bool IsOptionsBuilderValidateMethod(IMethodSymbol method)
+        {
+            return string.Equals(method.Name, "Validate", StringComparison.Ordinal) &&
+                   method.ContainingType.Name == "OptionsBuilder" &&
+                   method.ContainingType.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Options";
+        }
+
+        private static bool IsOptionsBuilderValidateOnStartMethod(IMethodSymbol method)
+        {
+            return string.Equals(method.Name, "ValidateOnStart", StringComparison.Ordinal) &&
+                   string.Equals(method.ContainingType.ToDisplayString(), "Microsoft.Extensions.DependencyInjection.OptionsBuilderExtensions", StringComparison.Ordinal);
+        }
+
+        private static bool IsOptionsBuilderValidateDataAnnotationsMethod(IMethodSymbol method)
+        {
+            return string.Equals(method.Name, "ValidateDataAnnotations", StringComparison.Ordinal) &&
+                   string.Equals(method.ContainingType.ToDisplayString(), "Microsoft.Extensions.DependencyInjection.OptionsBuilderDataAnnotationsExtensions", StringComparison.Ordinal);
         }
 
         private static bool IsLocalReference(
