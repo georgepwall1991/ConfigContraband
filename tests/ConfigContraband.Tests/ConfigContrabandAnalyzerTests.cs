@@ -1798,6 +1798,167 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_does_not_report_private_set_property_when_parenthesized_bind_non_public_properties_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", (options) => options.BindNonPublicProperties = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; private set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_private_set_property_when_bind_non_public_properties_is_false()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options => options.BindNonPublicProperties = false)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; private set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 3, 5, 3, 13)
+            .WithArguments("Stripe:ApiKey", "StripeOptions", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_private_set_property_when_binder_options_block_does_not_enable_non_public_properties()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options => { })
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; private set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 3, 5, 3, 13)
+            .WithArguments("Stripe:ApiKey", "StripeOptions", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_private_set_property_when_bind_non_public_properties_is_not_constant_true()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options => options.BindNonPublicProperties = IsEnabled())
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraMembers: """
+            private static bool IsEnabled() => true;
+            """, optionsTypes: """
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; private set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 3, 5, 3, 13)
+            .WithArguments("Stripe:ApiKey", "StripeOptions", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_private_set_property_when_bind_non_public_properties_assignment_is_not_binder_options()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options =>
+                {
+                    var unrelated = new BinderOptionLookalike();
+                    unrelated.BindNonPublicProperties = true;
+                })
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraMembers: """
+            private sealed class BinderOptionLookalike
+            {
+                public bool BindNonPublicProperties { get; set; }
+            }
+            """, optionsTypes: """
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; private set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 3, 5, 3, 13)
+            .WithArguments("Stripe:ApiKey", "StripeOptions", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_reports_private_set_property_without_bind_non_public_properties()
     {
         var source = OptionsSource("""
