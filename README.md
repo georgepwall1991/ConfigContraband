@@ -261,7 +261,7 @@ For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumerat
 
 ### `CFG006`: Config Keys Should Match Options Properties
 
-Keys under a bound section should match public bindable properties, or a `[ConfigurationKeyName]` alias. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
+Keys under a bound section should match public bindable properties. If a property uses `[ConfigurationKeyName]`, that configured name replaces the CLR property name for matching. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
 
 Before:
 
@@ -316,7 +316,7 @@ ConfigContraband currently focuses on:
 - Direct `Configure<T>(configuration.GetSection("Section"))` registrations for section and JSON-key drift.
 - String-literal section names.
 - Public bindable properties on options types, including inherited bindable properties.
-- `[ConfigurationKeyName]` aliases.
+- `[ConfigurationKeyName]` key-name overrides.
 - Normal fluent chains and immediate same-block local `OptionsBuilder<T>` chains.
 
 It does not try to prove every possible dynamic configuration shape. When the analyzer cannot see enough static information, it stays quiet.

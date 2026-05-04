@@ -9,6 +9,7 @@ All notable changes to ConfigContraband will be documented in this file.
 - Hardened the `CFG005` recursive-validation code fix to reuse namespace-local `Microsoft.Extensions.Options` imports and add new imports to the namespace-local using block when that is the file style.
 - Hardened the `CFG005` recursive-validation code fix to fully qualify inserted attributes when a project-local attribute name would otherwise shadow `ValidateObjectMembersAttribute` or `ValidateEnumeratedItemsAttribute`.
 - Hardened `CFG006` colon-delimited appsettings projection so sibling flattened keys under the same nested object are merged into one logical configuration node before unknown-key analysis.
+- Hardened `CFG006` to treat `[ConfigurationKeyName]` as the runtime configuration key override instead of also accepting the CLR property name.
 - Hardened the `CFG001` section-suggestion code fix to preserve verbatim and raw string literal style when replacing misspelled section names.
 - Tightened appsettings file discovery to `appsettings.json` and dot-qualified `appsettings.*.json` files, avoiding lookalike files such as `appsettingsBackup.json` or `appsettingsSchema.json`.
 

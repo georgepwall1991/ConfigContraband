@@ -202,8 +202,7 @@ internal sealed class OptionsTypeMetadata
 
     private static IEnumerable<string> GetConfigurationNames(IPropertySymbol property)
     {
-        yield return property.Name;
-
+        var hasAlias = false;
         foreach (var attribute in property.GetAttributes())
         {
             if (attribute.AttributeClass?.ToDisplayString() == "Microsoft.Extensions.Configuration.ConfigurationKeyNameAttribute" &&
@@ -211,8 +210,14 @@ internal sealed class OptionsTypeMetadata
                 attribute.ConstructorArguments[0].Value is string alias &&
                 !string.IsNullOrWhiteSpace(alias))
             {
+                hasAlias = true;
                 yield return alias;
             }
+        }
+
+        if (!hasAlias)
+        {
+            yield return property.Name;
         }
     }
 

@@ -51,6 +51,7 @@ The analyzer has a compact, coherent rule set: five diagnostics, four code-fix f
 | 2026-05-04 | 8 | `CFG006` | Colon-delimited projection represented sibling flattened keys under the same nested object as repeated one-property nodes, which still reported correctly but caused unnecessary repeated recursive walks. | Merge shared projected prefixes into one logical nested configuration node before unknown-key analysis and added sibling flattened-key regression coverage. | `CFG006` stays `4.50`, with a cleaner configuration model and lower repeated-walk risk. |
 | 2026-05-04 | 9 | `CFG001` | The section typo code fix recreated replacements as normal string literals, so verbatim and raw section literals lost their original style. | Preserve verbatim and raw string literal tokens when replacing suggested section names, with focused code-fix regressions. | `CFG001` stays `4.85`, with more style-preserving automatic fixes. |
 | 2026-05-04 | 10 | `CFG001`, `CFG006` | File discovery accepted any `appsettings*.json`, so lookalike files such as `appsettingsBackup.json` or `appsettingsSchema.json` could suppress missing-section diagnostics or create unknown-key noise. | Restrict analyzer and buildTransitive discovery to `appsettings.json` plus dot-qualified `appsettings.*.json`, while proving `appsettings.Development.local.json` remains visible. | `CFG001` stays `4.85`; `CFG006` stays `4.50`, with a lower false-positive/false-negative file-selection boundary. |
+| 2026-05-04 | 11 | `CFG006` | `[ConfigurationKeyName]` was treated as an extra accepted key instead of the runtime binding key override, so JSON using the CLR property name could hide an unbound option value. | Match the configured key name instead of the CLR property name when an alias is present, with root and nested regressions. | `CFG006` stays `4.50`, with stronger runtime binder alignment. |
 
 ## Health Baseline
 
@@ -60,7 +61,7 @@ The analyzer has a compact, coherent rule set: five diagnostics, four code-fix f
 | CFG003 Validation not on startup | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Good analyzer boundary for fluent and immediate same-block local `OptionsBuilder<T>` chains, including `Bind(GetSection(...))`; tracks symbol-checked framework validation/startup calls before and after the binding call, honors `AddOptionsWithValidateOnStart<TOptions>()`, and code fixes preserve multiline formatting, comments, split locals, and single-line chains. |
 | CFG004 DataAnnotations not enabled | Warning | 4 | 5 | 5 | 4 | 5 | 5 | 4.60 | P3 | Covers inherited bindable DataAnnotations and `IValidatableObject` on supported `OptionsBuilder<T>` bindings, recognizes the framework `ValidateDataAnnotations()` before and after binding, avoids duplicate `ValidateOnStart()` when startup validation already exists, and shares the formatter-safe invocation appender with CFG003. |
 | CFG005 Nested validation not recursive | Warning | 5 | 4 | 5 | 5 | 5 | 5 | 4.75 | P3 | Strong current shape. Covers recursive object and collection graphs, including nested `IValidatableObject` types and user namespaces that merely start with `System`, on supported `OptionsBuilder<T>` bindings; suppresses unsafe interface cases and proves cross-document recursive-attribute fixes, including namespace-local using handling and local attribute-name conflicts. |
-| CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 5 | 5 | 4.50 | P3 | Broadest test depth. Covers `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))`; recurses through nested objects, object collections, dictionary values, dictionary values containing collections, comments, JSON string escapes, merged colon-delimited appsettings keys, dot-qualified appsettings file names, and user namespaces that merely start with `System` while keeping scalar arrays and dictionary entry names quiet. |
+| CFG006 Unknown configuration key | Info | 4 | 4 | 5 | 5 | 5 | 5 | 4.50 | P3 | Broadest test depth. Covers `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))`; recurses through nested objects, object collections, dictionary values, dictionary values containing collections, comments, JSON string escapes, `[ConfigurationKeyName]` key overrides, merged colon-delimited appsettings keys, dot-qualified appsettings file names, and user namespaces that merely start with `System` while keeping scalar arrays and dictionary entry names quiet. |
 
 ## Selection Policy
 
@@ -154,7 +155,7 @@ Known gaps:
 
 ### CFG006 Unknown Configuration Key
 
-Reports an appsettings key under a bound section when the key does not match a bindable options property or `[ConfigurationKeyName]` alias. This rule stays informational because configuration binding is flexible and false-positive cost is higher.
+Reports an appsettings key under a bound section when the key does not match a bindable options property or its `[ConfigurationKeyName]` override. This rule stays informational because configuration binding is flexible and false-positive cost is higher.
 
 Current behavior:
 
@@ -162,7 +163,7 @@ Current behavior:
 - Parses `//` and `/* ... */` comments, JSON string escapes, and colon-delimited JSON keys before walking keys so commented local appsettings files stay analyzable.
 - Merges sibling colon-delimited keys under the same nested object into one projected configuration node before recursive unknown-key analysis.
 - Recurses into nested object properties, arrays/lists of nested objects, strongly typed dictionary values, and dictionary values containing nested object collections.
-- Honors `[ConfigurationKeyName]` aliases at the root and nested levels.
+- Honors `[ConfigurationKeyName]` overrides at the root and nested levels, matching the configured key instead of the CLR property name when an override is present.
 - Treats user namespaces such as `Systematic.Options` as analyzable user code while still avoiding BCL `System` / `System.*` nested types.
 - Treats scalar array items and dictionary entry names as values rather than property names.
 

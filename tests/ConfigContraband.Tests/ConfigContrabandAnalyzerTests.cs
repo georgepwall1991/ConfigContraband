@@ -1538,6 +1538,38 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_reports_property_name_when_configuration_key_name_overrides_binding_name()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public sealed class StripeOptions
+            {
+                [ConfigurationKeyName("api_key")]
+                public string ApiKey { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 3, 5, 3, 13)
+            .WithArguments("Stripe:ApiKey", "StripeOptions", ". Did you mean \"api_key\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_honors_json_unicode_escapes_in_configuration_keys()
     {
         var source = OptionsSource("""
@@ -1824,6 +1856,45 @@ public sealed class ConfigContrabandAnalyzerTests
               }
             }
             """));
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_property_name_when_nested_configuration_key_name_overrides_binding_name()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions Database { get; set; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [ConfigurationKeyName("connection_string")]
+                public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 7, 4, 25)
+            .WithArguments("App:Database:ConnectionString", "DatabaseOptions", ". Did you mean \"connection_string\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Database": {
+                  "ConnectionString": "Server=.;"
+                }
+              }
+            }
+            """),
+            expected);
     }
 
     [Fact]
