@@ -941,6 +941,50 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg005_fix_adds_validate_enumerated_items_to_constructor_bound_record_collection()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed record AppOptions(List<ServerOptions> {|#1:Servers|});
+
+            public sealed record ServerOptions([property: Required] string Host);
+            """);
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using System.Collections.Generic;
+            using Microsoft.Extensions.Options;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+                }
+            }
+
+            public sealed record AppOptions([property: ValidateEnumeratedItems] List<ServerOptions> Servers);
+
+            public sealed record ServerOptions([property: Required] string Host);
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Servers");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg005_fix_adds_validate_object_members_to_private_set_property_when_bind_non_public_properties_enabled()
     {
         var source = OptionsSource("""
