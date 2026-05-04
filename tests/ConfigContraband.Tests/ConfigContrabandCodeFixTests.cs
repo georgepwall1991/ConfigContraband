@@ -986,6 +986,82 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg005_fix_adds_validate_object_members_to_constructor_bound_inherited_property()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, optionsTypes: """
+            public abstract class BaseAppOptions
+            {
+                protected BaseAppOptions(DatabaseOptions database)
+                {
+                    Database = database;
+                }
+
+                public DatabaseOptions {|#1:Database|} { get; }
+            }
+
+            public sealed class AppOptions : BaseAppOptions
+            {
+                public AppOptions(DatabaseOptions database)
+                    : base(database)
+                {
+                }
+            }
+
+            public sealed record DatabaseOptions([property: Required] string ConnectionString);
+            """);
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+                }
+            }
+
+            public abstract class BaseAppOptions
+            {
+                protected BaseAppOptions(DatabaseOptions database)
+                {
+                    Database = database;
+                }
+
+                [ValidateObjectMembers]
+                public DatabaseOptions Database { get; }
+            }
+
+            public sealed class AppOptions : BaseAppOptions
+            {
+                public AppOptions(DatabaseOptions database)
+                    : base(database)
+                {
+                }
+            }
+
+            public sealed record DatabaseOptions([property: Required] string ConnectionString);
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("BaseAppOptions", "Database");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg005_fix_adds_validate_enumerated_items_to_constructor_bound_record_collection()
     {
         var source = OptionsSource("""

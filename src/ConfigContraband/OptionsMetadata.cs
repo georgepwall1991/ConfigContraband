@@ -232,22 +232,18 @@ internal sealed class OptionsTypeMetadata
 
     private static IEnumerable<BindablePropertyCandidate> GetBindableProperties(INamedTypeSymbol type, bool bindsNonPublicProperties)
     {
-        for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
+        foreach (var property in GetProperties(type))
         {
-            foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
+            if (IsBindable(property, type, bindsNonPublicProperties, out var isConstructorBound))
             {
-                if (IsBindable(property, type, bindsNonPublicProperties, out var isConstructorBound))
-                {
-                    yield return new BindablePropertyCandidate(property, isConstructorBound);
-                }
+                yield return new BindablePropertyCandidate(property, isConstructorBound);
             }
         }
     }
 
     private static bool IsConstructorBoundProperty(IPropertySymbol property, INamedTypeSymbol rootType)
     {
-        if (!SymbolEqualityComparer.Default.Equals(property.ContainingType, rootType) ||
-            rootType.InstanceConstructors.Any(static constructor =>
+        if (rootType.InstanceConstructors.Any(static constructor =>
                 constructor.DeclaredAccessibility == Accessibility.Public &&
                 constructor.Parameters.Length == 0))
         {
@@ -280,7 +276,7 @@ internal sealed class OptionsTypeMetadata
         IParameterSymbol parameter,
         out IPropertySymbol property)
     {
-        foreach (var candidate in type.GetMembers().OfType<IPropertySymbol>())
+        foreach (var candidate in GetProperties(type))
         {
             if (IsConstructorParameterForProperty(parameter, candidate))
             {
@@ -382,6 +378,17 @@ internal sealed class OptionsTypeMetadata
         }
 
         return false;
+    }
+
+    private static IEnumerable<IPropertySymbol> GetProperties(INamedTypeSymbol type)
+    {
+        for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
+            {
+                yield return property;
+            }
+        }
     }
 
     private static bool HasAttribute(ISymbol symbol, string metadataName)

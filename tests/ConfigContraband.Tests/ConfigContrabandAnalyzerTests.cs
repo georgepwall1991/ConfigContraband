@@ -946,6 +946,44 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_reports_constructor_bound_inherited_data_annotations_without_validate_data_annotations()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateOnStart()|};
+            """, optionsTypes: """
+            public abstract class BaseStripeOptions
+            {
+                protected BaseStripeOptions(string apiKey)
+                {
+                    ApiKey = apiKey;
+                }
+
+                [Required]
+                public string ApiKey { get; }
+            }
+
+            public sealed class StripeOptions : BaseStripeOptions
+            {
+                public StripeOptions(string apiKey, string webhookSecret)
+                    : base(apiKey)
+                {
+                    WebhookSecret = webhookSecret;
+                }
+
+                public string WebhookSecret { get; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg004_does_not_report_inherited_data_annotations_when_enabled()
     {
         var source = OptionsSource("""
@@ -1507,6 +1545,44 @@ public sealed class ConfigContrabandAnalyzerTests
             .WithLocation(0)
             .WithLocation(1)
             .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_reports_constructor_bound_inherited_nested_object_without_recursive_validation()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, optionsTypes: """
+            public abstract class BaseAppOptions
+            {
+                protected BaseAppOptions(DatabaseOptions database)
+                {
+                    Database = database;
+                }
+
+                public DatabaseOptions {|#1:Database|} { get; }
+            }
+
+            public sealed class AppOptions : BaseAppOptions
+            {
+                public AppOptions(DatabaseOptions database)
+                    : base(database)
+                {
+                }
+            }
+
+            public sealed record DatabaseOptions([property: Required] string ConnectionString);
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("BaseAppOptions", "Database");
 
         await Verifier.VerifyAnalyzerAsync(source, expected);
     }
@@ -2193,6 +2269,49 @@ public sealed class ConfigContrabandAnalyzerTests
             {
               "Stripe": {
                 "ApiKey": "secret"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg006_does_not_report_constructor_bound_inherited_property()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public abstract class BaseStripeOptions
+            {
+                protected BaseStripeOptions(string apiKey)
+                {
+                    ApiKey = apiKey;
+                }
+
+                public string ApiKey { get; }
+            }
+
+            public sealed class StripeOptions : BaseStripeOptions
+            {
+                public StripeOptions(string apiKey, string webhookSecret)
+                    : base(apiKey)
+                {
+                    WebhookSecret = webhookSecret;
+                }
+
+                public string WebhookSecret { get; }
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret",
+                "WebhookSecret": "hook"
               }
             }
             """));
