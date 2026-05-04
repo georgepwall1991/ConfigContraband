@@ -184,7 +184,7 @@ The analyzer tracks validation calls on the same fluent chain whether they appea
 
 ### `CFG004`: DataAnnotations Must Be Switched On
 
-Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration. Nested options graphs count as well: if a nested object or list-style collection item has DataAnnotations and is part of the bindable options graph, including initialized get-only object or collection properties, the root registration still needs `ValidateDataAnnotations()`. `IValidatableObject` is also part of DataAnnotations validation, so options types that implement it need the same registration.
+Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration. Nested options graphs count as well: if a nested object or list-style collection item has DataAnnotations and is part of the bindable options graph, including initialized get-only object or collection properties, the root registration still needs `ValidateDataAnnotations()`. If a binding call explicitly sets `BindNonPublicProperties = true`, public properties with private setters are counted too. `IValidatableObject` is also part of DataAnnotations validation, so options types that implement it need the same registration.
 
 Before:
 
@@ -222,7 +222,7 @@ Like `CFG003`, `CFG004` symbol-checks the framework validation extension methods
 
 ### `CFG005`: Nested Options Need Recursive Validation
 
-DataAnnotations do not automatically walk into child objects or collection items. If a nested class or list-style collection item has validation attributes or implements `IValidatableObject` anywhere in its bindable object graph, mark each parent property that should be checked recursively. Initialized get-only object and mutable collection properties count because the configuration binder can populate their existing instances.
+DataAnnotations do not automatically walk into child objects or collection items. If a nested class or list-style collection item has validation attributes or implements `IValidatableObject` anywhere in its bindable object graph, mark each parent property that should be checked recursively. Initialized get-only object and mutable collection properties count because the configuration binder can populate their existing instances. Public private-set nested properties also count when the binding call opts into `BindNonPublicProperties`.
 
 Before:
 
@@ -261,7 +261,7 @@ For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumerat
 
 ### `CFG006`: Config Keys Should Match Options Properties
 
-Keys under a bound section should match public bindable properties. Public settable properties are bindable, and initialized get-only object or mutable collection properties are treated as bindable because the runtime binder can populate them. If a property uses `[ConfigurationKeyName]`, that configured name replaces the CLR property name for matching. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
+Keys under a bound section should match public bindable properties. Public settable properties are bindable, and initialized get-only object or mutable collection properties are treated as bindable because the runtime binder can populate them. Public private-set properties are treated as bindable only when the registration explicitly sets `BindNonPublicProperties = true`. If a property uses `[ConfigurationKeyName]`, that configured name replaces the CLR property name for matching. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
 
 Before:
 
@@ -295,7 +295,7 @@ After:
 
 `CFG006` is informational because .NET configuration binding allows flexible shapes. It is still useful for catching the typos that hide in environment-specific settings.
 
-Visible `appsettings.json` and `appsettings.*.json` files are treated as a merged configuration view for unknown-key checks, including files with `//` or `/* ... */` comments and files that use colon-delimited keys such as `"Features:Stripe:WebhookSecret"`. Sibling flattened keys under the same nested object are projected into one logical configuration node before analysis. If a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects, arrays or lists of nested options objects, strongly typed dictionary values, and dictionary values that bind to collections of nested options objects are checked recursively, so typos under `Servers:0:Port`, `Servers:primary:Port`, or `ServersByRegion:eu:0:Port`-style data can still be found.
+Visible `appsettings.json` and `appsettings.*.json` files are treated as a merged configuration view for unknown-key checks, including files with `//` or `/* ... */` comments and files that use colon-delimited keys such as `"Features:Stripe:WebhookSecret"`. Sibling flattened keys under the same nested object are projected into one logical configuration node before analysis. If a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects, arrays or lists of nested options objects, strongly typed dictionary values, and dictionary values that bind to collections of nested options objects are checked recursively, so typos under `Servers:0:Port`, `Servers:primary:Port`, or `ServersByRegion:eu:0:Port`-style data can still be found. Private-set properties are included for registrations that opt into `BindNonPublicProperties`.
 
 Dictionary entry names and scalar array items are treated as values rather than property names. Arbitrary keys under `Dictionary<string, string>` and values inside `string[]` are not reported as unknown options properties.
 

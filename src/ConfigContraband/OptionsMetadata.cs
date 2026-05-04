@@ -9,18 +9,21 @@ namespace ConfigContraband;
 internal sealed class OptionsTypeMetadata
 {
     private readonly bool _hasAnyDataAnnotations;
+    private readonly bool _bindsNonPublicProperties;
 
     private OptionsTypeMetadata(
         INamedTypeSymbol type,
         ImmutableArray<BindableProperty> bindableProperties,
         bool implementsValidatableObject,
-        bool hasAnyDataAnnotations)
+        bool hasAnyDataAnnotations,
+        bool bindsNonPublicProperties)
     {
         TypeName = type.Name;
         TypeKey = type.ToDisplayString();
         BindableProperties = bindableProperties;
         ImplementsValidatableObject = implementsValidatableObject;
         _hasAnyDataAnnotations = hasAnyDataAnnotations;
+        _bindsNonPublicProperties = bindsNonPublicProperties;
     }
 
     public string TypeName { get; }
@@ -28,11 +31,11 @@ internal sealed class OptionsTypeMetadata
     public ImmutableArray<BindableProperty> BindableProperties { get; }
     public bool ImplementsValidatableObject { get; }
 
-    public static OptionsTypeMetadata Create(INamedTypeSymbol type)
+    public static OptionsTypeMetadata Create(INamedTypeSymbol type, bool bindsNonPublicProperties = false)
     {
         var properties = ImmutableArray.CreateBuilder<BindableProperty>();
 
-        foreach (var member in GetBindableProperties(type))
+        foreach (var member in GetBindableProperties(type, bindsNonPublicProperties))
         {
             properties.Add(new BindableProperty(
                 member,
@@ -44,7 +47,8 @@ internal sealed class OptionsTypeMetadata
             type,
             properties.ToImmutable(),
             ImplementsInterface(type, "System.ComponentModel.DataAnnotations.IValidatableObject"),
-            ContainsValidationAttributes(type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default)));
+            ContainsValidationAttributes(type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), bindsNonPublicProperties),
+            bindsNonPublicProperties);
     }
 
     public bool HasAnyDataAnnotations()
@@ -75,7 +79,7 @@ internal sealed class OptionsTypeMetadata
         if (IsPotentialNestedObject(property.Symbol.Type) &&
             property.Symbol.Type is INamedTypeSymbol namedType)
         {
-            metadata = Create(namedType);
+            metadata = Create(namedType, _bindsNonPublicProperties);
             return true;
         }
 
@@ -89,7 +93,7 @@ internal sealed class OptionsTypeMetadata
             IsPotentialNestedObject(elementType) &&
             elementType is INamedTypeSymbol namedType)
         {
-            metadata = Create(namedType);
+            metadata = Create(namedType, _bindsNonPublicProperties);
             return true;
         }
 
@@ -103,7 +107,7 @@ internal sealed class OptionsTypeMetadata
             IsPotentialNestedObject(valueType) &&
             valueType is INamedTypeSymbol namedType)
         {
-            metadata = Create(namedType);
+            metadata = Create(namedType, _bindsNonPublicProperties);
             return true;
         }
 
@@ -118,7 +122,7 @@ internal sealed class OptionsTypeMetadata
             IsPotentialNestedObject(elementType) &&
             elementType is INamedTypeSymbol namedType)
         {
-            metadata = Create(namedType);
+            metadata = Create(namedType, _bindsNonPublicProperties);
             return true;
         }
 
@@ -150,31 +154,32 @@ internal sealed class OptionsTypeMetadata
             if (TryGetCollectionElementType(property.Symbol.Type, out var elementType))
             {
                 if (IsPotentialNestedObject(elementType) &&
-                    ContainsValidationAttributes(elementType, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default)) &&
+                    ContainsValidationAttributes(elementType, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), _bindsNonPublicProperties) &&
                     !HasAttribute(property.Symbol, "Microsoft.Extensions.Options.ValidateEnumeratedItemsAttribute"))
                 {
                     builder.Add(new NestedValidationCandidate(property, "ValidateEnumeratedItems", isCollection: true));
                 }
 
-                AddNestedValidationCandidates(elementType, builder, visited);
+                AddNestedValidationCandidates(elementType, builder, visited, _bindsNonPublicProperties);
                 continue;
             }
 
             if (IsPotentialNestedObject(property.Symbol.Type) &&
-                ContainsValidationAttributes(property.Symbol.Type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default)) &&
+                ContainsValidationAttributes(property.Symbol.Type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), _bindsNonPublicProperties) &&
                 !HasAttribute(property.Symbol, "Microsoft.Extensions.Options.ValidateObjectMembersAttribute"))
             {
                 builder.Add(new NestedValidationCandidate(property, "ValidateObjectMembers", isCollection: false));
             }
 
-            AddNestedValidationCandidates(property.Symbol.Type, builder, visited);
+            AddNestedValidationCandidates(property.Symbol.Type, builder, visited, _bindsNonPublicProperties);
         }
     }
 
     private static void AddNestedValidationCandidates(
         ITypeSymbol type,
         ImmutableArray<NestedValidationCandidate>.Builder builder,
-        HashSet<ITypeSymbol> visited)
+        HashSet<ITypeSymbol> visited,
+        bool bindsNonPublicProperties)
     {
         if (!IsPotentialNestedObject(type) ||
             type is not INamedTypeSymbol namedType ||
@@ -183,10 +188,10 @@ internal sealed class OptionsTypeMetadata
             return;
         }
 
-        Create(namedType).AddNestedValidationCandidates(builder, visited);
+        Create(namedType, bindsNonPublicProperties).AddNestedValidationCandidates(builder, visited);
     }
 
-    private static bool IsBindable(IPropertySymbol property)
+    private static bool IsBindable(IPropertySymbol property, bool bindsNonPublicProperties)
     {
         if (property.IsStatic ||
             property.DeclaredAccessibility != Accessibility.Public ||
@@ -198,20 +203,21 @@ internal sealed class OptionsTypeMetadata
 
         if (property.SetMethod is not null)
         {
-            return property.SetMethod.DeclaredAccessibility == Accessibility.Public;
+            return property.SetMethod.DeclaredAccessibility == Accessibility.Public ||
+                   bindsNonPublicProperties;
         }
 
         return HasPropertyInitializer(property) &&
                (IsPotentialNestedObject(property.Type) || IsMutableCollectionType(property.Type));
     }
 
-    private static IEnumerable<IPropertySymbol> GetBindableProperties(INamedTypeSymbol type)
+    private static IEnumerable<IPropertySymbol> GetBindableProperties(INamedTypeSymbol type, bool bindsNonPublicProperties)
     {
         for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
         {
             foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
             {
-                if (IsBindable(property))
+                if (IsBindable(property, bindsNonPublicProperties))
                 {
                     yield return property;
                 }
@@ -245,7 +251,10 @@ internal sealed class OptionsTypeMetadata
         return symbol.GetAttributes().Any(attribute => InheritsFrom(attribute.AttributeClass, "System.ComponentModel.DataAnnotations.ValidationAttribute"));
     }
 
-    private static bool ContainsValidationAttributes(ITypeSymbol type, HashSet<ITypeSymbol> visited)
+    private static bool ContainsValidationAttributes(
+        ITypeSymbol type,
+        HashSet<ITypeSymbol> visited,
+        bool bindsNonPublicProperties)
     {
         if (!visited.Add(type))
         {
@@ -262,7 +271,7 @@ internal sealed class OptionsTypeMetadata
             return true;
         }
 
-        foreach (var property in GetBindableProperties(namedType))
+        foreach (var property in GetBindableProperties(namedType, bindsNonPublicProperties))
         {
             if (HasValidationAttribute(property))
             {
@@ -272,7 +281,7 @@ internal sealed class OptionsTypeMetadata
             if (TryGetCollectionElementType(property.Type, out var elementType))
             {
                 if (IsPotentialNestedObject(elementType) &&
-                    ContainsValidationAttributes(elementType, visited))
+                    ContainsValidationAttributes(elementType, visited, bindsNonPublicProperties))
                 {
                     return true;
                 }
@@ -281,7 +290,7 @@ internal sealed class OptionsTypeMetadata
             }
 
             if (IsPotentialNestedObject(property.Type) &&
-                ContainsValidationAttributes(property.Type, visited))
+                ContainsValidationAttributes(property.Type, visited, bindsNonPublicProperties))
             {
                 return true;
             }

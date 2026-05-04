@@ -77,7 +77,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 registration.OptionsType.Name));
         }
 
-        var metadata = OptionsTypeMetadata.Create(registration.OptionsType);
+        var metadata = OptionsTypeMetadata.Create(registration.OptionsType, registration.BindsNonPublicProperties);
         if (metadata.HasAnyDataAnnotations() && !registration.HasValidateDataAnnotations)
         {
             var properties = ImmutableDictionary<string, string?>.Empty
@@ -96,7 +96,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         OptionsRegistration registration,
         ConcurrentDictionary<string, byte> nestedValidationReported)
     {
-        var metadata = OptionsTypeMetadata.Create(registration.OptionsType);
+        var metadata = OptionsTypeMetadata.Create(registration.OptionsType, registration.BindsNonPublicProperties);
         foreach (var candidate in metadata.GetNestedValidationCandidates())
         {
             var reportKey = candidate.Property.Symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) +
@@ -174,7 +174,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var metadata = OptionsTypeMetadata.Create(registration.OptionsType);
+        var metadata = OptionsTypeMetadata.Create(registration.OptionsType, registration.BindsNonPublicProperties);
         foreach (var matchingSection in sections)
         {
             AnalyzeUnknownKeysInSection(
@@ -363,6 +363,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         var chain = InvocationChain.Create(invocation, semanticModel, methodName);
         var hasValidateOnStart = chain.MethodNames.Contains("ValidateOnStart") ||
             HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel);
+        var bindsNonPublicProperties = HasBindNonPublicPropertiesEnabled(invocation, semanticModel);
 
         registration = new OptionsRegistration(
             optionsType,
@@ -373,7 +374,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             sectionExpressionContainsFullPath,
             chain.MethodNames.Contains("ValidateDataAnnotations"),
             hasValidateOnStart,
-            chain.MethodNames.Any(IsValidationMethod));
+            chain.MethodNames.Any(IsValidationMethod),
+            bindsNonPublicProperties);
         return true;
     }
 
@@ -450,11 +452,91 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 sectionExpressionContainsFullPath,
                 hasValidateDataAnnotations: false,
                 hasValidateOnStart: false,
-                hasValidation: false);
+                hasValidation: false,
+                HasBindNonPublicPropertiesEnabled(invocation, semanticModel));
             return true;
         }
 
         return false;
+    }
+
+    private static bool HasBindNonPublicPropertiesEnabled(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        return invocation.ArgumentList.Arguments.Any(argument =>
+            ContainsBindNonPublicPropertiesEnabled(argument.Expression, semanticModel));
+    }
+
+    private static bool ContainsBindNonPublicPropertiesEnabled(
+        ExpressionSyntax? expression,
+        SemanticModel semanticModel)
+    {
+        if (expression is null)
+        {
+            return false;
+        }
+
+        if (expression is SimpleLambdaExpressionSyntax simpleLambda)
+        {
+            return ContainsBindNonPublicPropertiesEnabled(simpleLambda.ExpressionBody, semanticModel) ||
+                   ContainsBindNonPublicPropertiesEnabled(simpleLambda.Block, semanticModel);
+        }
+
+        if (expression is ParenthesizedLambdaExpressionSyntax parenthesizedLambda)
+        {
+            return ContainsBindNonPublicPropertiesEnabled(parenthesizedLambda.ExpressionBody, semanticModel) ||
+                   ContainsBindNonPublicPropertiesEnabled(parenthesizedLambda.Block, semanticModel);
+        }
+
+        return IsBindNonPublicPropertiesEnabledAssignment(expression, semanticModel);
+    }
+
+    private static bool ContainsBindNonPublicPropertiesEnabled(
+        BlockSyntax? block,
+        SemanticModel semanticModel)
+    {
+        if (block is null)
+        {
+            return false;
+        }
+
+        foreach (var statement in block.Statements)
+        {
+            if (statement is ExpressionStatementSyntax expressionStatement &&
+                IsBindNonPublicPropertiesEnabledAssignment(expressionStatement.Expression, semanticModel))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsBindNonPublicPropertiesEnabledAssignment(
+        ExpressionSyntax? expression,
+        SemanticModel semanticModel)
+    {
+        if (expression is not AssignmentExpressionSyntax assignment ||
+            !assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) ||
+            assignment.Left is not MemberAccessExpressionSyntax memberAccess ||
+            !string.Equals(memberAccess.Name.Identifier.ValueText, "BindNonPublicProperties", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var property = semanticModel.GetSymbolInfo(memberAccess).Symbol as IPropertySymbol;
+        if (property is null ||
+            !string.Equals(property.Name, "BindNonPublicProperties", StringComparison.Ordinal) ||
+            !string.Equals(property.ContainingType.ToDisplayString(), "Microsoft.Extensions.Configuration.BinderOptions", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var constant = semanticModel.GetConstantValue(assignment.Right);
+        return constant.HasValue &&
+               constant.Value is bool enabled &&
+               enabled;
     }
 
     private static bool TryGetConstantSectionPath(
@@ -648,7 +730,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             bool sectionExpressionContainsFullPath,
             bool hasValidateDataAnnotations,
             bool hasValidateOnStart,
-            bool hasValidation)
+            bool hasValidation,
+            bool bindsNonPublicProperties)
         {
             OptionsType = optionsType;
             SectionPath = sectionPath;
@@ -659,6 +742,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             HasValidateDataAnnotations = hasValidateDataAnnotations;
             HasValidateOnStart = hasValidateOnStart;
             HasValidation = hasValidation;
+            BindsNonPublicProperties = bindsNonPublicProperties;
         }
 
         public INamedTypeSymbol OptionsType { get; }
@@ -670,6 +754,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         public bool HasValidateDataAnnotations { get; }
         public bool HasValidateOnStart { get; }
         public bool HasValidation { get; }
+        public bool BindsNonPublicProperties { get; }
     }
 
     private sealed class InvocationChain

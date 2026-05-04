@@ -790,6 +790,64 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg005_fix_adds_validate_object_members_to_private_set_property_when_bind_non_public_properties_enabled()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.BindNonPublicProperties = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions {|#1:Database|} { get; private set; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; private set; } = "";
+            }
+            """);
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.BindNonPublicProperties = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+                }
+            }
+
+            public sealed class AppOptions
+            {
+                [ValidateObjectMembers]
+                public DatabaseOptions Database { get; private set; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; private set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg005_fix_reuses_existing_options_using()
     {
         var source = OptionsSource("""

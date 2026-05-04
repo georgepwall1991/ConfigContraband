@@ -6,6 +6,7 @@ All notable changes to ConfigContraband will be documented in this file.
 
 - Hardened `CFG003` and `CFG004` chain analysis so only the real framework `OptionsBuilder<TOptions>` validation APIs count as validation or startup validation.
 - Added regression coverage for custom same-name extension methods that previously could hide missing `ValidateOnStart()` / `ValidateDataAnnotations()` diagnostics or create a validation false positive.
+- Hardened `BindNonPublicProperties` handling so explicit binder options make private-set options properties visible to validation and unknown-key analysis.
 - Hardened bindable-property detection so initialized get-only object, collection, and dictionary properties align with the runtime configuration binder.
 - Hardened `CFG004` so nested object graphs that contain DataAnnotations still require `ValidateDataAnnotations()` even when the root options type has no direct annotations.
 - Hardened the `CFG005` recursive-validation code fix to reuse namespace-local `Microsoft.Extensions.Options` imports and add new imports to the namespace-local using block when that is the file style.
