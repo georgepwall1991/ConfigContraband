@@ -2373,6 +2373,39 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_does_not_report_configuration_key_name_alias_on_settable_constructor_bound_property()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public sealed class StripeOptions
+            {
+                public StripeOptions(string apiKey)
+                {
+                    ApiKey = apiKey;
+                }
+
+                [ConfigurationKeyName("api_key")]
+                public string ApiKey { get; set; }
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "constructor",
+                "api_key": "setter"
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg006_reports_get_only_property_when_public_parameterless_constructor_wins()
     {
         var source = OptionsSource("""

@@ -196,6 +196,11 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             if (!metadata.TryGetConfigurationProperty(property.Key, out var bindableProperty))
             {
+                if (metadata.TryGetSettableConstructorBoundAlias(property.Key, section, out _))
+                {
+                    continue;
+                }
+
                 var reportKey = metadata.TypeKey + "|" + property.Location.GetLineSpan().Path + "|" + property.FullPath;
                 if (!unknownKeysReported.TryAdd(reportKey, 0))
                 {

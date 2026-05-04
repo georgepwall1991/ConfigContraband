@@ -40,6 +40,7 @@ internal sealed class OptionsTypeMetadata
             properties.Add(new BindableProperty(
                 member.Property,
                 GetConfigurationNames(member.Property, member.IsConstructorBound).ToImmutableArray(),
+                member.IsConstructorBound,
                 HasValidationAttribute(member.Property)));
         }
 
@@ -68,6 +69,29 @@ internal sealed class OptionsTypeMetadata
                     return true;
                 }
             }
+        }
+
+        bindableProperty = null!;
+        return false;
+    }
+
+    public bool TryGetSettableConstructorBoundAlias(
+        string key,
+        ConfigurationNode section,
+        out BindableProperty bindableProperty)
+    {
+        foreach (var property in BindableProperties)
+        {
+            if (!property.IsConstructorBound ||
+                !CanBindPropertyAfterConstruction(property.Symbol, _bindsNonPublicProperties) ||
+                !section.TryGetProperty(property.Symbol.Name, out _) ||
+                !HasConfigurationAlias(property.Symbol, key))
+            {
+                continue;
+            }
+
+            bindableProperty = property;
+            return true;
         }
 
         bindableProperty = null!;
@@ -310,10 +334,7 @@ internal sealed class OptionsTypeMetadata
         var hasAlias = false;
         foreach (var attribute in property.GetAttributes())
         {
-            if (attribute.AttributeClass?.ToDisplayString() == "Microsoft.Extensions.Configuration.ConfigurationKeyNameAttribute" &&
-                attribute.ConstructorArguments.Length == 1 &&
-                attribute.ConstructorArguments[0].Value is string alias &&
-                !string.IsNullOrWhiteSpace(alias))
+            if (TryGetConfigurationAlias(attribute, out var alias))
             {
                 hasAlias = true;
                 yield return alias;
@@ -324,6 +345,42 @@ internal sealed class OptionsTypeMetadata
         {
             yield return property.Name;
         }
+    }
+
+    private static bool HasConfigurationAlias(IPropertySymbol property, string key)
+    {
+        foreach (var attribute in property.GetAttributes())
+        {
+            if (TryGetConfigurationAlias(attribute, out var alias) &&
+                string.Equals(alias, key, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetConfigurationAlias(AttributeData attribute, out string alias)
+    {
+        if (attribute.AttributeClass?.ToDisplayString() == "Microsoft.Extensions.Configuration.ConfigurationKeyNameAttribute" &&
+            attribute.ConstructorArguments.Length == 1 &&
+            attribute.ConstructorArguments[0].Value is string value &&
+            !string.IsNullOrWhiteSpace(value))
+        {
+            alias = value;
+            return true;
+        }
+
+        alias = null!;
+        return false;
+    }
+
+    private static bool CanBindPropertyAfterConstruction(IPropertySymbol property, bool bindsNonPublicProperties)
+    {
+        return property.SetMethod is not null &&
+               (property.SetMethod.DeclaredAccessibility == Accessibility.Public ||
+                bindsNonPublicProperties);
     }
 
     private static bool HasValidationAttribute(ISymbol symbol)
@@ -534,15 +591,21 @@ internal sealed class OptionsTypeMetadata
 
 internal sealed class BindableProperty
 {
-    public BindableProperty(IPropertySymbol symbol, ImmutableArray<string> configurationNames, bool hasValidationAttribute)
+    public BindableProperty(
+        IPropertySymbol symbol,
+        ImmutableArray<string> configurationNames,
+        bool isConstructorBound,
+        bool hasValidationAttribute)
     {
         Symbol = symbol;
         ConfigurationNames = configurationNames;
+        IsConstructorBound = isConstructorBound;
         HasValidationAttribute = hasValidationAttribute;
     }
 
     public IPropertySymbol Symbol { get; }
     public ImmutableArray<string> ConfigurationNames { get; }
+    public bool IsConstructorBound { get; }
     public bool HasValidationAttribute { get; }
 }
 
