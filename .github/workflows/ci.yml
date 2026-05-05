@@ -36,7 +36,7 @@ jobs:
         run: dotnet test ConfigContraband.slnx --configuration Release --no-build --logger trx --results-directory TestResults --collect:"XPlat Code Coverage"
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           directory: TestResults
           fail_ci_if_error: true
