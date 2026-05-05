@@ -77,7 +77,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 registration.OptionsType.Name));
         }
 
-        var metadata = OptionsTypeMetadata.Create(registration.OptionsType);
+        var metadata = OptionsTypeMetadata.Create(registration.OptionsType, registration.BindsNonPublicProperties);
         if (metadata.HasAnyDataAnnotations() && !registration.HasValidateDataAnnotations)
         {
             var properties = ImmutableDictionary<string, string?>.Empty
@@ -96,7 +96,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         OptionsRegistration registration,
         ConcurrentDictionary<string, byte> nestedValidationReported)
     {
-        var metadata = OptionsTypeMetadata.Create(registration.OptionsType);
+        var metadata = OptionsTypeMetadata.Create(registration.OptionsType, registration.BindsNonPublicProperties);
         foreach (var candidate in metadata.GetNestedValidationCandidates())
         {
             var reportKey = candidate.Property.Symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) +
@@ -174,7 +174,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var metadata = OptionsTypeMetadata.Create(registration.OptionsType);
+        var metadata = OptionsTypeMetadata.Create(registration.OptionsType, registration.BindsNonPublicProperties);
         foreach (var matchingSection in sections)
         {
             AnalyzeUnknownKeysInSection(
@@ -196,6 +196,11 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             if (!metadata.TryGetConfigurationProperty(property.Key, out var bindableProperty))
             {
+                if (metadata.TryGetSettableConstructorBoundAlias(property.Key, section, out _))
+                {
+                    continue;
+                }
+
                 var reportKey = metadata.TypeKey + "|" + property.Location.GetLineSpan().Path + "|" + property.FullPath;
                 if (!unknownKeysReported.TryAdd(reportKey, 0))
                 {
@@ -363,6 +368,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         var chain = InvocationChain.Create(invocation, semanticModel, methodName);
         var hasValidateOnStart = chain.MethodNames.Contains("ValidateOnStart") ||
             HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel);
+        var bindsNonPublicProperties = HasBindNonPublicPropertiesEnabled(invocation, semanticModel);
 
         registration = new OptionsRegistration(
             optionsType,
@@ -373,7 +379,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             sectionExpressionContainsFullPath,
             chain.MethodNames.Contains("ValidateDataAnnotations"),
             hasValidateOnStart,
-            chain.MethodNames.Any(IsValidationMethod));
+            chain.MethodNames.Any(IsValidationMethod),
+            bindsNonPublicProperties);
         return true;
     }
 
@@ -450,11 +457,114 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 sectionExpressionContainsFullPath,
                 hasValidateDataAnnotations: false,
                 hasValidateOnStart: false,
-                hasValidation: false);
+                hasValidation: false,
+                HasBindNonPublicPropertiesEnabled(invocation, semanticModel));
             return true;
         }
 
         return false;
+    }
+
+    private static bool HasBindNonPublicPropertiesEnabled(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        return invocation.ArgumentList.Arguments.Any(argument =>
+            ContainsBindNonPublicPropertiesEnabled(argument.Expression, semanticModel));
+    }
+
+    private static bool ContainsBindNonPublicPropertiesEnabled(
+        ExpressionSyntax? expression,
+        SemanticModel semanticModel)
+    {
+        if (expression is null)
+        {
+            return false;
+        }
+
+        if (expression is SimpleLambdaExpressionSyntax simpleLambda)
+        {
+            var parameter = semanticModel.GetDeclaredSymbol(simpleLambda.Parameter);
+            return parameter is not null &&
+                   (ContainsBindNonPublicPropertiesEnabled(simpleLambda.ExpressionBody, semanticModel, parameter) ||
+                    ContainsBindNonPublicPropertiesEnabled(simpleLambda.Block, semanticModel, parameter));
+        }
+
+        if (expression is ParenthesizedLambdaExpressionSyntax parenthesizedLambda)
+        {
+            var parameter = parenthesizedLambda.ParameterList.Parameters.Count == 1
+                ? semanticModel.GetDeclaredSymbol(parenthesizedLambda.ParameterList.Parameters[0])
+                : null;
+            return parameter is not null &&
+                   (ContainsBindNonPublicPropertiesEnabled(parenthesizedLambda.ExpressionBody, semanticModel, parameter) ||
+                    ContainsBindNonPublicPropertiesEnabled(parenthesizedLambda.Block, semanticModel, parameter));
+        }
+
+        return false;
+    }
+
+    private static bool ContainsBindNonPublicPropertiesEnabled(
+        ExpressionSyntax? expression,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter)
+    {
+        return IsBindNonPublicPropertiesEnabledAssignment(expression, semanticModel, binderOptionsParameter);
+    }
+
+    private static bool ContainsBindNonPublicPropertiesEnabled(
+        BlockSyntax? block,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter)
+    {
+        if (block is null)
+        {
+            return false;
+        }
+
+        foreach (var statement in block.Statements)
+        {
+            if (statement is ExpressionStatementSyntax expressionStatement &&
+                IsBindNonPublicPropertiesEnabledAssignment(expressionStatement.Expression, semanticModel, binderOptionsParameter))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsBindNonPublicPropertiesEnabledAssignment(
+        ExpressionSyntax? expression,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter)
+    {
+        if (expression is not AssignmentExpressionSyntax assignment ||
+            !assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) ||
+            assignment.Left is not MemberAccessExpressionSyntax memberAccess ||
+            !string.Equals(memberAccess.Name.Identifier.ValueText, "BindNonPublicProperties", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var property = semanticModel.GetSymbolInfo(memberAccess).Symbol as IPropertySymbol;
+        if (property is null ||
+            !string.Equals(property.Name, "BindNonPublicProperties", StringComparison.Ordinal) ||
+            !string.Equals(property.ContainingType.ToDisplayString(), "Microsoft.Extensions.Configuration.BinderOptions", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!SymbolEqualityComparer.Default.Equals(
+                semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol,
+                binderOptionsParameter))
+        {
+            return false;
+        }
+
+        var constant = semanticModel.GetConstantValue(assignment.Right);
+        return constant.HasValue &&
+               constant.Value is bool enabled &&
+               enabled;
     }
 
     private static bool TryGetConstantSectionPath(
@@ -648,7 +758,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             bool sectionExpressionContainsFullPath,
             bool hasValidateDataAnnotations,
             bool hasValidateOnStart,
-            bool hasValidation)
+            bool hasValidation,
+            bool bindsNonPublicProperties)
         {
             OptionsType = optionsType;
             SectionPath = sectionPath;
@@ -659,6 +770,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             HasValidateDataAnnotations = hasValidateDataAnnotations;
             HasValidateOnStart = hasValidateOnStart;
             HasValidation = hasValidation;
+            BindsNonPublicProperties = bindsNonPublicProperties;
         }
 
         public INamedTypeSymbol OptionsType { get; }
@@ -670,6 +782,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         public bool HasValidateDataAnnotations { get; }
         public bool HasValidateOnStart { get; }
         public bool HasValidation { get; }
+        public bool BindsNonPublicProperties { get; }
     }
 
     private sealed class InvocationChain
@@ -687,7 +800,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             var methods = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
             methods.Add(bindMethodName);
-            AddReceiverInvocations(bindInvocation, methods);
+            AddReceiverInvocations(bindInvocation, semanticModel, methods);
 
             var current = bindInvocation;
             var outermost = bindInvocation;
@@ -696,7 +809,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                    memberAccess.Expression == current &&
                    memberAccess.Parent is InvocationExpressionSyntax nextInvocation)
             {
-                methods.Add(memberAccess.Name.Identifier.ValueText);
+                AddRecognizedOptionsBuilderMethod(nextInvocation, semanticModel, methods);
                 outermost = nextInvocation;
                 current = nextInvocation;
             }
@@ -708,14 +821,15 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
         private static void AddReceiverInvocations(
             InvocationExpressionSyntax invocation,
+            SemanticModel semanticModel,
             ImmutableHashSet<string>.Builder methods)
         {
             var current = invocation;
             while (current.Expression is MemberAccessExpressionSyntax memberAccess &&
                    memberAccess.Expression is InvocationExpressionSyntax receiverInvocation &&
-                   receiverInvocation.Expression is MemberAccessExpressionSyntax receiverMemberAccess)
+                   receiverInvocation.Expression is MemberAccessExpressionSyntax)
             {
-                methods.Add(receiverMemberAccess.Name.Identifier.ValueText);
+                AddRecognizedOptionsBuilderMethod(receiverInvocation, semanticModel, methods);
                 current = receiverInvocation;
             }
         }
@@ -726,17 +840,133 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             ImmutableHashSet<string>.Builder methods)
         {
             var declarator = bindInvocation.FirstAncestorOrSelf<VariableDeclaratorSyntax>();
-            if (declarator?.Initializer?.Value is null ||
-                !declarator.Initializer.Value.Span.Contains(bindInvocation.Span) ||
-                declarator.Parent?.Parent is not LocalDeclarationStatementSyntax declarationStatement ||
-                declarationStatement.Parent is not BlockSyntax block ||
-                semanticModel.GetDeclaredSymbol(declarator) is not ILocalSymbol localSymbol)
+            if (declarator?.Initializer?.Value is not null &&
+                declarator.Initializer.Value.Span.Contains(bindInvocation.Span) &&
+                declarator.Parent?.Parent is LocalDeclarationStatementSyntax declarationStatement &&
+                declarationStatement.Parent is BlockSyntax declarationBlock &&
+                semanticModel.GetDeclaredSymbol(declarator) is ILocalSymbol declaredLocalSymbol)
+            {
+                AddSubsequentLocalInvocations(
+                    declarationBlock,
+                    declarationBlock.Statements.IndexOf(declarationStatement) + 1,
+                    declaredLocalSymbol,
+                    semanticModel,
+                    methods);
+                return;
+            }
+
+            if (bindInvocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
+                semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol is not ILocalSymbol receiverLocalSymbol ||
+                bindInvocation.FirstAncestorOrSelf<ExpressionStatementSyntax>() is not ExpressionStatementSyntax expressionStatement ||
+                !expressionStatement.Expression.Span.Contains(bindInvocation.Span) ||
+                expressionStatement.Parent is not BlockSyntax expressionBlock)
             {
                 return;
             }
 
-            var declarationIndex = block.Statements.IndexOf(declarationStatement);
-            for (var i = declarationIndex + 1; i < block.Statements.Count; i++)
+            var expressionIndex = expressionBlock.Statements.IndexOf(expressionStatement);
+            var previousBoundaryIndex = AddPreviousLocalInvocations(
+                expressionBlock,
+                expressionIndex - 1,
+                receiverLocalSymbol,
+                semanticModel,
+                methods);
+            AddLocalInitializerInvocations(
+                expressionBlock,
+                previousBoundaryIndex,
+                receiverLocalSymbol,
+                semanticModel,
+                methods);
+
+            AddSubsequentLocalInvocations(
+                expressionBlock,
+                expressionIndex + 1,
+                receiverLocalSymbol,
+                semanticModel,
+                methods);
+        }
+
+        private static int AddPreviousLocalInvocations(
+            BlockSyntax block,
+            int startIndex,
+            ILocalSymbol localSymbol,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            for (var i = startIndex; i >= 0; i--)
+            {
+                if (block.Statements[i] is not ExpressionStatementSyntax expressionStatement ||
+                    expressionStatement.Expression is not InvocationExpressionSyntax invocation ||
+                    !TryCollectLocalInvocationChain(invocation, localSymbol, semanticModel, methods))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static void AddLocalInitializerInvocations(
+            BlockSyntax block,
+            int statementIndex,
+            ILocalSymbol localSymbol,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            if (statementIndex < 0 ||
+                statementIndex >= block.Statements.Count ||
+                block.Statements[statementIndex] is not LocalDeclarationStatementSyntax declarationStatement)
+            {
+                return;
+            }
+
+            foreach (var declarator in declarationStatement.Declaration.Variables)
+            {
+                if (semanticModel.GetDeclaredSymbol(declarator) is not ILocalSymbol declaredLocal ||
+                    !SymbolEqualityComparer.Default.Equals(declaredLocal, localSymbol) ||
+                    declarator.Initializer?.Value is not InvocationExpressionSyntax initializerInvocation)
+                {
+                    continue;
+                }
+
+                AddRecognizedInitializerInvocation(initializerInvocation, semanticModel, methods);
+                return;
+            }
+        }
+
+        private static void AddRecognizedInitializerInvocation(
+            InvocationExpressionSyntax invocation,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            var current = invocation;
+            while (true)
+            {
+                AddRecognizedOptionsBuilderMethod(current, semanticModel, methods);
+                if (IsAddOptionsWithValidateOnStart(current, semanticModel))
+                {
+                    methods.Add("ValidateOnStart");
+                }
+
+                if (current.Expression is not MemberAccessExpressionSyntax memberAccess ||
+                    memberAccess.Expression is not InvocationExpressionSyntax receiverInvocation ||
+                    receiverInvocation.Expression is not MemberAccessExpressionSyntax)
+                {
+                    return;
+                }
+
+                current = receiverInvocation;
+            }
+        }
+
+        private static void AddSubsequentLocalInvocations(
+            BlockSyntax block,
+            int startIndex,
+            ILocalSymbol localSymbol,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            for (var i = startIndex; i < block.Statements.Count; i++)
             {
                 if (block.Statements[i] is not ExpressionStatementSyntax expressionStatement ||
                     expressionStatement.Expression is not InvocationExpressionSyntax invocation ||
@@ -760,7 +990,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
             if (IsLocalReference(memberAccess.Expression, localSymbol, semanticModel))
             {
-                methods.Add(memberAccess.Name.Identifier.ValueText);
+                AddRecognizedOptionsBuilderMethod(invocation, semanticModel, methods);
                 return true;
             }
 
@@ -770,8 +1000,57 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 return false;
             }
 
-            methods.Add(memberAccess.Name.Identifier.ValueText);
+            AddRecognizedOptionsBuilderMethod(invocation, semanticModel, methods);
             return true;
+        }
+
+        private static void AddRecognizedOptionsBuilderMethod(
+            InvocationExpressionSyntax invocation,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+            var original = symbol?.ReducedFrom ?? symbol;
+            if (original is null)
+            {
+                return;
+            }
+
+            if (IsOptionsBuilderValidateMethod(original))
+            {
+                methods.Add("Validate");
+                return;
+            }
+
+            if (IsOptionsBuilderValidateOnStartMethod(original))
+            {
+                methods.Add("ValidateOnStart");
+                return;
+            }
+
+            if (IsOptionsBuilderValidateDataAnnotationsMethod(original))
+            {
+                methods.Add("ValidateDataAnnotations");
+            }
+        }
+
+        private static bool IsOptionsBuilderValidateMethod(IMethodSymbol method)
+        {
+            return string.Equals(method.Name, "Validate", StringComparison.Ordinal) &&
+                   method.ContainingType.Name == "OptionsBuilder" &&
+                   method.ContainingType.ContainingNamespace.ToDisplayString() == "Microsoft.Extensions.Options";
+        }
+
+        private static bool IsOptionsBuilderValidateOnStartMethod(IMethodSymbol method)
+        {
+            return string.Equals(method.Name, "ValidateOnStart", StringComparison.Ordinal) &&
+                   string.Equals(method.ContainingType.ToDisplayString(), "Microsoft.Extensions.DependencyInjection.OptionsBuilderExtensions", StringComparison.Ordinal);
+        }
+
+        private static bool IsOptionsBuilderValidateDataAnnotationsMethod(IMethodSymbol method)
+        {
+            return string.Equals(method.Name, "ValidateDataAnnotations", StringComparison.Ordinal) &&
+                   string.Equals(method.ContainingType.ToDisplayString(), "Microsoft.Extensions.DependencyInjection.OptionsBuilderDataAnnotationsExtensions", StringComparison.Ordinal);
         }
 
         private static bool IsLocalReference(

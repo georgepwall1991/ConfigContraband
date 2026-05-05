@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ConfigContraband\ConfigContraband.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
-    <AdditionalFiles Include="appsettings*.json" />
+    <AdditionalFiles Include="appsettings.json;appsettings.*.json" />
   </ItemGroup>
 
   <ItemGroup>

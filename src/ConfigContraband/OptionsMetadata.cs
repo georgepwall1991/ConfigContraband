@@ -8,12 +8,22 @@ namespace ConfigContraband;
 
 internal sealed class OptionsTypeMetadata
 {
-    private OptionsTypeMetadata(INamedTypeSymbol type, ImmutableArray<BindableProperty> bindableProperties, bool implementsValidatableObject)
+    private readonly bool _hasAnyDataAnnotations;
+    private readonly bool _bindsNonPublicProperties;
+
+    private OptionsTypeMetadata(
+        INamedTypeSymbol type,
+        ImmutableArray<BindableProperty> bindableProperties,
+        bool implementsValidatableObject,
+        bool hasAnyDataAnnotations,
+        bool bindsNonPublicProperties)
     {
         TypeName = type.Name;
         TypeKey = type.ToDisplayString();
         BindableProperties = bindableProperties;
         ImplementsValidatableObject = implementsValidatableObject;
+        _hasAnyDataAnnotations = hasAnyDataAnnotations;
+        _bindsNonPublicProperties = bindsNonPublicProperties;
     }
 
     public string TypeName { get; }
@@ -21,25 +31,31 @@ internal sealed class OptionsTypeMetadata
     public ImmutableArray<BindableProperty> BindableProperties { get; }
     public bool ImplementsValidatableObject { get; }
 
-    public static OptionsTypeMetadata Create(INamedTypeSymbol type)
+    public static OptionsTypeMetadata Create(INamedTypeSymbol type, bool bindsNonPublicProperties = false)
     {
         var properties = ImmutableArray.CreateBuilder<BindableProperty>();
 
-        foreach (var member in GetBindableProperties(type))
+        foreach (var member in GetBindableProperties(type, bindsNonPublicProperties))
         {
             properties.Add(new BindableProperty(
-                member,
-                GetConfigurationNames(member).ToImmutableArray(),
-                HasValidationAttribute(member)));
+                member.Property,
+                GetConfigurationNames(member.Property, member.IsConstructorBound).ToImmutableArray(),
+                member.IsConstructorBound,
+                member.ConstructorParameterCanUseDefault,
+                HasValidationAttribute(member.Property)));
         }
 
-        return new OptionsTypeMetadata(type, properties.ToImmutable(), ImplementsInterface(type, "System.ComponentModel.DataAnnotations.IValidatableObject"));
+        return new OptionsTypeMetadata(
+            type,
+            properties.ToImmutable(),
+            ImplementsInterface(type, "System.ComponentModel.DataAnnotations.IValidatableObject"),
+            ContainsValidationAttributes(type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), bindsNonPublicProperties),
+            bindsNonPublicProperties);
     }
 
     public bool HasAnyDataAnnotations()
     {
-        return ImplementsValidatableObject ||
-               BindableProperties.Any(property => property.HasValidationAttribute);
+        return _hasAnyDataAnnotations;
     }
 
     public bool TryGetConfigurationProperty(string key, out BindableProperty bindableProperty)
@@ -60,12 +76,35 @@ internal sealed class OptionsTypeMetadata
         return false;
     }
 
+    public bool TryGetSettableConstructorBoundAlias(
+        string key,
+        ConfigurationNode section,
+        out BindableProperty bindableProperty)
+    {
+        foreach (var property in BindableProperties)
+        {
+            if (!property.IsConstructorBound ||
+                !CanBindPropertyAfterConstruction(property.Symbol, _bindsNonPublicProperties) ||
+                (!property.ConstructorParameterCanUseDefault && !section.TryGetProperty(property.Symbol.Name, out _)) ||
+                !HasConfigurationAlias(property.Symbol, key))
+            {
+                continue;
+            }
+
+            bindableProperty = property;
+            return true;
+        }
+
+        bindableProperty = null!;
+        return false;
+    }
+
     public bool TryCreateNestedMetadata(BindableProperty property, out OptionsTypeMetadata metadata)
     {
         if (IsPotentialNestedObject(property.Symbol.Type) &&
             property.Symbol.Type is INamedTypeSymbol namedType)
         {
-            metadata = Create(namedType);
+            metadata = Create(namedType, _bindsNonPublicProperties);
             return true;
         }
 
@@ -79,7 +118,7 @@ internal sealed class OptionsTypeMetadata
             IsPotentialNestedObject(elementType) &&
             elementType is INamedTypeSymbol namedType)
         {
-            metadata = Create(namedType);
+            metadata = Create(namedType, _bindsNonPublicProperties);
             return true;
         }
 
@@ -93,7 +132,7 @@ internal sealed class OptionsTypeMetadata
             IsPotentialNestedObject(valueType) &&
             valueType is INamedTypeSymbol namedType)
         {
-            metadata = Create(namedType);
+            metadata = Create(namedType, _bindsNonPublicProperties);
             return true;
         }
 
@@ -108,7 +147,7 @@ internal sealed class OptionsTypeMetadata
             IsPotentialNestedObject(elementType) &&
             elementType is INamedTypeSymbol namedType)
         {
-            metadata = Create(namedType);
+            metadata = Create(namedType, _bindsNonPublicProperties);
             return true;
         }
 
@@ -140,31 +179,32 @@ internal sealed class OptionsTypeMetadata
             if (TryGetCollectionElementType(property.Symbol.Type, out var elementType))
             {
                 if (IsPotentialNestedObject(elementType) &&
-                    ContainsValidationAttributes(elementType, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default)) &&
+                    ContainsValidationAttributes(elementType, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), _bindsNonPublicProperties) &&
                     !HasAttribute(property.Symbol, "Microsoft.Extensions.Options.ValidateEnumeratedItemsAttribute"))
                 {
                     builder.Add(new NestedValidationCandidate(property, "ValidateEnumeratedItems", isCollection: true));
                 }
 
-                AddNestedValidationCandidates(elementType, builder, visited);
+                AddNestedValidationCandidates(elementType, builder, visited, _bindsNonPublicProperties);
                 continue;
             }
 
             if (IsPotentialNestedObject(property.Symbol.Type) &&
-                ContainsValidationAttributes(property.Symbol.Type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default)) &&
+                ContainsValidationAttributes(property.Symbol.Type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), _bindsNonPublicProperties) &&
                 !HasAttribute(property.Symbol, "Microsoft.Extensions.Options.ValidateObjectMembersAttribute"))
             {
                 builder.Add(new NestedValidationCandidate(property, "ValidateObjectMembers", isCollection: false));
             }
 
-            AddNestedValidationCandidates(property.Symbol.Type, builder, visited);
+            AddNestedValidationCandidates(property.Symbol.Type, builder, visited, _bindsNonPublicProperties);
         }
     }
 
     private static void AddNestedValidationCandidates(
         ITypeSymbol type,
         ImmutableArray<NestedValidationCandidate>.Builder builder,
-        HashSet<ITypeSymbol> visited)
+        HashSet<ITypeSymbol> visited,
+        bool bindsNonPublicProperties)
     {
         if (!IsPotentialNestedObject(type) ||
             type is not INamedTypeSymbol namedType ||
@@ -173,47 +213,212 @@ internal sealed class OptionsTypeMetadata
             return;
         }
 
-        Create(namedType).AddNestedValidationCandidates(builder, visited);
+        Create(namedType, bindsNonPublicProperties).AddNestedValidationCandidates(builder, visited);
     }
 
-    private static bool IsBindable(IPropertySymbol property)
+    private static bool IsBindable(
+        IPropertySymbol property,
+        INamedTypeSymbol rootType,
+        bool bindsNonPublicProperties,
+        out bool isConstructorBound,
+        out bool constructorParameterCanUseDefault)
+    {
+        isConstructorBound = false;
+        constructorParameterCanUseDefault = false;
+        if (property.IsStatic ||
+            property.DeclaredAccessibility != Accessibility.Public ||
+            property.GetMethod is null ||
+            property.Parameters.Length != 0)
+        {
+            return false;
+        }
+
+        var constructorBound = TryGetConstructorBoundProperty(
+            property,
+            rootType,
+            out var constructorParameterCanUseDefaultValue);
+        if (property.SetMethod is not null &&
+            (property.SetMethod.DeclaredAccessibility == Accessibility.Public ||
+             bindsNonPublicProperties))
+        {
+            isConstructorBound = constructorBound;
+            constructorParameterCanUseDefault = constructorParameterCanUseDefaultValue;
+            return true;
+        }
+
+        if (constructorBound)
+        {
+            isConstructorBound = true;
+            constructorParameterCanUseDefault = constructorParameterCanUseDefaultValue;
+            return true;
+        }
+
+        if (HasPropertyInitializer(property) &&
+            (IsPotentialNestedObject(property.Type) || IsMutableCollectionType(property.Type)))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<BindablePropertyCandidate> GetBindableProperties(INamedTypeSymbol type, bool bindsNonPublicProperties)
+    {
+        foreach (var property in GetProperties(type))
+        {
+            if (IsBindable(
+                    property,
+                    type,
+                    bindsNonPublicProperties,
+                    out var isConstructorBound,
+                    out var constructorParameterCanUseDefault))
+            {
+                yield return new BindablePropertyCandidate(
+                    property,
+                    isConstructorBound,
+                    constructorParameterCanUseDefault);
+            }
+        }
+    }
+
+    private static bool TryGetConstructorBoundProperty(
+        IPropertySymbol property,
+        INamedTypeSymbol rootType,
+        out bool constructorParameterCanUseDefault)
+    {
+        constructorParameterCanUseDefault = false;
+        if (rootType.InstanceConstructors.Any(static constructor =>
+                constructor.DeclaredAccessibility == Accessibility.Public &&
+                constructor.Parameters.Length == 0))
+        {
+            return false;
+        }
+
+        var isConstructorBound = false;
+        var allMatchingConstructorParametersCanUseDefault = true;
+        var bindableConstructors = rootType.InstanceConstructors
+            .Where(static constructor =>
+                constructor.DeclaredAccessibility == Accessibility.Public &&
+                constructor.Parameters.Length > 0)
+            .ToArray();
+        if (bindableConstructors.Length != 1)
+        {
+            return false;
+        }
+
+        foreach (var constructor in bindableConstructors)
+        {
+            if (!constructor.Parameters.All(parameter => TryFindMatchingConstructorProperty(rootType, parameter, out _)))
+            {
+                continue;
+            }
+
+            foreach (var parameter in constructor.Parameters)
+            {
+                if (IsConstructorParameterForProperty(parameter, property))
+                {
+                    isConstructorBound = true;
+                    allMatchingConstructorParametersCanUseDefault &=
+                        CanUseDefaultConstructorParameterValue(parameter);
+                }
+            }
+        }
+
+        constructorParameterCanUseDefault = isConstructorBound && allMatchingConstructorParametersCanUseDefault;
+        return isConstructorBound;
+    }
+
+    private static bool TryFindMatchingConstructorProperty(
+        INamedTypeSymbol type,
+        IParameterSymbol parameter,
+        out IPropertySymbol property)
+    {
+        foreach (var candidate in GetProperties(type))
+        {
+            if (IsConstructorParameterForProperty(parameter, candidate))
+            {
+                property = candidate;
+                return true;
+            }
+        }
+
+        property = null!;
+        return false;
+    }
+
+    private static bool IsConstructorParameterForProperty(IParameterSymbol parameter, IPropertySymbol property)
     {
         return !property.IsStatic &&
                property.DeclaredAccessibility == Accessibility.Public &&
                property.GetMethod is not null &&
-               property.SetMethod is not null &&
-               property.SetMethod.DeclaredAccessibility == Accessibility.Public &&
-               property.Parameters.Length == 0;
+               property.Parameters.Length == 0 &&
+               string.Equals(parameter.Name, property.Name, StringComparison.OrdinalIgnoreCase) &&
+               SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type);
     }
 
-    private static IEnumerable<IPropertySymbol> GetBindableProperties(INamedTypeSymbol type)
+    private static bool CanUseDefaultConstructorParameterValue(IParameterSymbol parameter)
     {
-        for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
+        return parameter.IsOptional || parameter.HasExplicitDefaultValue;
+    }
+
+    private static IEnumerable<string> GetConfigurationNames(IPropertySymbol property, bool isConstructorBound)
+    {
+        if (isConstructorBound)
         {
-            foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
-            {
-                if (IsBindable(property))
-                {
-                    yield return property;
-                }
-            }
+            yield return property.Name;
+            yield break;
         }
-    }
 
-    private static IEnumerable<string> GetConfigurationNames(IPropertySymbol property)
-    {
-        yield return property.Name;
-
+        var hasAlias = false;
         foreach (var attribute in property.GetAttributes())
         {
-            if (attribute.AttributeClass?.ToDisplayString() == "Microsoft.Extensions.Configuration.ConfigurationKeyNameAttribute" &&
-                attribute.ConstructorArguments.Length == 1 &&
-                attribute.ConstructorArguments[0].Value is string alias &&
-                !string.IsNullOrWhiteSpace(alias))
+            if (TryGetConfigurationAlias(attribute, out var alias))
             {
+                hasAlias = true;
                 yield return alias;
             }
         }
+
+        if (!hasAlias)
+        {
+            yield return property.Name;
+        }
+    }
+
+    private static bool HasConfigurationAlias(IPropertySymbol property, string key)
+    {
+        foreach (var attribute in property.GetAttributes())
+        {
+            if (TryGetConfigurationAlias(attribute, out var alias) &&
+                string.Equals(alias, key, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetConfigurationAlias(AttributeData attribute, out string alias)
+    {
+        if (attribute.AttributeClass?.ToDisplayString() == "Microsoft.Extensions.Configuration.ConfigurationKeyNameAttribute" &&
+            attribute.ConstructorArguments.Length == 1 &&
+            attribute.ConstructorArguments[0].Value is string value &&
+            !string.IsNullOrWhiteSpace(value))
+        {
+            alias = value;
+            return true;
+        }
+
+        alias = null!;
+        return false;
+    }
+
+    private static bool CanBindPropertyAfterConstruction(IPropertySymbol property, bool bindsNonPublicProperties)
+    {
+        return property.SetMethod is not null &&
+               (property.SetMethod.DeclaredAccessibility == Accessibility.Public ||
+                bindsNonPublicProperties);
     }
 
     private static bool HasValidationAttribute(ISymbol symbol)
@@ -221,7 +426,10 @@ internal sealed class OptionsTypeMetadata
         return symbol.GetAttributes().Any(attribute => InheritsFrom(attribute.AttributeClass, "System.ComponentModel.DataAnnotations.ValidationAttribute"));
     }
 
-    private static bool ContainsValidationAttributes(ITypeSymbol type, HashSet<ITypeSymbol> visited)
+    private static bool ContainsValidationAttributes(
+        ITypeSymbol type,
+        HashSet<ITypeSymbol> visited,
+        bool bindsNonPublicProperties)
     {
         if (!visited.Add(type))
         {
@@ -238,8 +446,14 @@ internal sealed class OptionsTypeMetadata
             return true;
         }
 
-        foreach (var property in GetBindableProperties(namedType))
+        if (HasValidationAttribute(namedType))
         {
+            return true;
+        }
+
+        foreach (var candidate in GetBindableProperties(namedType, bindsNonPublicProperties))
+        {
+            var property = candidate.Property;
             if (HasValidationAttribute(property))
             {
                 return true;
@@ -248,7 +462,7 @@ internal sealed class OptionsTypeMetadata
             if (TryGetCollectionElementType(property.Type, out var elementType))
             {
                 if (IsPotentialNestedObject(elementType) &&
-                    ContainsValidationAttributes(elementType, visited))
+                    ContainsValidationAttributes(elementType, visited, bindsNonPublicProperties))
                 {
                     return true;
                 }
@@ -257,13 +471,24 @@ internal sealed class OptionsTypeMetadata
             }
 
             if (IsPotentialNestedObject(property.Type) &&
-                ContainsValidationAttributes(property.Type, visited))
+                ContainsValidationAttributes(property.Type, visited, bindsNonPublicProperties))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static IEnumerable<IPropertySymbol> GetProperties(INamedTypeSymbol type)
+    {
+        for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
+            {
+                yield return property;
+            }
+        }
     }
 
     private static bool HasAttribute(ISymbol symbol, string metadataName)
@@ -296,6 +521,39 @@ internal sealed class OptionsTypeMetadata
         return type.TypeKind == TypeKind.Class &&
                type.SpecialType != SpecialType.System_String &&
                !IsSystemNamespace(type.ContainingNamespace);
+    }
+
+    private static bool HasPropertyInitializer(IPropertySymbol property)
+    {
+        return property.DeclaringSyntaxReferences
+            .Select(reference => reference.GetSyntax())
+            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.PropertyDeclarationSyntax>()
+            .Any(declaration => declaration.Initializer is not null);
+    }
+
+    private static bool IsMutableCollectionType(ITypeSymbol type)
+    {
+        if (type is not INamedTypeSymbol namedType)
+        {
+            return false;
+        }
+
+        foreach (var iface in namedType.AllInterfaces.Concat(new[] { namedType }))
+        {
+            if (!iface.IsGenericType)
+            {
+                continue;
+            }
+
+            var originalDefinition = iface.OriginalDefinition.ToDisplayString();
+            if (originalDefinition == "System.Collections.Generic.ICollection<T>" ||
+                originalDefinition == "System.Collections.Generic.IDictionary<TKey, TValue>")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsSystemNamespace(INamespaceSymbol containingNamespace)
@@ -360,19 +618,45 @@ internal sealed class OptionsTypeMetadata
         valueType = null!;
         return false;
     }
+
+    private readonly struct BindablePropertyCandidate
+    {
+        public BindablePropertyCandidate(
+            IPropertySymbol property,
+            bool isConstructorBound,
+            bool constructorParameterCanUseDefault)
+        {
+            Property = property;
+            IsConstructorBound = isConstructorBound;
+            ConstructorParameterCanUseDefault = constructorParameterCanUseDefault;
+        }
+
+        public IPropertySymbol Property { get; }
+        public bool IsConstructorBound { get; }
+        public bool ConstructorParameterCanUseDefault { get; }
+    }
 }
 
 internal sealed class BindableProperty
 {
-    public BindableProperty(IPropertySymbol symbol, ImmutableArray<string> configurationNames, bool hasValidationAttribute)
+    public BindableProperty(
+        IPropertySymbol symbol,
+        ImmutableArray<string> configurationNames,
+        bool isConstructorBound,
+        bool constructorParameterCanUseDefault,
+        bool hasValidationAttribute)
     {
         Symbol = symbol;
         ConfigurationNames = configurationNames;
+        IsConstructorBound = isConstructorBound;
+        ConstructorParameterCanUseDefault = constructorParameterCanUseDefault;
         HasValidationAttribute = hasValidationAttribute;
     }
 
     public IPropertySymbol Symbol { get; }
     public ImmutableArray<string> ConfigurationNames { get; }
+    public bool IsConstructorBound { get; }
+    public bool ConstructorParameterCanUseDefault { get; }
     public bool HasValidationAttribute { get; }
 }
 

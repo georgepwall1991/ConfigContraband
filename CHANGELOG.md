@@ -2,6 +2,45 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.1.11 - 2026-05-04
+
+- Hardened `CFG003` and `CFG004` chain analysis so only the real framework `OptionsBuilder<TOptions>` validation APIs count as validation or startup validation.
+- Added regression coverage proving named `AddOptions<TOptions>("name")` builder chains keep section, validation, and unknown-key diagnostics.
+- Added code-fix regression coverage proving named `AddOptions<TOptions>("name")` builder chains receive the same `ValidateOnStart()` and `ValidateDataAnnotations()` fixes.
+- Hardened constructor-bound bindable-property detection so derived options constructors can map to inherited public properties, matching runtime binder behaviour for validation and unknown-key analysis.
+- Hardened constructor-bound bindable-property detection to ignore ambiguous types with multiple public parameterized constructors, matching the runtime binder.
+- Hardened `CFG004` and `CFG005` so type-level `ValidationAttribute`s on root or nested options types are treated as DataAnnotations validation.
+- Added `CFG005` guard coverage proving dictionary value objects stay quiet because recursive Options validation attributes do not validate dictionary values directly.
+- Hardened `CFG006` so `[ConfigurationKeyName]` aliases on settable constructor-bound properties are accepted only when the constructor parameter key is present in the same section.
+- Hardened `CFG006` so `[ConfigurationKeyName]` aliases on settable constructor-bound properties are also accepted when the matching constructor parameter has a default value.
+- Added `CFG006` regression coverage for private-set constructor-bound aliases with and without `BindNonPublicProperties`.
+- Hardened `BindNonPublicProperties` detection so only assignments on the actual binder-options lambda parameter make private-set properties analyzable.
+- Added regression coverage for custom same-name extension methods that previously could hide missing `ValidateOnStart()` / `ValidateDataAnnotations()` diagnostics or create a validation false positive.
+- Hardened split local `OptionsBuilder<TOptions>` chain analysis so validation calls after a separate local `BindConfiguration(...)` / `Bind(...)` statement are recognized.
+- Hardened split local `OptionsBuilder<TOptions>` chain analysis so adjacent validation calls before a later local bind statement are recognized without scanning past unrelated statements.
+- Hardened split local `OptionsBuilder<TOptions>` chain analysis so adjacent builder initializer calls such as `AddOptionsWithValidateOnStart<TOptions>()` and `.ValidateDataAnnotations()` are recognized before a later local bind statement.
+- Added code-fix regression coverage for the expanded split local validation-chain shapes, including pre-bind validation and initializer startup validation.
+- Synced NuGet package release notes with the `0.1.11` analyzer hardening surface.
+- Added formatting verification to PR CI so whitespace and formatter drift fail before merge.
+- Added formatting verification to the NuGet publish workflow so release packaging uses the same formatter gate as PR CI.
+- Synced analyzer release tracking so diagnostics shipped since `0.1.0` are recorded in `AnalyzerReleases.Shipped.md` instead of remaining marked as unshipped.
+- Added regression coverage proving analyzer diagnostics stay quiet in generated source files.
+- Added regression coverage proving analyzer diagnostics stay quiet in generated `.g.cs` source files.
+- Hardened `BindNonPublicProperties` handling so explicit binder options make private-set options properties visible to validation and unknown-key analysis.
+- Hardened bindable-property detection so constructor-bound options records and immutable classes align with the runtime configuration binder, including nested validation and unknown-key analysis.
+- Hardened the `CFG005` recursive-validation code fix so constructor-bound record properties receive property-targeted recursive validation attributes.
+- Added `CFG005` code-fix regression coverage proving constructor-bound record collections receive property-targeted `[ValidateEnumeratedItems]`.
+- Added `CFG005` code-fix regression coverage proving constructor-bound record collection fixes fully qualify `[ValidateEnumeratedItems]` when a local attribute name conflicts.
+- Hardened bindable-property detection so initialized get-only object, collection, and dictionary properties align with the runtime configuration binder.
+- Hardened `CFG004` so nested object graphs that contain DataAnnotations still require `ValidateDataAnnotations()` even when the root options type has no direct annotations.
+- Hardened the `CFG005` recursive-validation code fix to reuse namespace-local `Microsoft.Extensions.Options` imports and add new imports to the namespace-local using block when that is the file style.
+- Hardened the `CFG005` recursive-validation code fix to fully qualify inserted attributes when a project-local attribute name would otherwise shadow `ValidateObjectMembersAttribute` or `ValidateEnumeratedItemsAttribute`.
+- Hardened `CFG006` colon-delimited appsettings projection so sibling flattened keys under the same nested object are merged into one logical configuration node before unknown-key analysis.
+- Hardened `CFG006` to treat `[ConfigurationKeyName]` as the runtime configuration key override instead of also accepting the CLR property name.
+- Hardened the `CFG001` section-suggestion code fix to preserve verbatim and raw string literal style when replacing misspelled section names.
+- Hardened the `CFG001` raw string section-suggestion code fix to fall back to an escaped string literal when the suggested section contains decoded line breaks.
+- Tightened appsettings file discovery to `appsettings.json` and dot-qualified `appsettings.*.json` files, avoiding lookalike files such as `appsettingsBackup.json` or `appsettingsSchema.json`.
+
 ## 0.1.10 - 2026-05-03
 
 - Hardened `CFG001` and `CFG006` to recognize colon-delimited appsettings keys such as `"Features:Stripe"` and `"Features:Stripe:ApiKey"` as normal configuration hierarchy.

@@ -1,5 +1,5 @@
 <Project>
   <ItemGroup>
-    <AdditionalFiles Include="appsettings*.json" Exclude="bin/**;obj/**" />
+    <AdditionalFiles Include="appsettings.json;appsettings.*.json" Exclude="bin/**;obj/**" />
   </ItemGroup>
 </Project>

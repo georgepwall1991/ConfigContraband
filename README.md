@@ -26,7 +26,7 @@ Use it when your app relies on strongly typed options and you want configuration
 
 | Area | What ConfigContraband does |
 |------|----------------------------|
-| Section binding | Checks supported options bindings against visible `appsettings*.json` files. |
+| Section binding | Checks supported options bindings against visible `appsettings.json` and `appsettings.*.json` files. |
 | Startup validation | Flags options validation that is registered but not forced to run at startup. |
 | DataAnnotations | Finds `[Required]`, `[Range]`, and inherited validation attributes without `ValidateDataAnnotations()`. |
 | Nested validation | Detects nested options objects and collections that need recursive validation attributes. |
@@ -35,10 +35,10 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.1.10" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.1.11" PrivateAssets="all" />
 ```
 
-The package includes `buildTransitive` props that pass visible `appsettings*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
+The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
 
 No runtime dependency is added to your app. ConfigContraband runs as an analyzer during build and in supported IDEs.
 
@@ -49,6 +49,15 @@ ConfigContraband analyzes options registrations shaped like this:
 ```csharp
 services.AddOptions<StripeOptions>()
     .BindConfiguration("Stripe");
+```
+
+Named options use the same supported `OptionsBuilder<T>` shape:
+
+```csharp
+services.AddOptions<StripeOptions>("tenant")
+    .BindConfiguration("Stripe")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 ```
 
 It also recognizes the common explicit-section style:
@@ -80,6 +89,17 @@ optionsBuilder.ValidateDataAnnotations();
 optionsBuilder.ValidateOnStart();
 ```
 
+The same tracking works when binding happens after the builder is declared:
+
+```csharp
+var optionsBuilder = services.AddOptions<StripeOptions>();
+optionsBuilder.BindConfiguration("Stripe");
+optionsBuilder.ValidateDataAnnotations();
+optionsBuilder.ValidateOnStart();
+```
+
+Adjacent validation calls on that same local builder may appear in the builder initializer, before the bind statement, or after it. The scan stops at unrelated statements instead of guessing across wider control flow.
+
 When the analyzer cannot prove a configuration shape statically, it stays quiet. The goal is high-signal feedback, not noisy guesses.
 
 ## Rules
@@ -106,7 +126,7 @@ The sample stays out of the main solution so normal development builds remain cl
 
 ### `CFG001`: The Section Must Exist
 
-If your code binds `"Stripe"`, a visible `appsettings*.json` file should contain a matching `Stripe` section.
+If your code binds `"Stripe"`, a visible `appsettings.json` or `appsettings.*.json` file should contain a matching `Stripe` section.
 
 Before:
 
@@ -134,7 +154,7 @@ services.AddOptions<StripeOptions>()
     .ValidateOnStart();
 ```
 
-When ConfigContraband sees a likely typo, it can offer a code fix. Nested section paths use the same colon-separated shape as .NET configuration:
+When ConfigContraband sees a likely typo, it can offer a code fix. The fix keeps regular, verbatim, and raw string literal style when replacing the section name, falling back to an escaped string literal if a raw replacement would need line breaks. Nested section paths use the same colon-separated shape as .NET configuration:
 
 ```csharp
 services.AddOptions<StripeOptions>()
@@ -155,7 +175,7 @@ services.AddOptions<StripeOptions>()
 
 For nested typos, the fix keeps the parent path and replaces only the bad leaf section. If the code says `Features:Strpie` and the file contains `Features:Stripe`, the fix changes it to `Features:Stripe`.
 
-The analyzer checks every visible `appsettings*.json` additional file for section existence, including commented files, JSON string escapes, colon-delimited keys such as `"Features:Stripe"`, and duplicate JSON section members when resolving nested section paths. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
+The analyzer checks every visible `appsettings.json` and `appsettings.*.json` additional file for section existence, including commented files, JSON string escapes, colon-delimited keys such as `"Features:Stripe"`, and duplicate JSON section members when resolving nested section paths. Lookalike files such as `appsettingsBackup.json` are ignored. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
 
 ### `CFG003`: Validation Should Run When The App Starts
 
@@ -178,11 +198,13 @@ services.AddOptions<StripeOptions>()
     .ValidateOnStart();
 ```
 
-The analyzer tracks validation calls on the same fluent chain whether they appear before or after the binding call. The code fix appends `ValidateOnStart()` in the same style as the existing registration chain, including multiline chains and immediate same-block local `OptionsBuilder<T>` chains. Registrations that start with `AddOptionsWithValidateOnStart<TOptions>()` already run validation at startup, so `CFG003` stays quiet for that shape.
+The analyzer tracks validation calls on the same fluent chain whether they appear before or after the binding call. The code fix appends `ValidateOnStart()` in the same style as the existing registration chain, including multiline chains and immediate same-block local `OptionsBuilder<T>` chains where binding happens in the initializer or a later local statement. For later local bind statements, adjacent validation calls on the same local are recognized from the builder initializer, before the bind, and after the bind. Registrations that start with `AddOptionsWithValidateOnStart<TOptions>()` already run validation at startup, so `CFG003` stays quiet for that shape.
+
+`CFG003` only treats the framework `OptionsBuilder<TOptions>.Validate(...)`, `ValidateDataAnnotations()`, and `ValidateOnStart()` APIs as validation signals. Custom extension methods with the same names are ignored unless they call the framework APIs in a shape the analyzer can see.
 
 ### `CFG004`: DataAnnotations Must Be Switched On
 
-Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, so a base options class with DataAnnotations still needs validation enabled on the derived options registration. `IValidatableObject` is also part of DataAnnotations validation, so options types that implement it need the same registration.
+Attributes such as `[Required]` do nothing for Options validation unless `ValidateDataAnnotations()` is registered. Inherited bindable properties count too, including inherited get-only properties populated through a derived constructor, so a base options class with DataAnnotations still needs validation enabled on the derived options registration. Type-level validation attributes are included as well, because DataAnnotations evaluates `ValidationAttribute`s on the options object itself. Nested options graphs count too: if a nested object or list-style collection item has DataAnnotations and is part of the bindable options graph, including constructor-bound records/classes or initialized get-only object or collection properties, the root registration still needs `ValidateDataAnnotations()`. Constructor-bound properties are included only for the single-public-parameterized-constructor shape the runtime binder supports. If a binding call explicitly sets `BindNonPublicProperties = true` on the actual binder-options lambda parameter, public properties with private setters are counted too. `IValidatableObject` is also part of DataAnnotations validation, so options types that implement it need the same registration.
 
 Before:
 
@@ -216,9 +238,11 @@ services.AddOptions<StripeOptions>()
 
 The analyzer recognizes `ValidateDataAnnotations()` on the same fluent chain before or after the binding call. The code fix preserves existing fluent-chain formatting, adds `ValidateDataAnnotations()`, and only adds `ValidateOnStart()` when startup validation is not already present, including registrations started with `AddOptionsWithValidateOnStart<TOptions>()`.
 
+Like `CFG003`, `CFG004` symbol-checks the framework validation extension methods. A project-local helper named `ValidateDataAnnotations(...)` does not satisfy the rule by name alone.
+
 ### `CFG005`: Nested Options Need Recursive Validation
 
-DataAnnotations do not automatically walk into child objects or collection items. If a nested class or collection item has validation attributes or implements `IValidatableObject` anywhere in its bindable object graph, mark each parent property that should be checked recursively.
+DataAnnotations do not automatically walk into child objects or collection items. If a nested class or list-style collection item has property-level or type-level validation attributes, or implements `IValidatableObject` anywhere in its bindable object graph, mark each parent property that should be checked recursively. Initialized get-only object and mutable collection properties count because the configuration binder can populate their existing instances. Public private-set nested properties also count when the binding call opts into `BindNonPublicProperties` on the actual binder-options lambda parameter.
 
 Before:
 
@@ -253,11 +277,11 @@ public sealed class DatabaseOptions
 }
 ```
 
-For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. The code fix updates the file that owns the options property, adds `using Microsoft.Extensions.Options;` when needed, and keeps existing property comments in place. `CFG005` does not report interface-typed nested properties or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
+For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. Constructor-bound nested records/classes are included when there is exactly one public parameterized constructor and its parameters map to public properties, including inherited public properties. The code fix updates the file that owns the options property, uses a `property:` attribute target for record constructor parameters, including `[property: ValidateEnumeratedItems]` on constructor-bound collection parameters, adds `using Microsoft.Extensions.Options;` when needed, respects namespace-local using blocks, avoids project-local attribute name conflicts, and keeps existing property comments in place. `CFG005` does not report interface-typed nested properties, dictionary value objects, or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
 
 ### `CFG006`: Config Keys Should Match Options Properties
 
-Keys under a bound section should match public bindable properties, or a `[ConfigurationKeyName]` alias. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
+Keys under a bound section should match public bindable properties. Public settable properties are bindable, constructor-bound records/classes are bindable when there is exactly one public parameterized constructor and its parameters map to public properties, including inherited public properties, and initialized get-only object or mutable collection properties are treated as bindable because the runtime binder can populate them. Public private-set properties are treated as bindable only when the registration explicitly sets `BindNonPublicProperties = true` on the actual binder-options lambda parameter. If a property-bound option uses `[ConfigurationKeyName]`, that configured name replaces the CLR property name for matching. Constructor-bound properties use constructor parameter keys, matching the runtime binder; if the property is also settable after construction, including a private setter enabled by `BindNonPublicProperties`, a `[ConfigurationKeyName]` alias is accepted when the constructor key is present or the constructor parameter has a default value. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
 
 Before:
 
@@ -291,7 +315,7 @@ After:
 
 `CFG006` is informational because .NET configuration binding allows flexible shapes. It is still useful for catching the typos that hide in environment-specific settings.
 
-Visible `appsettings*.json` files are treated as a merged configuration view for unknown-key checks, including files with `//` or `/* ... */` comments and files that use colon-delimited keys such as `"Features:Stripe:WebhookSecret"`. If a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects, arrays or lists of nested options objects, strongly typed dictionary values, and dictionary values that bind to collections of nested options objects are checked recursively, so typos under `Servers:0:Port`, `Servers:primary:Port`, or `ServersByRegion:eu:0:Port`-style data can still be found.
+Visible `appsettings.json` and `appsettings.*.json` files are treated as a merged configuration view for unknown-key checks, including files with `//` or `/* ... */` comments and files that use colon-delimited keys such as `"Features:Stripe:WebhookSecret"`. Sibling flattened keys under the same nested object are projected into one logical configuration node before analysis. If a bound section appears in `appsettings.json` and `appsettings.Production.json`, keys from both files are checked. Nested options objects, arrays or lists of nested options objects, strongly typed dictionary values, and dictionary values that bind to collections of nested options objects are checked recursively, so typos under `Servers:0:Port`, `Servers:primary:Port`, or `ServersByRegion:eu:0:Port`-style data can still be found. Private-set properties are included for registrations that opt into `BindNonPublicProperties`.
 
 Dictionary entry names and scalar array items are treated as values rather than property names. Arbitrary keys under `Dictionary<string, string>` and values inside `string[]` are not reported as unknown options properties.
 
@@ -300,19 +324,19 @@ Dictionary entry names and scalar array items are treated as values rather than 
 - Prefer warnings for configuration failures that are likely to break production.
 - Keep flexible binding shapes quiet when static proof is weak.
 - Offer fixes only when the rewrite is narrow and deterministic.
-- Treat `appsettings*.json` as the contract your options classes are supposed to honor.
+- Treat `appsettings.json` and `appsettings.*.json` as the contract your options classes are supposed to honor.
 
 ## Current Scope
 
 ConfigContraband currently focuses on:
 
-- `appsettings*.json` files.
+- `appsettings.json` and `appsettings.*.json` files.
 - `AddOptions<T>().BindConfiguration("Section")` registrations.
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
 - Direct `Configure<T>(configuration.GetSection("Section"))` registrations for section and JSON-key drift.
 - String-literal section names.
-- Public bindable properties on options types, including inherited bindable properties.
-- `[ConfigurationKeyName]` aliases.
+- Public bindable properties on options types, including inherited and constructor-bound bindable properties.
+- `[ConfigurationKeyName]` key-name overrides.
 - Normal fluent chains and immediate same-block local `OptionsBuilder<T>` chains.
 
 It does not try to prove every possible dynamic configuration shape. When the analyzer cannot see enough static information, it stays quiet.
