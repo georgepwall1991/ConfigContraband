@@ -1965,6 +1965,54 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg005_does_not_report_dictionary_value_object_without_recursive_validation()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<string, ServerOptions> Servers { get; set; } = [];
+            }
+
+            public sealed class ServerOptions
+            {
+                [Required]
+                public string Host { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg005_does_not_report_dictionary_value_object_collection_without_recursive_validation()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<string, List<ServerOptions>> ServersByRegion { get; set; } = [];
+            }
+
+            public sealed class ServerOptions
+            {
+                [Required]
+                public string Host { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg005_reports_nullable_nested_object_without_recursive_validation()
     {
         var source = OptionsSource("""
