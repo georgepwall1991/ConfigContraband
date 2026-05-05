@@ -484,22 +484,37 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
         if (expression is SimpleLambdaExpressionSyntax simpleLambda)
         {
-            return ContainsBindNonPublicPropertiesEnabled(simpleLambda.ExpressionBody, semanticModel) ||
-                   ContainsBindNonPublicPropertiesEnabled(simpleLambda.Block, semanticModel);
+            var parameter = semanticModel.GetDeclaredSymbol(simpleLambda.Parameter);
+            return parameter is not null &&
+                   (ContainsBindNonPublicPropertiesEnabled(simpleLambda.ExpressionBody, semanticModel, parameter) ||
+                    ContainsBindNonPublicPropertiesEnabled(simpleLambda.Block, semanticModel, parameter));
         }
 
         if (expression is ParenthesizedLambdaExpressionSyntax parenthesizedLambda)
         {
-            return ContainsBindNonPublicPropertiesEnabled(parenthesizedLambda.ExpressionBody, semanticModel) ||
-                   ContainsBindNonPublicPropertiesEnabled(parenthesizedLambda.Block, semanticModel);
+            var parameter = parenthesizedLambda.ParameterList.Parameters.Count == 1
+                ? semanticModel.GetDeclaredSymbol(parenthesizedLambda.ParameterList.Parameters[0])
+                : null;
+            return parameter is not null &&
+                   (ContainsBindNonPublicPropertiesEnabled(parenthesizedLambda.ExpressionBody, semanticModel, parameter) ||
+                    ContainsBindNonPublicPropertiesEnabled(parenthesizedLambda.Block, semanticModel, parameter));
         }
 
-        return IsBindNonPublicPropertiesEnabledAssignment(expression, semanticModel);
+        return false;
+    }
+
+    private static bool ContainsBindNonPublicPropertiesEnabled(
+        ExpressionSyntax? expression,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter)
+    {
+        return IsBindNonPublicPropertiesEnabledAssignment(expression, semanticModel, binderOptionsParameter);
     }
 
     private static bool ContainsBindNonPublicPropertiesEnabled(
         BlockSyntax? block,
-        SemanticModel semanticModel)
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter)
     {
         if (block is null)
         {
@@ -509,7 +524,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         foreach (var statement in block.Statements)
         {
             if (statement is ExpressionStatementSyntax expressionStatement &&
-                IsBindNonPublicPropertiesEnabledAssignment(expressionStatement.Expression, semanticModel))
+                IsBindNonPublicPropertiesEnabledAssignment(expressionStatement.Expression, semanticModel, binderOptionsParameter))
             {
                 return true;
             }
@@ -520,7 +535,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
     private static bool IsBindNonPublicPropertiesEnabledAssignment(
         ExpressionSyntax? expression,
-        SemanticModel semanticModel)
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter)
     {
         if (expression is not AssignmentExpressionSyntax assignment ||
             !assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) ||
@@ -534,6 +550,13 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         if (property is null ||
             !string.Equals(property.Name, "BindNonPublicProperties", StringComparison.Ordinal) ||
             !string.Equals(property.ContainingType.ToDisplayString(), "Microsoft.Extensions.Configuration.BinderOptions", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!SymbolEqualityComparer.Default.Equals(
+                semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol,
+                binderOptionsParameter))
         {
             return false;
         }

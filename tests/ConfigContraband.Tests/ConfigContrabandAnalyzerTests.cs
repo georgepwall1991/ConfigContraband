@@ -1240,6 +1240,28 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_ignores_private_set_data_annotations_when_unrelated_binder_options_are_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options =>
+                {
+                    var unrelated = new BinderOptions();
+                    unrelated.BindNonPublicProperties = true;
+                })
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; private set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg004_does_not_report_validatable_object_when_data_annotations_enabled()
     {
         var source = OptionsSource("""
@@ -3013,6 +3035,41 @@ public sealed class ConfigContrabandAnalyzerTests
                 public bool BindNonPublicProperties { get; set; }
             }
             """, optionsTypes: """
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; private set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 3, 5, 3, 13)
+            .WithArguments("Stripe:ApiKey", "StripeOptions", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_private_set_property_when_unrelated_binder_options_are_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options =>
+                {
+                    var unrelated = new BinderOptions();
+                    unrelated.BindNonPublicProperties = true;
+                })
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
             public sealed class StripeOptions
             {
                 public string ApiKey { get; private set; } = "";
