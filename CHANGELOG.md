@@ -38,6 +38,7 @@ All notable changes to ConfigContraband will be documented in this file.
 - Hardened `CFG006` colon-delimited appsettings projection so sibling flattened keys under the same nested object are merged into one logical configuration node before unknown-key analysis.
 - Hardened `CFG006` to treat `[ConfigurationKeyName]` as the runtime configuration key override instead of also accepting the CLR property name.
 - Hardened the `CFG001` section-suggestion code fix to preserve verbatim and raw string literal style when replacing misspelled section names.
+- Hardened the `CFG001` raw string section-suggestion code fix to fall back to an escaped string literal when the suggested section contains decoded line breaks.
 - Tightened appsettings file discovery to `appsettings.json` and dot-qualified `appsettings.*.json` files, avoiding lookalike files such as `appsettingsBackup.json` or `appsettingsSchema.json`.
 
 ## 0.1.10 - 2026-05-03

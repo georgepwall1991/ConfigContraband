@@ -142,6 +142,11 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
 
         if (TryGetRawStringDelimiterLength(tokenText, out var delimiterLength))
         {
+            if (suggestion.Contains('\n') || suggestion.Contains('\r'))
+            {
+                return SyntaxFactory.Literal(suggestion);
+            }
+
             var delimiter = new string('"', Math.Max(delimiterLength, LongestQuoteRun(suggestion) + 1));
             return SyntaxFactory.Token(
                 SyntaxTriviaList.Empty,

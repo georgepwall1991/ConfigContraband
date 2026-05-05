@@ -154,7 +154,7 @@ services.AddOptions<StripeOptions>()
     .ValidateOnStart();
 ```
 
-When ConfigContraband sees a likely typo, it can offer a code fix. The fix keeps regular, verbatim, and raw string literal style when replacing the section name. Nested section paths use the same colon-separated shape as .NET configuration:
+When ConfigContraband sees a likely typo, it can offer a code fix. The fix keeps regular, verbatim, and raw string literal style when replacing the section name, falling back to an escaped string literal if a raw replacement would need line breaks. Nested section paths use the same colon-separated shape as .NET configuration:
 
 ```csharp
 services.AddOptions<StripeOptions>()

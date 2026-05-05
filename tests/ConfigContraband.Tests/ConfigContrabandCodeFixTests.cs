@@ -175,6 +175,40 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg001_fix_uses_escaped_literal_when_raw_section_replacement_contains_newline()
+    {
+        var source = OptionsSource(""""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:"""Strpe"""|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """");
+
+        var fixedSource = OptionsSource(""""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stri\npe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpe", ". Did you mean \"Stri\npe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json", """
+            {
+              "Stri\npe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg001_fix_replaces_constant_section_identifier()
     {
         var source = OptionsSource("""
