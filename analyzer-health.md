@@ -2,9 +2,9 @@
 
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
-Last refreshed: 2026-05-05
+Last refreshed: 2026-05-13
 Package version: `0.1.11`
-Base audited commit: `303ace0`
+Base audited commit: `c44bfaf`
 
 ## Scoring Rubric
 
@@ -80,6 +80,7 @@ The analyzer has a compact, coherent rule set: five diagnostics, four code-fix f
 | 2026-05-04 | 37 | `CFG005` | Dictionary value objects look similar to CFG006's recursive key-analysis dictionaries, but built-in recursive Options validation attributes do not validate dictionary values directly. | Added no-diagnostic guard coverage for dictionary value objects and dictionary values containing object collections, and documented the intentional boundary. | `CFG005` stays `4.75`, with stronger false-positive guard coverage around unsupported recursive-validation shapes. |
 | 2026-05-05 | 38 | `CFG004`, `CFG006` | `BindNonPublicProperties` detection symbol-checked the property assignment but not the receiver, so assigning `true` on an unrelated `BinderOptions` instance inside the lambda could make private-set members look bindable. | Require the assignment receiver to be the actual binder-options lambda parameter, with warning and unknown-key regressions for unrelated `BinderOptions` assignments. | `CFG004` stays `4.60` and `CFG006` stays `4.50`, with a tighter false-positive boundary around private-set options. |
 | 2026-05-05 | 39 | `CFG001` | Raw string section fixes used a single-line raw token even when the suggested decoded section name contained a line break, which could produce invalid fixed code. | Fall back to a normal escaped string literal for raw section replacements containing `\r` or `\n`, with a regression for decoded JSON newline suggestions. | `CFG001` stays `4.85`, with safer automatic fixes for unusual but valid configuration keys. |
+| 2026-05-13 | 40 | Monitor | No actionable precision debt surfaced this sweep; refreshed audit metadata only. | Bumped `Last refreshed` to 2026-05-13 and `Base audited commit` to `c44bfaf` to reflect the v0.1.11 release as the audited baseline; no analyzer, code-fix, or test changes. | No score changes. Every rule remains P3 / monitor and the Current Shortlist holds. |
 
 ## Health Baseline
 
