@@ -28,6 +28,12 @@ services.AddOptions<UnknownKeyOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+// CFG007: strict binding turns the same unknown-key shape into a startup failure.
+services.AddOptions<StrictUnknownKeyOptions>()
+    .BindConfiguration("StrictUnknownKey", options => options.ErrorOnUnknownConfiguration = true)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
 _ = services;
 
 public sealed class MissingSectionOptions
@@ -58,6 +64,14 @@ public sealed class DatabaseOptions
 }
 
 public sealed class UnknownKeyOptions
+{
+    [Required]
+    public string ApiKey { get; set; } = "";
+
+    public string WebhookSecret { get; set; } = "";
+}
+
+public sealed class StrictUnknownKeyOptions
 {
     [Required]
     public string ApiKey { get; set; } = "";

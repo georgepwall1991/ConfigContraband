@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -22,7 +24,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         DiagnosticDescriptors.ValidationNotOnStart,
         DiagnosticDescriptors.DataAnnotationsNotEnabled,
         DiagnosticDescriptors.NestedValidationNotRecursive,
-        DiagnosticDescriptors.UnknownConfigurationKey);
+        DiagnosticDescriptors.UnknownConfigurationKey,
+        DiagnosticDescriptors.UnknownConfigurationKeyWillThrow);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -36,6 +39,14 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 compilationContext.CancellationToken);
             var nestedValidationReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
             var unknownKeysReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+            var strictUnknownKeyDiagnosticsEnabled = !IsDiagnosticSuppressed(
+                compilationContext.Compilation,
+                DiagnosticIds.UnknownConfigurationKeyWillThrow);
+            var strictUnknownKeyRegistrations = configuration.HasFiles && strictUnknownKeyDiagnosticsEnabled
+                ? CollectStrictUnknownKeyRegistrationKeys(
+                    compilationContext.Compilation,
+                    compilationContext.CancellationToken)
+                : ImmutableHashSet<string>.Empty;
 
             compilationContext.RegisterSyntaxNodeAction(
                 syntaxContext =>
@@ -46,23 +57,108 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         return;
                     }
 
-                    AnalyzeRegistrationChain(syntaxContext.ReportDiagnostic, registration);
+                    var compilation = syntaxContext.SemanticModel.Compilation;
+                    AnalyzeRegistrationChain(syntaxContext.ReportDiagnostic, registration, compilation);
                     if (registration.SupportsValidationRules)
                     {
-                        AnalyzeOptionType(syntaxContext.ReportDiagnostic, registration, nestedValidationReported);
+                        AnalyzeOptionType(syntaxContext.ReportDiagnostic, registration, nestedValidationReported, compilation);
                     }
 
                     if (configuration.HasFiles)
                     {
                         AnalyzeConfigurationSection(syntaxContext.ReportDiagnostic, registration, configuration);
-                        AnalyzeUnknownKeys(syntaxContext.ReportDiagnostic, registration, configuration, unknownKeysReported);
+                        AnalyzeUnknownKeys(
+                            syntaxContext.ReportDiagnostic,
+                            registration,
+                            configuration,
+                            unknownKeysReported,
+                            strictUnknownKeyRegistrations,
+                            strictUnknownKeyDiagnosticsEnabled,
+                            compilation);
                     }
                 },
                 SyntaxKind.InvocationExpression);
         });
     }
 
-    private static void AnalyzeRegistrationChain(Action<Diagnostic> reportDiagnostic, OptionsRegistration registration)
+    private static bool IsDiagnosticSuppressed(Compilation compilation, string diagnosticId)
+    {
+        return compilation.Options.SpecificDiagnosticOptions.TryGetValue(diagnosticId, out var reportDiagnostic) &&
+               reportDiagnostic == ReportDiagnostic.Suppress;
+    }
+
+    private static ImmutableHashSet<string> CollectStrictUnknownKeyRegistrationKeys(
+        Compilation compilation,
+        CancellationToken cancellationToken)
+    {
+        var keys = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
+
+        foreach (var syntaxTree in compilation.SyntaxTrees)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var root = syntaxTree.GetRoot(cancellationToken);
+            if (IsGeneratedSyntaxTree(syntaxTree, root))
+            {
+                continue;
+            }
+
+#pragma warning disable RS1030
+            var semanticModel = compilation.GetSemanticModel(syntaxTree);
+#pragma warning restore RS1030
+            foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (TryCreateRegistration(invocation, semanticModel, out var registration) &&
+                    registration.ErrorsOnUnknownConfiguration)
+                {
+                    keys.Add(GetUnknownKeyRegistrationKey(registration));
+                }
+            }
+        }
+
+        return keys.ToImmutable();
+    }
+
+    private static bool IsGeneratedSyntaxTree(SyntaxTree syntaxTree, SyntaxNode root)
+    {
+        var fileName = System.IO.Path.GetFileName(syntaxTree.FilePath);
+        if (fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (var trivia in root.GetLeadingTrivia())
+        {
+            if (trivia.IsKind(SyntaxKind.SingleLineCommentTrivia) ||
+                trivia.IsKind(SyntaxKind.MultiLineCommentTrivia))
+            {
+                var text = trivia.ToString();
+                if (text.IndexOf("<auto-generated", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            if (!trivia.IsKind(SyntaxKind.WhitespaceTrivia) &&
+                !trivia.IsKind(SyntaxKind.EndOfLineTrivia) &&
+                !trivia.IsKind(SyntaxKind.SingleLineCommentTrivia) &&
+                !trivia.IsKind(SyntaxKind.MultiLineCommentTrivia))
+            {
+                break;
+            }
+        }
+
+        return false;
+    }
+
+    private static void AnalyzeRegistrationChain(
+        Action<Diagnostic> reportDiagnostic,
+        OptionsRegistration registration,
+        Compilation compilation)
     {
         if (!registration.SupportsValidationRules)
         {
@@ -77,7 +173,10 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 registration.OptionsType.Name));
         }
 
-        var metadata = OptionsTypeMetadata.Create(registration.OptionsType, registration.BindsNonPublicProperties);
+        var metadata = OptionsTypeMetadata.Create(
+            registration.OptionsType,
+            registration.BindsNonPublicProperties,
+            compilation);
         if (metadata.HasAnyDataAnnotations() && !registration.HasValidateDataAnnotations)
         {
             var properties = ImmutableDictionary<string, string?>.Empty
@@ -94,9 +193,13 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
     private static void AnalyzeOptionType(
         Action<Diagnostic> reportDiagnostic,
         OptionsRegistration registration,
-        ConcurrentDictionary<string, byte> nestedValidationReported)
+        ConcurrentDictionary<string, byte> nestedValidationReported,
+        Compilation compilation)
     {
-        var metadata = OptionsTypeMetadata.Create(registration.OptionsType, registration.BindsNonPublicProperties);
+        var metadata = OptionsTypeMetadata.Create(
+            registration.OptionsType,
+            registration.BindsNonPublicProperties,
+            compilation);
         foreach (var candidate in metadata.GetNestedValidationCandidates())
         {
             var reportKey = candidate.Property.Symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) +
@@ -166,7 +269,10 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         Action<Diagnostic> reportDiagnostic,
         OptionsRegistration registration,
         ConfigurationSnapshot configuration,
-        ConcurrentDictionary<string, byte> unknownKeysReported)
+        ConcurrentDictionary<string, byte> unknownKeysReported,
+        ImmutableHashSet<string> strictUnknownKeyRegistrations,
+        bool strictUnknownKeyDiagnosticsEnabled,
+        Compilation compilation)
     {
         var sections = configuration.FindSections(registration.SectionPath);
         if (sections.IsDefaultOrEmpty)
@@ -174,49 +280,122 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var metadata = OptionsTypeMetadata.Create(registration.OptionsType, registration.BindsNonPublicProperties);
+        var errorsOnUnknownConfiguration =
+            registration.ErrorsOnUnknownConfiguration &&
+            strictUnknownKeyDiagnosticsEnabled;
+        if (!errorsOnUnknownConfiguration &&
+            strictUnknownKeyRegistrations.Contains(GetUnknownKeyRegistrationKey(registration)))
+        {
+            return;
+        }
+
+        var metadata = OptionsTypeMetadata.Create(
+            registration.OptionsType,
+            registration.BindsNonPublicProperties,
+            compilation);
         foreach (var matchingSection in sections)
         {
             AnalyzeUnknownKeysInSection(
                 reportDiagnostic,
                 matchingSection,
                 metadata,
-                unknownKeysReported);
+                unknownKeysReported,
+                errorsOnUnknownConfiguration,
+                compilation);
         }
+    }
+
+    private static string GetUnknownKeyRegistrationKey(OptionsRegistration registration)
+    {
+        return registration.OptionsType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) +
+               "|" +
+               registration.SectionPath.ToUpperInvariant() +
+               "|" +
+               registration.BindsNonPublicProperties.ToString();
     }
 
     private static void AnalyzeUnknownKeysInSection(
         Action<Diagnostic> reportDiagnostic,
         ConfigurationNode section,
         OptionsTypeMetadata metadata,
-        ConcurrentDictionary<string, byte> unknownKeysReported)
+        ConcurrentDictionary<string, byte> unknownKeysReported,
+        bool errorsOnUnknownConfiguration,
+        Compilation compilation)
     {
         var knownNames = metadata.GetConfigurationNames();
         foreach (var property in section.Properties)
         {
             if (!metadata.TryGetConfigurationProperty(property.Key, out var bindableProperty))
             {
-                if (metadata.TryGetSettableConstructorBoundAlias(property.Key, section, out _))
+                if (metadata.TryGetSettableConstructorBoundAlias(property.Key, section, out var constructorAliasProperty))
                 {
+                    if (errorsOnUnknownConfiguration &&
+                        metadata.IsConfigurationAlias(constructorAliasProperty, property.Key))
+                    {
+                        ReportUnknownConfigurationKey(
+                            reportDiagnostic,
+                            unknownKeysReported,
+                            metadata.TypeKey,
+                            DiagnosticDescriptors.UnknownConfigurationKeyWillThrow,
+                            property.Location,
+                            property.FullPath,
+                            property.Key,
+                            metadata.TypeName,
+                            ImmutableArray<string>.Empty);
+                    }
+
                     continue;
                 }
 
-                var reportKey = metadata.TypeKey + "|" + property.Location.GetLineSpan().Path + "|" + property.FullPath;
-                if (!unknownKeysReported.TryAdd(reportKey, 0))
+                if (errorsOnUnknownConfiguration &&
+                    !property.Value.Properties.IsDefaultOrEmpty &&
+                    metadata.TryGetClrPropertyNamed(property.Key, out var clrProperty) &&
+                    clrProperty is not null &&
+                    metadata.CanStrictBindObjectShapedClrOnlyProperty(clrProperty))
                 {
+                    ReportStrictScalarChildKeys(
+                        reportDiagnostic,
+                        unknownKeysReported,
+                        metadata.TypeKey + "|" + clrProperty.Name,
+                        clrProperty.Type,
+                        property.Value,
+                        suppressKnownClrProperties: true);
                     continue;
                 }
 
-                var suggestion = FindClosest(property.Key, knownNames);
-                var suffix = suggestion is null ? "." : $". Did you mean \"{suggestion}\"?";
-
-                reportDiagnostic(Diagnostic.Create(
-                    DiagnosticDescriptors.UnknownConfigurationKey,
+                var descriptor = errorsOnUnknownConfiguration &&
+                    !metadata.HasClrPropertyNamed(property.Key)
+                    ? DiagnosticDescriptors.UnknownConfigurationKeyWillThrow
+                    : DiagnosticDescriptors.UnknownConfigurationKey;
+                ReportUnknownConfigurationKey(
+                    reportDiagnostic,
+                    unknownKeysReported,
+                    metadata.TypeKey,
+                    descriptor,
                     property.Location,
                     property.FullPath,
+                    property.Key,
                     metadata.TypeName,
-                    suffix));
+                    errorsOnUnknownConfiguration
+                        ? metadata.GetStrictBindingSuggestionNames()
+                        : knownNames);
 
+                continue;
+            }
+
+            if (errorsOnUnknownConfiguration &&
+                metadata.IsConfigurationAlias(bindableProperty, property.Key))
+            {
+                ReportUnknownConfigurationKey(
+                    reportDiagnostic,
+                    unknownKeysReported,
+                    metadata.TypeKey,
+                    DiagnosticDescriptors.UnknownConfigurationKeyWillThrow,
+                    property.Location,
+                    property.FullPath,
+                    property.Key,
+                    metadata.TypeName,
+                    ImmutableArray<string>.Empty);
                 continue;
             }
 
@@ -227,11 +406,15 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
             if (metadata.TryCreateNestedMetadata(bindableProperty, out var nestedMetadata))
             {
+                var nestedErrorsOnUnknownConfiguration = errorsOnUnknownConfiguration &&
+                    !bindableProperty.HasPotentialPolymorphicInitializer;
                 AnalyzeUnknownKeysInSection(
                     reportDiagnostic,
                     property.Value,
                     nestedMetadata,
-                    unknownKeysReported);
+                    unknownKeysReported,
+                    nestedErrorsOnUnknownConfiguration,
+                    compilation);
                 continue;
             }
 
@@ -241,11 +424,15 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 {
                     if (!entry.Value.Properties.IsDefaultOrEmpty)
                     {
+                        var dictionaryErrorsOnUnknownConfiguration = errorsOnUnknownConfiguration &&
+                            !bindableProperty.HasPotentialPolymorphicDictionaryValueInitializerForKey(entry.Key);
                         AnalyzeUnknownKeysInSection(
                             reportDiagnostic,
                             entry.Value,
                             dictionaryValueMetadata,
-                            unknownKeysReported);
+                            unknownKeysReported,
+                            dictionaryErrorsOnUnknownConfiguration,
+                            compilation);
                     }
                 }
 
@@ -264,7 +451,9 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                                 reportDiagnostic,
                                 item.Value,
                                 dictionaryValueElementMetadata,
-                                unknownKeysReported);
+                                unknownKeysReported,
+                                errorsOnUnknownConfiguration,
+                                compilation);
                         }
                     }
                 }
@@ -274,6 +463,73 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
             if (!metadata.TryCreateCollectionElementMetadata(bindableProperty, out var elementMetadata))
             {
+                if (errorsOnUnknownConfiguration)
+                {
+                    var reportKeyPrefix = metadata.TypeKey + "|" + bindableProperty.Symbol.Name;
+                    if (OptionsTypeMetadata.TryGetDictionaryValueType(bindableProperty.Symbol.Type, out var dictionaryValueType))
+                    {
+                        if (OptionsTypeMetadata.TryGetDictionaryValueType(dictionaryValueType, out _))
+                        {
+                            ReportStrictNestedDictionaryChildKeys(
+                                reportDiagnostic,
+                                unknownKeysReported,
+                                reportKeyPrefix,
+                                dictionaryValueType,
+                                property.Value,
+                                bindableProperty,
+                                ImmutableArray<string>.Empty,
+                                metadata.BindsNonPublicProperties,
+                                compilation);
+                            continue;
+                        }
+
+                        if (OptionsTypeMetadata.TryGetCollectionElementType(dictionaryValueType, out var dictionaryValueElementType) &&
+                            IsStrictScalarValueType(dictionaryValueElementType) &&
+                            !IsOpenRuntimeShape(dictionaryValueElementType))
+                        {
+                            ReportStrictScalarDictionaryValueCollectionChildKeys(
+                                reportDiagnostic,
+                                unknownKeysReported,
+                                reportKeyPrefix,
+                                dictionaryValueElementType,
+                                property.Value);
+                        }
+                        else if (IsStrictScalarValueType(dictionaryValueType) &&
+                                 !IsOpenRuntimeShape(dictionaryValueType))
+                        {
+                            ReportStrictScalarDictionaryValueChildKeys(
+                                reportDiagnostic,
+                                unknownKeysReported,
+                                reportKeyPrefix,
+                                dictionaryValueType,
+                                property.Value);
+                        }
+                    }
+                    else if (OptionsTypeMetadata.TryGetCollectionElementType(bindableProperty.Symbol.Type, out var collectionElementType))
+                    {
+                        if (IsStrictScalarValueType(collectionElementType) &&
+                            !IsOpenRuntimeShape(collectionElementType))
+                        {
+                            ReportStrictScalarCollectionChildKeys(
+                                reportDiagnostic,
+                                unknownKeysReported,
+                                reportKeyPrefix,
+                                collectionElementType,
+                                property.Value);
+                        }
+                    }
+                    else if (!IsOpenRuntimeShape(bindableProperty.Symbol.Type))
+                    {
+                        ReportStrictScalarChildKeys(
+                            reportDiagnostic,
+                            unknownKeysReported,
+                            reportKeyPrefix,
+                            bindableProperty.Symbol.Type,
+                            property.Value,
+                            suppressKnownClrProperties: CanSuppressKnownBindableScalarClrProperties(metadata, bindableProperty));
+                    }
+                }
+
                 continue;
             }
 
@@ -285,10 +541,348 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         reportDiagnostic,
                         item.Value,
                         elementMetadata,
-                        unknownKeysReported);
+                        unknownKeysReported,
+                        errorsOnUnknownConfiguration,
+                        compilation);
                 }
             }
         }
+    }
+
+    private static bool IsStrictScalarValueType(ITypeSymbol type)
+    {
+        return !OptionsTypeMetadata.TryGetDictionaryValueType(type, out _) &&
+               !OptionsTypeMetadata.TryGetCollectionElementType(type, out _);
+    }
+
+    private static void ReportStrictScalarChildKeys(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> unknownKeysReported,
+        string reportKeyPrefix,
+        ITypeSymbol valueType,
+        ConfigurationNode value,
+        bool suppressKnownClrProperties)
+    {
+        var effectiveValueType = UnwrapNullableValueType(valueType);
+        var canSuppressKnownClrProperties = suppressKnownClrProperties &&
+            CanSuppressKnownStrictScalarClrProperties(effectiveValueType);
+        var knownNames = canSuppressKnownClrProperties
+            ? OptionsTypeMetadata.GetClrPropertyNames(effectiveValueType)
+            : ImmutableArray<string>.Empty;
+        foreach (var child in value.Properties)
+        {
+            if (canSuppressKnownClrProperties &&
+                OptionsTypeMetadata.TryGetClrProperty(effectiveValueType, child.Key, out var childProperty))
+            {
+                if (childProperty is not null &&
+                    childProperty.DeclaredAccessibility == Accessibility.Public &&
+                    !childProperty.IsStatic &&
+                    childProperty.Parameters.Length == 0 &&
+                    !child.Value.Properties.IsDefaultOrEmpty)
+                {
+                    ReportStrictScalarChildKeys(
+                        reportDiagnostic,
+                        unknownKeysReported,
+                        reportKeyPrefix,
+                        childProperty.Type,
+                        child.Value,
+                        suppressKnownClrProperties: true);
+                }
+
+                continue;
+            }
+
+            ReportUnknownConfigurationKey(
+                reportDiagnostic,
+                unknownKeysReported,
+                reportKeyPrefix,
+                DiagnosticDescriptors.UnknownConfigurationKeyWillThrow,
+                child.Location,
+                child.FullPath,
+                child.Key,
+                effectiveValueType.Name,
+                knownNames);
+        }
+    }
+
+    private static void ReportStrictScalarCollectionChildKeys(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> unknownKeysReported,
+        string reportKeyPrefix,
+        ITypeSymbol elementType,
+        ConfigurationNode collectionValue)
+    {
+        foreach (var item in collectionValue.Properties)
+        {
+            if (!item.Value.Properties.IsDefaultOrEmpty)
+            {
+                ReportStrictScalarChildKeys(
+                    reportDiagnostic,
+                    unknownKeysReported,
+                    reportKeyPrefix,
+                    elementType,
+                    item.Value,
+                    suppressKnownClrProperties: CanSuppressKnownStrictCollectionItemClrProperties(elementType));
+            }
+        }
+    }
+
+    private static void ReportStrictScalarDictionaryValueChildKeys(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> unknownKeysReported,
+        string reportKeyPrefix,
+        ITypeSymbol valueType,
+        ConfigurationNode dictionaryValue)
+    {
+        foreach (var entry in dictionaryValue.Properties)
+        {
+            if (!entry.Value.Properties.IsDefaultOrEmpty)
+            {
+                ReportStrictScalarChildKeys(
+                    reportDiagnostic,
+                    unknownKeysReported,
+                    reportKeyPrefix,
+                    valueType,
+                    entry.Value,
+                    suppressKnownClrProperties: CanSuppressKnownStrictCollectionItemClrProperties(valueType));
+            }
+        }
+    }
+
+    private static void ReportStrictScalarDictionaryValueCollectionChildKeys(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> unknownKeysReported,
+        string reportKeyPrefix,
+        ITypeSymbol elementType,
+        ConfigurationNode dictionaryValue)
+    {
+        foreach (var entry in dictionaryValue.Properties)
+        {
+            ReportStrictScalarCollectionChildKeys(
+                reportDiagnostic,
+                unknownKeysReported,
+                reportKeyPrefix,
+                elementType,
+                entry.Value);
+        }
+    }
+
+    private static void ReportStrictNestedDictionaryChildKeys(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> unknownKeysReported,
+        string reportKeyPrefix,
+        ITypeSymbol dictionaryType,
+        ConfigurationNode dictionaryValue,
+        BindableProperty bindableProperty,
+        ImmutableArray<string> dictionaryPath,
+        bool bindsNonPublicProperties,
+        Compilation compilation)
+    {
+        if (!OptionsTypeMetadata.TryGetDictionaryValueType(dictionaryType, out var valueType))
+        {
+            return;
+        }
+
+        foreach (var entry in dictionaryValue.Properties)
+        {
+            var entryPath = dictionaryPath.Add(entry.Key);
+            if (entry.Value.Properties.IsDefaultOrEmpty)
+            {
+                continue;
+            }
+
+            if (OptionsTypeMetadata.TryGetDictionaryValueType(valueType, out _))
+            {
+                ReportStrictNestedDictionaryChildKeys(
+                    reportDiagnostic,
+                    unknownKeysReported,
+                    reportKeyPrefix,
+                    valueType,
+                    entry.Value,
+                    bindableProperty,
+                    entryPath,
+                    bindsNonPublicProperties,
+                    compilation);
+            }
+            else if (OptionsTypeMetadata.TryGetCollectionElementType(valueType, out var elementType))
+            {
+                if (IsStrictScalarValueType(elementType) &&
+                    !IsOpenRuntimeShape(elementType) &&
+                    !IsUserDefinedReferenceObject(elementType))
+                {
+                    ReportStrictScalarDictionaryValueCollectionChildKeys(
+                        reportDiagnostic,
+                        unknownKeysReported,
+                        reportKeyPrefix,
+                        elementType,
+                        entry.Value);
+                }
+                else if (elementType is INamedTypeSymbol namedElementType &&
+                         IsUserDefinedReferenceObject(elementType))
+                {
+                    ReportStrictNestedDictionaryObjectCollectionChildKeys(
+                        reportDiagnostic,
+                        unknownKeysReported,
+                        namedElementType,
+                        entry.Value,
+                        bindsNonPublicProperties,
+                        compilation);
+                }
+            }
+            else if (IsStrictScalarValueType(valueType) &&
+                     !IsUserDefinedReferenceObject(valueType) &&
+                     !IsOpenRuntimeShape(valueType))
+            {
+                ReportStrictScalarDictionaryValueChildKeys(
+                    reportDiagnostic,
+                    unknownKeysReported,
+                    reportKeyPrefix,
+                    valueType,
+                    entry.Value);
+            }
+            else if (valueType is INamedTypeSymbol namedValueType &&
+                     IsUserDefinedReferenceObject(valueType))
+            {
+                var valueMetadata = OptionsTypeMetadata.Create(namedValueType, bindsNonPublicProperties, compilation);
+                foreach (var nestedEntry in entry.Value.Properties)
+                {
+                    if (!nestedEntry.Value.Properties.IsDefaultOrEmpty)
+                    {
+                        var nestedPath = entryPath.Add(nestedEntry.Key);
+                        AnalyzeUnknownKeysInSection(
+                            reportDiagnostic,
+                            nestedEntry.Value,
+                            valueMetadata,
+                            unknownKeysReported,
+                            errorsOnUnknownConfiguration: !bindableProperty.HasPotentialPolymorphicDictionaryValueInitializerForPath(nestedPath),
+                            compilation: compilation);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void ReportStrictNestedDictionaryObjectCollectionChildKeys(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> unknownKeysReported,
+        INamedTypeSymbol elementType,
+        ConfigurationNode dictionaryValue,
+        bool bindsNonPublicProperties,
+        Compilation compilation)
+    {
+        var elementMetadata = OptionsTypeMetadata.Create(elementType, bindsNonPublicProperties, compilation);
+        foreach (var nestedEntry in dictionaryValue.Properties)
+        {
+            foreach (var item in nestedEntry.Value.Properties)
+            {
+                if (!item.Value.Properties.IsDefaultOrEmpty)
+                {
+                    AnalyzeUnknownKeysInSection(
+                        reportDiagnostic,
+                        item.Value,
+                        elementMetadata,
+                        unknownKeysReported,
+                        errorsOnUnknownConfiguration: true,
+                        compilation: compilation);
+                }
+            }
+        }
+    }
+
+    private static ITypeSymbol UnwrapNullableValueType(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol { IsGenericType: true } namedType &&
+            namedType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
+            namedType.TypeArguments.Length == 1)
+        {
+            return namedType.TypeArguments[0];
+        }
+
+        return type;
+    }
+
+    private static bool CanSuppressKnownStrictScalarClrProperties(ITypeSymbol type)
+    {
+        return type.TypeKind is TypeKind.Class or TypeKind.Struct;
+    }
+
+    private static bool CanSuppressKnownStrictCollectionItemClrProperties(ITypeSymbol type)
+    {
+        return type.IsValueType;
+    }
+
+    private static bool CanSuppressKnownBindableScalarClrProperties(
+        OptionsTypeMetadata metadata,
+        BindableProperty property)
+    {
+        return IsNullableValueType(property.Symbol.Type) ||
+               metadata.CanStrictBindObjectShapedClrOnlyProperty(property.Symbol);
+    }
+
+    private static bool IsNullableValueType(ITypeSymbol type)
+    {
+        return type is INamedTypeSymbol { IsGenericType: true } namedType &&
+               namedType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
+    }
+
+    private static bool IsOpenRuntimeShape(ITypeSymbol type)
+    {
+        return type.TypeKind == TypeKind.Interface ||
+               type.SpecialType == SpecialType.System_Object;
+    }
+
+    private static bool IsUserDefinedReferenceObject(ITypeSymbol type)
+    {
+        if (type.TypeKind != TypeKind.Class ||
+            type.SpecialType == SpecialType.System_String)
+        {
+            return false;
+        }
+
+        var namespaceName = type.ContainingNamespace.ToDisplayString();
+        return !string.Equals(namespaceName, "System", StringComparison.Ordinal) &&
+               !namespaceName.StartsWith("System.", StringComparison.Ordinal);
+    }
+
+    private static bool ContainsName(ImmutableArray<string> names, string key)
+    {
+        foreach (var name in names)
+        {
+            if (string.Equals(name, key, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void ReportUnknownConfigurationKey(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> unknownKeysReported,
+        string typeKey,
+        DiagnosticDescriptor descriptor,
+        Location location,
+        string fullPath,
+        string key,
+        string typeName,
+        ImmutableArray<string> knownNames)
+    {
+        var reportKey = typeKey + "|" + descriptor.Id + "|" + location.GetLineSpan().Path + "|" + fullPath;
+        if (!unknownKeysReported.TryAdd(reportKey, 0))
+        {
+            return;
+        }
+
+        var suggestion = FindClosest(key, knownNames);
+        var suffix = suggestion is null ? "." : $". Did you mean \"{suggestion}\"?";
+
+        reportDiagnostic(Diagnostic.Create(
+            descriptor,
+            location,
+            fullPath,
+            typeName,
+            suffix));
     }
 
     private static bool TryCreateRegistration(
@@ -369,6 +963,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         var hasValidateOnStart = chain.MethodNames.Contains("ValidateOnStart") ||
             HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel);
         var bindsNonPublicProperties = HasBindNonPublicPropertiesEnabled(invocation, semanticModel);
+        var errorsOnUnknownConfiguration = HasErrorOnUnknownConfigurationEnabled(invocation, semanticModel);
 
         registration = new OptionsRegistration(
             optionsType,
@@ -380,7 +975,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             chain.MethodNames.Contains("ValidateDataAnnotations"),
             hasValidateOnStart,
             chain.MethodNames.Any(IsValidationMethod),
-            bindsNonPublicProperties);
+            bindsNonPublicProperties,
+            errorsOnUnknownConfiguration);
         return true;
     }
 
@@ -458,7 +1054,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 hasValidateDataAnnotations: false,
                 hasValidateOnStart: false,
                 hasValidation: false,
-                HasBindNonPublicPropertiesEnabled(invocation, semanticModel));
+                HasBindNonPublicPropertiesEnabled(invocation, semanticModel),
+                HasErrorOnUnknownConfigurationEnabled(invocation, semanticModel));
             return true;
         }
 
@@ -469,13 +1066,39 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         InvocationExpressionSyntax invocation,
         SemanticModel semanticModel)
     {
-        return invocation.ArgumentList.Arguments.Any(argument =>
-            ContainsBindNonPublicPropertiesEnabled(argument.Expression, semanticModel));
+        return HasBinderOptionsBooleanEnabled(
+            invocation,
+            semanticModel,
+            "BindNonPublicProperties",
+            BinderOptionsBooleanDetection.AnyTopLevelConstantTrue);
     }
 
-    private static bool ContainsBindNonPublicPropertiesEnabled(
-        ExpressionSyntax? expression,
+    private static bool HasErrorOnUnknownConfigurationEnabled(
+        InvocationExpressionSyntax invocation,
         SemanticModel semanticModel)
+    {
+        return HasBinderOptionsBooleanEnabled(
+            invocation,
+            semanticModel,
+            "ErrorOnUnknownConfiguration",
+            BinderOptionsBooleanDetection.LinearFinalConstantTrue);
+    }
+
+    private static bool HasBinderOptionsBooleanEnabled(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        string propertyName,
+        BinderOptionsBooleanDetection detection)
+    {
+        return invocation.ArgumentList.Arguments.Any(argument =>
+            ContainsBinderOptionsBooleanEnabled(argument.Expression, semanticModel, propertyName, detection));
+    }
+
+    private static bool ContainsBinderOptionsBooleanEnabled(
+        ExpressionSyntax? expression,
+        SemanticModel semanticModel,
+        string propertyName,
+        BinderOptionsBooleanDetection detection)
     {
         if (expression is null)
         {
@@ -486,8 +1109,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             var parameter = semanticModel.GetDeclaredSymbol(simpleLambda.Parameter);
             return parameter is not null &&
-                   (ContainsBindNonPublicPropertiesEnabled(simpleLambda.ExpressionBody, semanticModel, parameter) ||
-                    ContainsBindNonPublicPropertiesEnabled(simpleLambda.Block, semanticModel, parameter));
+                   (ContainsBinderOptionsBooleanEnabled(simpleLambda.ExpressionBody, semanticModel, parameter, propertyName) ||
+                    ContainsBinderOptionsBooleanEnabled(simpleLambda.Block, semanticModel, parameter, propertyName, detection));
         }
 
         if (expression is ParenthesizedLambdaExpressionSyntax parenthesizedLambda)
@@ -496,35 +1119,211 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 ? semanticModel.GetDeclaredSymbol(parenthesizedLambda.ParameterList.Parameters[0])
                 : null;
             return parameter is not null &&
-                   (ContainsBindNonPublicPropertiesEnabled(parenthesizedLambda.ExpressionBody, semanticModel, parameter) ||
-                    ContainsBindNonPublicPropertiesEnabled(parenthesizedLambda.Block, semanticModel, parameter));
+                   (ContainsBinderOptionsBooleanEnabled(parenthesizedLambda.ExpressionBody, semanticModel, parameter, propertyName) ||
+                    ContainsBinderOptionsBooleanEnabled(parenthesizedLambda.Block, semanticModel, parameter, propertyName, detection));
         }
 
         return false;
     }
 
-    private static bool ContainsBindNonPublicPropertiesEnabled(
+    private static bool ContainsBinderOptionsBooleanEnabled(
         ExpressionSyntax? expression,
         SemanticModel semanticModel,
-        IParameterSymbol binderOptionsParameter)
+        IParameterSymbol binderOptionsParameter,
+        string propertyName)
     {
-        return IsBindNonPublicPropertiesEnabledAssignment(expression, semanticModel, binderOptionsParameter);
+        return TryGetBinderOptionsBooleanAssignment(
+            expression,
+            semanticModel,
+            binderOptionsParameter,
+            binderOptionsAliases: null,
+            parameterStillTargetsRuntimeOptions: true,
+            propertyName,
+            out var value) &&
+            value == true;
     }
 
-    private static bool ContainsBindNonPublicPropertiesEnabled(
+    private static bool ContainsBinderOptionsBooleanEnabled(
         BlockSyntax? block,
         SemanticModel semanticModel,
-        IParameterSymbol binderOptionsParameter)
+        IParameterSymbol binderOptionsParameter,
+        string propertyName,
+        BinderOptionsBooleanDetection detection)
     {
         if (block is null)
         {
             return false;
         }
 
+        if (detection == BinderOptionsBooleanDetection.AnyTopLevelConstantTrue)
+        {
+            var topLevelParameterStillTargetsRuntimeOptions = true;
+            var binderOptionsAliases = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
+            foreach (var statement in block.Statements)
+            {
+                UpdateBinderOptionsAliases(
+                    statement,
+                    semanticModel,
+                    binderOptionsParameter,
+                    topLevelParameterStillTargetsRuntimeOptions,
+                    binderOptionsAliases);
+
+                if (IsTopLevelBinderOptionsParameterAssignment(statement, semanticModel, binderOptionsParameter))
+                {
+                    topLevelParameterStillTargetsRuntimeOptions = false;
+                }
+
+                if (statement is ExpressionStatementSyntax expressionStatement &&
+                    TryGetBinderOptionsBooleanAssignment(
+                        expressionStatement.Expression,
+                        semanticModel,
+                        binderOptionsParameter,
+                        binderOptionsAliases,
+                        topLevelParameterStillTargetsRuntimeOptions,
+                        propertyName,
+                        out var value) &&
+                    value == true)
+                {
+                    return true;
+                }
+
+                if (ContainsBinderOptionsParameterAssignment(statement, semanticModel, binderOptionsParameter))
+                {
+                    topLevelParameterStillTargetsRuntimeOptions = false;
+                }
+            }
+
+            return false;
+        }
+
+        bool? finalValue = null;
+        var hasNonLinearControlFlow = false;
+        var parameterStillTargetsRuntimeOptions = true;
+        var runtimeBinderOptionsAliases = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
         foreach (var statement in block.Statements)
         {
+            UpdateBinderOptionsAliases(
+                statement,
+                semanticModel,
+                binderOptionsParameter,
+                parameterStillTargetsRuntimeOptions,
+                runtimeBinderOptionsAliases);
+
+            if (ContainsNonLinearControlFlow(statement))
+            {
+                hasNonLinearControlFlow = true;
+            }
+
+            if (IsTopLevelBinderOptionsParameterAssignment(statement, semanticModel, binderOptionsParameter))
+            {
+                parameterStillTargetsRuntimeOptions = false;
+                continue;
+            }
+
             if (statement is ExpressionStatementSyntax expressionStatement &&
-                IsBindNonPublicPropertiesEnabledAssignment(expressionStatement.Expression, semanticModel, binderOptionsParameter))
+                TryGetBinderOptionsBooleanAssignment(
+                    expressionStatement.Expression,
+                    semanticModel,
+                    binderOptionsParameter,
+                    runtimeBinderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions,
+                    propertyName,
+                    out var value))
+            {
+                finalValue = value;
+                continue;
+            }
+
+            if (ContainsBinderOptionsBooleanAssignment(
+                        statement,
+                        semanticModel,
+                        binderOptionsParameter,
+                        runtimeBinderOptionsAliases,
+                        parameterStillTargetsRuntimeOptions,
+                        propertyName))
+            {
+                finalValue = null;
+            }
+
+            if (ContainsRuntimeBinderOptionsEscape(
+                    statement,
+                    semanticModel,
+                    binderOptionsParameter,
+                    runtimeBinderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                finalValue = null;
+            }
+
+            if (ContainsBinderOptionsParameterAssignment(statement, semanticModel, binderOptionsParameter))
+            {
+                parameterStillTargetsRuntimeOptions = false;
+                finalValue = null;
+            }
+        }
+
+        return !hasNonLinearControlFlow &&
+               finalValue == true;
+    }
+
+    private enum BinderOptionsBooleanDetection
+    {
+        AnyTopLevelConstantTrue,
+        LinearFinalConstantTrue
+    }
+
+    private static bool TryGetBinderOptionsBooleanAssignment(
+        ExpressionSyntax? expression,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol>? binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions,
+        string propertyName,
+        out bool? value)
+    {
+        value = null;
+        if (expression is not AssignmentExpressionSyntax assignment ||
+            !assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) ||
+            !IsBinderOptionsBooleanAssignmentTarget(
+                assignment.Left,
+                semanticModel,
+                binderOptionsParameter,
+                binderOptionsAliases,
+                parameterStillTargetsRuntimeOptions,
+                propertyName))
+        {
+            return false;
+        }
+
+        var constant = semanticModel.GetConstantValue(assignment.Right);
+        if (constant.HasValue &&
+            constant.Value is bool enabled)
+        {
+            value = enabled;
+        }
+
+        return true;
+    }
+
+    private static bool ContainsBinderOptionsBooleanAssignment(
+        SyntaxNode node,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol> binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions,
+        string propertyName)
+    {
+        foreach (var assignment in node
+                     .DescendantNodes(ShouldDescendIntoBinderOptionsNode)
+                     .OfType<AssignmentExpressionSyntax>())
+        {
+            if (IsBinderOptionsBooleanAssignmentTarget(
+                    assignment.Left,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions,
+                    propertyName))
             {
                 return true;
             }
@@ -533,38 +1332,215 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         return false;
     }
 
-    private static bool IsBindNonPublicPropertiesEnabledAssignment(
-        ExpressionSyntax? expression,
+    private static bool ContainsRuntimeBinderOptionsEscape(
+        SyntaxNode node,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol> binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions)
+    {
+        foreach (var invocation in node
+                     .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
+                     .OfType<InvocationExpressionSyntax>())
+        {
+            if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
+                semanticModel.GetSymbolInfo(invocation).Symbol is IMethodSymbol { ReducedFrom: not null } &&
+                IsRuntimeBinderOptionsReference(
+                    memberAccess.Expression,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                return true;
+            }
+
+            foreach (var argument in invocation.ArgumentList.Arguments)
+            {
+                if (IsRuntimeBinderOptionsReference(
+                        argument.Expression,
+                        semanticModel,
+                        binderOptionsParameter,
+                        binderOptionsAliases,
+                        parameterStillTargetsRuntimeOptions))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static void UpdateBinderOptionsAliases(
+        StatementSyntax statement,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        bool parameterStillTargetsRuntimeOptions,
+        HashSet<ILocalSymbol> binderOptionsAliases)
+    {
+        if (statement is LocalDeclarationStatementSyntax localDeclaration)
+        {
+            foreach (var variable in localDeclaration.Declaration.Variables)
+            {
+                if (semanticModel.GetDeclaredSymbol(variable) is not ILocalSymbol local)
+                {
+                    continue;
+                }
+
+                if (variable.Initializer?.Value is { } initializer &&
+                    IsRuntimeBinderOptionsReference(
+                        initializer,
+                        semanticModel,
+                        binderOptionsParameter,
+                        binderOptionsAliases,
+                        parameterStillTargetsRuntimeOptions))
+                {
+                    binderOptionsAliases.Add(local);
+                }
+                else
+                {
+                    binderOptionsAliases.Remove(local);
+                }
+            }
+
+            return;
+        }
+
+        if (statement is ExpressionStatementSyntax { Expression: AssignmentExpressionSyntax assignment } &&
+            semanticModel.GetSymbolInfo(assignment.Left).Symbol is ILocalSymbol localSymbol)
+        {
+            if (IsRuntimeBinderOptionsReference(
+                    assignment.Right,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                binderOptionsAliases.Add(localSymbol);
+            }
+            else
+            {
+                binderOptionsAliases.Remove(localSymbol);
+            }
+        }
+    }
+
+    private static bool IsTopLevelBinderOptionsParameterAssignment(
+        StatementSyntax statement,
         SemanticModel semanticModel,
         IParameterSymbol binderOptionsParameter)
     {
-        if (expression is not AssignmentExpressionSyntax assignment ||
-            !assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) ||
-            assignment.Left is not MemberAccessExpressionSyntax memberAccess ||
-            !string.Equals(memberAccess.Name.Identifier.ValueText, "BindNonPublicProperties", StringComparison.Ordinal))
+        return statement is ExpressionStatementSyntax { Expression: AssignmentExpressionSyntax assignment } &&
+               IsBinderOptionsParameterAssignmentTarget(assignment.Left, semanticModel, binderOptionsParameter);
+    }
+
+    private static bool ContainsBinderOptionsParameterAssignment(
+        SyntaxNode node,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter)
+    {
+        foreach (var assignment in node
+                     .DescendantNodes(ShouldDescendIntoBinderOptionsNode)
+                     .OfType<AssignmentExpressionSyntax>())
+        {
+            if (IsBinderOptionsParameterAssignmentTarget(assignment.Left, semanticModel, binderOptionsParameter))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsBinderOptionsParameterAssignmentTarget(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter)
+    {
+        return SymbolEqualityComparer.Default.Equals(
+            semanticModel.GetSymbolInfo(expression).Symbol,
+            binderOptionsParameter);
+    }
+
+    private static bool ContainsNonLinearControlFlow(SyntaxNode node)
+    {
+        foreach (var descendant in node.DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode))
+        {
+            if (descendant.IsKind(SyntaxKind.ReturnStatement) ||
+                descendant.IsKind(SyntaxKind.GotoStatement) ||
+                descendant.IsKind(SyntaxKind.GotoCaseStatement) ||
+                descendant.IsKind(SyntaxKind.GotoDefaultStatement) ||
+                descendant.IsKind(SyntaxKind.BreakStatement) ||
+                descendant.IsKind(SyntaxKind.ContinueStatement) ||
+                descendant.IsKind(SyntaxKind.ThrowStatement) ||
+                descendant.IsKind(SyntaxKind.YieldBreakStatement))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ShouldDescendIntoBinderOptionsNode(SyntaxNode node)
+    {
+        return node is not AnonymousFunctionExpressionSyntax and
+               not LocalFunctionStatementSyntax;
+    }
+
+    private static bool IsBinderOptionsBooleanAssignmentTarget(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol>? binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions,
+        string propertyName)
+    {
+        if (expression is not MemberAccessExpressionSyntax memberAccess ||
+            !string.Equals(memberAccess.Name.Identifier.ValueText, propertyName, StringComparison.Ordinal))
         {
             return false;
         }
 
         var property = semanticModel.GetSymbolInfo(memberAccess).Symbol as IPropertySymbol;
         if (property is null ||
-            !string.Equals(property.Name, "BindNonPublicProperties", StringComparison.Ordinal) ||
+            !string.Equals(property.Name, propertyName, StringComparison.Ordinal) ||
             !string.Equals(property.ContainingType.ToDisplayString(), "Microsoft.Extensions.Configuration.BinderOptions", StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (!SymbolEqualityComparer.Default.Equals(
-                semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol,
-                binderOptionsParameter))
+        return IsRuntimeBinderOptionsReference(
+            memberAccess.Expression,
+            semanticModel,
+            binderOptionsParameter,
+            binderOptionsAliases,
+            parameterStillTargetsRuntimeOptions);
+    }
+
+    private static bool IsRuntimeBinderOptionsReference(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol>? binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions)
+    {
+        while (expression is ParenthesizedExpressionSyntax parenthesized)
         {
-            return false;
+            expression = parenthesized.Expression;
         }
 
-        var constant = semanticModel.GetConstantValue(assignment.Right);
-        return constant.HasValue &&
-               constant.Value is bool enabled &&
-               enabled;
+        var symbol = semanticModel.GetSymbolInfo(expression).Symbol;
+        if (parameterStillTargetsRuntimeOptions &&
+            SymbolEqualityComparer.Default.Equals(symbol, binderOptionsParameter))
+        {
+            return true;
+        }
+
+        return symbol is ILocalSymbol localSymbol &&
+               binderOptionsAliases is not null &&
+               binderOptionsAliases.Contains(localSymbol);
     }
 
     private static bool TryGetConstantSectionPath(
@@ -759,7 +1735,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             bool hasValidateDataAnnotations,
             bool hasValidateOnStart,
             bool hasValidation,
-            bool bindsNonPublicProperties)
+            bool bindsNonPublicProperties,
+            bool errorsOnUnknownConfiguration)
         {
             OptionsType = optionsType;
             SectionPath = sectionPath;
@@ -771,6 +1748,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             HasValidateOnStart = hasValidateOnStart;
             HasValidation = hasValidation;
             BindsNonPublicProperties = bindsNonPublicProperties;
+            ErrorsOnUnknownConfiguration = errorsOnUnknownConfiguration;
         }
 
         public INamedTypeSymbol OptionsType { get; }
@@ -783,6 +1761,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         public bool HasValidateOnStart { get; }
         public bool HasValidation { get; }
         public bool BindsNonPublicProperties { get; }
+        public bool ErrorsOnUnknownConfiguration { get; }
     }
 
     private sealed class InvocationChain

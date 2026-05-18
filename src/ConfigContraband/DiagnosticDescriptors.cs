@@ -50,4 +50,13 @@ public static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Info,
         isEnabledByDefault: true,
         description: "A key under a bound appsettings section does not match any public bindable property on the options type.");
+
+    public static readonly DiagnosticDescriptor UnknownConfigurationKeyWillThrow = new(
+        id: DiagnosticIds.UnknownConfigurationKeyWillThrow,
+        title: "Unknown configuration key will throw during binding",
+        messageFormat: "Configuration key \"{0}\" will fail strict binding for {1}{2}",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "A key under a bound appsettings section will be rejected while BinderOptions.ErrorOnUnknownConfiguration is enabled.");
 }
