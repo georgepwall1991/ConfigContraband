@@ -14,6 +14,15 @@ public static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "The section passed to BindConfiguration should exist in appsettings configuration files.");
+    
+    public static readonly DiagnosticDescriptor MissingRequiredConfigurationKey = new(
+        id: DiagnosticIds.MissingRequiredConfigurationKey,
+        title: "Required configuration key is missing",
+        messageFormat: "Required configuration key \"{0}\" is missing from section \"{1}\"",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Properties marked with [Required] or the required keyword should be present in the configuration section.");
 
     public static readonly DiagnosticDescriptor ValidationNotOnStart = new(
         id: DiagnosticIds.ValidationNotOnStart,

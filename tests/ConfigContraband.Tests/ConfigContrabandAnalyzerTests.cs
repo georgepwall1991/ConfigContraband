@@ -629,6 +629,266 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg002_reports_missing_required_property()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:"Stripe"|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithLocation(0)
+            .WithArguments("ApiKey", "Stripe");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "WebhookSecret": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg002_reports_missing_required_member()
+    {
+        var source = OptionsSource(
+            registration: """
+                services.AddOptions<RequiredMemberOptions>()
+                    .BindConfiguration({|#0:"Required"|})
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+                """,
+            optionsTypes: """
+                public sealed class RequiredMemberOptions
+                {
+                    public required string MyKey { get; set; }
+                }
+                """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithLocation(0)
+            .WithArguments("MyKey", "Required");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Required": {
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg002_does_not_report_when_required_property_is_present()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg002_reports_missing_required_property_in_nested_section()
+    {
+        var source = OptionsSource(
+            registration: """
+                services.AddOptions<StripeOptions>()
+                    .BindConfiguration({|#0:"Features:Stripe"|})
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+                """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithLocation(0)
+            .WithArguments("ApiKey", "Features:Stripe");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg002_does_not_report_when_section_is_missing()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:"Strpie"|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        // Only CFG001 should be reported
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg002_stays_quiet_when_required_property_is_in_overriding_file()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            new[]
+            {
+                ("appsettings.json", """
+                {
+                  "Stripe": {
+                  }
+                }
+                """),
+                ("appsettings.Development.json", """
+                {
+                  "Stripe": {
+                    "ApiKey": "secret"
+                  }
+                }
+                """)
+            });
+    }
+
+    [Fact]
+    public async Task Cfg002_reports_missing_key_in_empty_nested_object()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, """
+            using Microsoft.Extensions.Options;
+            public class AppOptions { [ValidateObjectMembers] public DatabaseOptions Database { get; set; } = new(); }
+            public class DatabaseOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithSpan(12, 24, 12, 29)
+            .WithArguments("ConnectionString", "App:Database");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Database": {}
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg002_reports_missing_key_in_collection_element()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, """
+            using System.Collections.Generic;
+            using Microsoft.Extensions.Options;
+            public class AppOptions { [ValidateEnumeratedItems] public List<DatabaseOptions> Databases { get; set; } = new(); }
+            public class DatabaseOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithSpan(13, 24, 13, 29)
+            .WithArguments("ConnectionString", "App:Databases:0");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Databases": [
+                  {}
+                ]
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg002_reports_alias_name_when_missing()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AliasedOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, """
+            using Microsoft.Extensions.Configuration;
+            public class AliasedOptions
+            {
+                [Required]
+                [ConfigurationKeyName("api-key")]
+                public string ApiKey { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithSpan(16, 24, 16, 32)
+            .WithArguments("api-key", "Stripe");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_validation_without_validate_on_start()
     {
         var source = OptionsSource("""
@@ -7868,13 +8128,14 @@ public sealed class ConfigContrabandAnalyzerTests
             """);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
-            .WithSpan("appsettings.json", 2, 3, 2, 33)
+            .WithSpan("appsettings.json", 3, 3, 3, 33)
             .WithArguments("Features:Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
 
         await Verifier.VerifyAnalyzerAsync(
             source,
             ("appsettings.json", """
             {
+              "Features:Stripe:ApiKey": "secret",
               "Features:Stripe:WebookSecret": "typo"
             }
             """),

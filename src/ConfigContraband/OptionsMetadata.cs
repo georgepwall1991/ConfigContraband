@@ -53,6 +53,7 @@ internal sealed class OptionsTypeMetadata
                 member.IsConstructorBound,
                 member.ConstructorParameterCanUseDefault,
                 HasValidationAttribute(member.Property),
+                IsRequired(member.Property),
                 HasPotentialPolymorphicInitializer(member.Property, type, compilation),
                 GetPotentialPolymorphicDictionaryValueInitializerKeys(member.Property, type, compilation)));
         }
@@ -588,6 +589,22 @@ internal sealed class OptionsTypeMetadata
     private static bool HasValidationAttribute(ISymbol symbol)
     {
         return symbol.GetAttributes().Any(attribute => InheritsFrom(attribute.AttributeClass, "System.ComponentModel.DataAnnotations.ValidationAttribute"));
+    }
+
+    private static bool IsRequired(ISymbol symbol)
+    {
+        if (symbol.GetAttributes().Any(attribute =>
+                string.Equals(attribute.AttributeClass?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        if (symbol is IPropertySymbol property && property.IsRequired)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static bool ContainsValidationAttributes(
@@ -2157,6 +2174,7 @@ internal sealed class BindableProperty
         bool isConstructorBound,
         bool constructorParameterCanUseDefault,
         bool hasValidationAttribute,
+        bool isRequired,
         bool hasPotentialPolymorphicInitializer,
         ImmutableHashSet<string> potentialPolymorphicDictionaryValueKeys)
     {
@@ -2165,6 +2183,7 @@ internal sealed class BindableProperty
         IsConstructorBound = isConstructorBound;
         ConstructorParameterCanUseDefault = constructorParameterCanUseDefault;
         HasValidationAttribute = hasValidationAttribute;
+        IsRequired = isRequired;
         HasPotentialPolymorphicInitializer = hasPotentialPolymorphicInitializer;
         PotentialPolymorphicDictionaryValueKeys = potentialPolymorphicDictionaryValueKeys;
     }
@@ -2174,6 +2193,7 @@ internal sealed class BindableProperty
     public bool IsConstructorBound { get; }
     public bool ConstructorParameterCanUseDefault { get; }
     public bool HasValidationAttribute { get; }
+    public bool IsRequired { get; }
     public bool HasPotentialPolymorphicInitializer { get; }
     public ImmutableHashSet<string> PotentialPolymorphicDictionaryValueKeys { get; }
 

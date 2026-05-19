@@ -2,7 +2,13 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
-## Unreleased
+## 0.3.0 - 2026-05-19
+
+- Added `CFG002`, a warning for required configuration keys missing from `appsettings.json` files.
+- Implemented detection for `[Required]` (DataAnnotations) and the C# 11 `required` keyword on options properties.
+- Added support for merging configuration sections across all visible `appsettings*.json` files before reporting missing keys, ensuring environment-specific overrides do not cause false positives.
+- Implemented recursive required key analysis for nested options objects and dictionaries.
+- Suppressed `CFG002` when the parent section is missing (`CFG001`) to reduce diagnostic noise.
 
 ## 0.2.0 - 2026-05-19
 

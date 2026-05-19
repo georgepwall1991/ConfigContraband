@@ -20,6 +20,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => ImmutableArray.Create(
         DiagnosticDescriptors.MissingConfigurationSection,
+        DiagnosticDescriptors.MissingRequiredConfigurationKey,
         DiagnosticDescriptors.ValidationNotOnStart,
         DiagnosticDescriptors.DataAnnotationsNotEnabled,
         DiagnosticDescriptors.NestedValidationNotRecursive,
@@ -281,6 +282,15 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             registration.OptionsType,
             registration.BindsNonPublicProperties,
             compilation);
+
+        AnalyzeRequiredKeysAcrossSections(
+            reportDiagnostic,
+            sections,
+            metadata,
+            registration.SectionPath,
+            registration.SectionExpression.GetLocation(),
+            compilation);
+
         foreach (var matchingSection in sections)
         {
             AnalyzeUnknownKeysInSection(
@@ -291,6 +301,120 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 registration.ErrorsOnUnknownConfiguration,
                 strictUnknownConfigurationKeySuppressed,
                 compilation);
+        }
+    }
+
+    private static void AnalyzeRequiredKeysAcrossSections(
+        Action<Diagnostic> reportDiagnostic,
+        ImmutableArray<ConfigurationNode> sections,
+        OptionsTypeMetadata metadata,
+        string sectionPath,
+        Location location,
+        Compilation compilation)
+    {
+        foreach (var property in metadata.BindableProperties)
+        {
+            var found = false;
+            var nestedSectionsBuilder = ImmutableArray.CreateBuilder<ConfigurationNode>();
+            string? matchedConfigName = null;
+
+            foreach (var section in sections)
+            {
+                foreach (var configName in property.ConfigurationNames)
+                {
+                    if (section.TryGetProperty(configName, out var matchedProperty))
+                    {
+                        found = true;
+                        matchedConfigName ??= matchedProperty.Key;
+                        nestedSectionsBuilder.Add(matchedProperty.Value);
+                    }
+                }
+            }
+
+            if (property.IsRequired && !found)
+            {
+                var displayName = property.ConfigurationNames.Length > 0
+                    ? property.ConfigurationNames[0]
+                    : property.Symbol.Name;
+
+                reportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.MissingRequiredConfigurationKey,
+                    location,
+                    displayName,
+                    sectionPath));
+            }
+
+            if (found && nestedSectionsBuilder.Count > 0)
+            {
+                var subPath = sectionPath + ":" + (matchedConfigName ?? property.Symbol.Name);
+                if (metadata.TryCreateNestedMetadata(property, out var nestedMetadata))
+                {
+                    AnalyzeRequiredKeysAcrossSections(
+                        reportDiagnostic,
+                        nestedSectionsBuilder.ToImmutable(),
+                        nestedMetadata,
+                        subPath,
+                        location,
+                        compilation);
+                }
+                else if (metadata.TryCreateDictionaryValueMetadata(property, out var dictionaryMetadata))
+                {
+                    var dictionaryEntries = new Dictionary<string, ImmutableArray<ConfigurationNode>.Builder>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var section in nestedSectionsBuilder)
+                    {
+                        foreach (var entry in section.Properties)
+                        {
+                            if (!dictionaryEntries.TryGetValue(entry.Key, out var builder))
+                            {
+                                builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
+                                dictionaryEntries[entry.Key] = builder;
+                            }
+                            builder.Add(entry.Value);
+                        }
+                    }
+
+                    foreach (var entry in dictionaryEntries)
+                    {
+                        AnalyzeRequiredKeysAcrossSections(
+                            reportDiagnostic,
+                            entry.Value.ToImmutable(),
+                            dictionaryMetadata,
+                            subPath + ":" + entry.Key,
+                            location,
+                            compilation);
+                    }
+                }
+                else if (metadata.TryCreateCollectionElementMetadata(property, out var elementMetadata))
+                {
+                    var elementEntries = new Dictionary<string, ImmutableArray<ConfigurationNode>.Builder>(StringComparer.Ordinal);
+                    foreach (var section in nestedSectionsBuilder)
+                    {
+                        foreach (var entry in section.Properties)
+                        {
+                            if (int.TryParse(entry.Key, out _))
+                            {
+                                if (!elementEntries.TryGetValue(entry.Key, out var builder))
+                                {
+                                    builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
+                                    elementEntries[entry.Key] = builder;
+                                }
+                                builder.Add(entry.Value);
+                            }
+                        }
+                    }
+
+                    foreach (var entry in elementEntries)
+                    {
+                        AnalyzeRequiredKeysAcrossSections(
+                            reportDiagnostic,
+                            entry.Value.ToImmutable(),
+                            elementMetadata,
+                            subPath + ":" + entry.Key,
+                            location,
+                            compilation);
+                    }
+                }
+            }
         }
     }
 

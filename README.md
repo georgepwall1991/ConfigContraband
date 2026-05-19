@@ -15,6 +15,7 @@ ConfigContraband is a high-signal Roslyn analyzer for .NET configuration, ASP.NE
 It focuses on the boring production failures:
 
 - a section name typo in `BindConfiguration(...)`
+- a required configuration key missing from all visible `appsettings*.json` files
 - validation that exists but does not run on startup
 - `[Required]` properties that are never wired into Options validation
 - nested options that look validated but are silently skipped
@@ -28,6 +29,7 @@ Use it when your app relies on strongly typed options and you want configuration
 | Area | What ConfigContraband does |
 |------|----------------------------|
 | Section binding | Checks supported options bindings against visible `appsettings.json` and `appsettings.*.json` files. |
+| Required keys | Warns when a property with `[Required]` or the `required` keyword is missing from all visible configuration files. |
 | Startup validation | Flags options validation that is registered but not forced to run at startup. |
 | DataAnnotations | Finds `[Required]`, `[Range]`, and inherited validation attributes without `ValidateDataAnnotations()`. |
 | Nested validation | Detects nested options objects and collections that need recursive validation attributes. |
@@ -37,7 +39,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.2.0" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.3.0" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -109,6 +111,7 @@ When the analyzer cannot prove a configuration shape statically, it stays quiet.
 | ID | Rule | Default | Catches |
 |----|------|---------|---------|
 | `CFG001` | Bound configuration section does not exist | Warning | `BindConfiguration("Strpie")` when only `Stripe` exists. |
+| `CFG002` | Required configuration key is missing | Warning | `[Required]` or `required` property missing from all visible `appsettings*.json` sections. |
 | `CFG003` | Options validation does not run on startup | Warning | Validation is registered but `ValidateOnStart()` is missing. |
 | `CFG004` | DataAnnotations are not enabled for options validation | Warning | `[Required]`, `[Range]`, inherited annotations, or `IValidatableObject` without `ValidateDataAnnotations()`. |
 | `CFG005` | Nested options validation is not recursive | Warning | Nested objects or item types with annotations or `IValidatableObject`, but no recursive validation attribute. |
