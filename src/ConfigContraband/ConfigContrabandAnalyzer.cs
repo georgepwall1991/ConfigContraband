@@ -1278,6 +1278,22 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         HashSet<ILocalSymbol> binderOptionsAliases,
         bool parameterStillTargetsRuntimeOptions)
     {
+        foreach (var assignment in node
+                     .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
+                     .OfType<AssignmentExpressionSyntax>())
+        {
+            if (IsRuntimeBinderOptionsReference(
+                    assignment.Right,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions) &&
+                semanticModel.GetSymbolInfo(assignment.Left).Symbol is not ILocalSymbol)
+            {
+                return true;
+            }
+        }
+
         foreach (var invocation in node
                      .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
                      .OfType<InvocationExpressionSyntax>())
