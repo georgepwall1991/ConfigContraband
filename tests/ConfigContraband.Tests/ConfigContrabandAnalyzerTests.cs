@@ -4306,6 +4306,113 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_stays_info_for_case_mismatched_constructor_assigned_polymorphic_dictionary_value_when_iequalitycomparer_local_is_ignore_case()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public AppOptions()
+                {
+                    IEqualityComparer<string> comparer = StringComparer.OrdinalIgnoreCase;
+                    Map = new(comparer);
+                    Map["primary"] = new DerivedEndpoint();
+                }
+
+                public Dictionary<string, BaseEndpoint> Map { get; }
+            }
+
+            public class BaseEndpoint
+            {
+                public string Url { get; set; } = "";
+            }
+
+            public sealed class DerivedEndpoint : BaseEndpoint
+            {
+                public string Token { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 5, 9, 5, 16)
+            .WithArguments("App:Map:Primary:Token", "BaseEndpoint", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Map": {
+                  "Primary": {
+                    "Token": "secret",
+                    "Url": "https://primary.example.test"
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_stays_info_for_case_mismatched_constructor_assigned_polymorphic_dictionary_value_when_iequalitycomparer_field_is_ignore_case()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                private static readonly IEqualityComparer<string> Comparer = StringComparer.OrdinalIgnoreCase;
+
+                public AppOptions()
+                {
+                    Map = new(Comparer);
+                    Map["primary"] = new DerivedEndpoint();
+                }
+
+                public Dictionary<string, BaseEndpoint> Map { get; }
+            }
+
+            public class BaseEndpoint
+            {
+                public string Url { get; set; } = "";
+            }
+
+            public sealed class DerivedEndpoint : BaseEndpoint
+            {
+                public string Token { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 5, 9, 5, 16)
+            .WithArguments("App:Map:Primary:Token", "BaseEndpoint", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Map": {
+                  "Primary": {
+                    "Token": "secret",
+                    "Url": "https://primary.example.test"
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg007_reports_dictionary_value_when_constructor_prepopulation_is_inside_uninvoked_lambda()
     {
         var source = OptionsSource("""

@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Add CFG007, a warning for unknown appsettings keys that will throw when a supported binding call explicitly leaves BinderOptions.ErrorOnUnknownConfiguration enabled; reuse CFG006's bindable-property model for strict BindConfiguration, Bind(GetSection(...)), and direct Configure(GetSection(...)) shapes while preserving conservative guards for non-final strict options, constructor/helper escapes, open or polymorphic value shapes, keys accepted by the strict runtime binder, constructor-assigned dictionary comparers, and nested dictionary paths with per-level case-insensitive comparers.</PackageReleaseNotes>
+    <PackageReleaseNotes>Add CFG007, a warning for unknown appsettings keys that will throw when a supported binding call explicitly leaves BinderOptions.ErrorOnUnknownConfiguration enabled; reuse CFG006's bindable-property model for strict BindConfiguration, Bind(GetSection(...)), and direct Configure(GetSection(...)) shapes while preserving conservative guards for non-final strict options, constructor/helper escapes, open or polymorphic value shapes, keys accepted by the strict runtime binder, constructor-assigned dictionary comparers, generic equality-comparer aliases, and nested dictionary paths with per-level case-insensitive comparers.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

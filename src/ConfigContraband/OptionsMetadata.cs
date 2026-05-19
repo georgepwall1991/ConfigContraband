@@ -1437,22 +1437,19 @@ internal sealed class OptionsTypeMetadata
     {
         initializer = null!;
         if (symbol is IFieldSymbol field &&
-            IsStringComparerType(field.Type))
+            IsStringComparerAliasType(field.Type))
         {
-            foreach (var declaration in field.DeclaringSyntaxReferences
-                         .Select(reference => reference.GetSyntax())
-                         .OfType<VariableDeclaratorSyntax>())
-            {
-                if (declaration.Initializer?.Value is { } value)
-                {
-                    initializer = value;
-                    return true;
-                }
-            }
+            return TryGetVariableInitializer(field.DeclaringSyntaxReferences, out initializer);
+        }
+
+        if (symbol is ILocalSymbol local &&
+            IsStringComparerAliasType(local.Type))
+        {
+            return TryGetVariableInitializer(local.DeclaringSyntaxReferences, out initializer);
         }
 
         if (symbol is IPropertySymbol property &&
-            IsStringComparerType(property.Type))
+            IsStringComparerAliasType(property.Type))
         {
             foreach (var declaration in property.DeclaringSyntaxReferences
                          .Select(reference => reference.GetSyntax())
@@ -1475,9 +1472,36 @@ internal sealed class OptionsTypeMetadata
         return false;
     }
 
-    private static bool IsStringComparerType(ITypeSymbol type)
+    private static bool TryGetVariableInitializer(
+        ImmutableArray<SyntaxReference> syntaxReferences,
+        out ExpressionSyntax initializer)
     {
-        return string.Equals(type.ToDisplayString(), "System.StringComparer", StringComparison.Ordinal);
+        initializer = null!;
+        foreach (var declaration in syntaxReferences
+                     .Select(reference => reference.GetSyntax())
+                     .OfType<VariableDeclaratorSyntax>())
+        {
+            if (declaration.Initializer?.Value is { } value)
+            {
+                initializer = value;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsStringComparerAliasType(ITypeSymbol type)
+    {
+        if (string.Equals(type.ToDisplayString(), "System.StringComparer", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return type is INamedTypeSymbol namedType &&
+               namedType.TypeArguments.Length == 1 &&
+               namedType.TypeArguments[0].SpecialType == SpecialType.System_String &&
+               IsEqualityComparerType(type);
     }
 
     private static void AddPotentialPolymorphicDictionaryPath(
