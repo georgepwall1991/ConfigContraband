@@ -1,6 +1,13 @@
 ; Shipped analyzer releases
 ; https://github.com/dotnet/roslyn-analyzers/blob/main/src/Microsoft.CodeAnalysis.Analyzers/ReleaseTrackingAnalyzers.Help.md
 
+## Release 0.2.0
+
+### New Rules
+Rule ID | Category | Severity | Notes
+--------|----------|----------|-------
+CFG007 | Configuration | Warning | Unknown config key will throw when ErrorOnUnknownConfiguration is enabled
+
 ## Release 0.1.0
 
 ### New Rules

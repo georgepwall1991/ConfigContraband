@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 
 namespace ConfigContraband.Tests;
@@ -129,5 +130,79 @@ public sealed class ConfigurationModelCoverageTests
             root!.Properties.Where(property => property.Key == "Features"),
             first => Assert.True(first.Value.TryGetProperty("Billing", out _)),
             second => Assert.True(second.Value.TryGetProperty("Stripe", out _)));
+    }
+
+    [Fact]
+    public void Json_parser_marks_properties_when_cfg007_is_suppressed_for_that_file()
+    {
+        var root = JsonConfigurationParser.Parse(
+            "appsettings.json",
+            SourceText.From("""
+                {
+                  "Stripe": {
+                    "WebookSecret": "typo"
+                  }
+                }
+                """),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: true);
+
+        Assert.NotNull(root);
+        Assert.True(root!.TryGetProperty("Stripe", out var stripe));
+        Assert.True(stripe.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig);
+        Assert.True(stripe.Value.TryGetProperty("WebookSecret", out var typo));
+        Assert.True(typo.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig);
+    }
+
+    [Fact]
+    public void Configuration_snapshot_tracks_cfg007_suppression_per_appsettings_file()
+    {
+        var snapshot = ConfigurationSnapshot.Create(
+            [
+                new TestAdditionalText("appsettings.json", """
+                    {
+                      "Stripe": {
+                        "WebookSecret": "typo"
+                      }
+                    }
+                    """),
+                new TestAdditionalText("appsettings.Production.json", """
+                    {
+                      "Stripe": {
+                        "WebookSecret": "typo"
+                      }
+                    }
+                    """)
+            ],
+            file => file.Path == "appsettings.json",
+            CancellationToken.None);
+
+        var sections = snapshot.FindSections("Stripe");
+        var typoProperties = sections
+            .Select(section => section.TryGetProperty("WebookSecret", out var property) ? property : null)
+            .Where(property => property is not null)
+            .ToArray();
+
+        Assert.Contains(typoProperties, property =>
+            property!.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig);
+        Assert.Contains(typoProperties, property =>
+            !property!.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig);
+    }
+
+    private sealed class TestAdditionalText : AdditionalText
+    {
+        private readonly SourceText _text;
+
+        public TestAdditionalText(string path, string text)
+        {
+            Path = path;
+            _text = SourceText.From(text);
+        }
+
+        public override string Path { get; }
+
+        public override SourceText GetText(CancellationToken cancellationToken = default)
+        {
+            return _text;
+        }
     }
 }

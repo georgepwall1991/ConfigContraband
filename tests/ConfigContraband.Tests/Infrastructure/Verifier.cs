@@ -52,6 +52,49 @@ internal static class Verifier
 
     public static async Task VerifyAnalyzerAsync(
         string source,
+        (string filename, string content) additionalFile,
+        string disabledDiagnosticId,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateAnalyzerTest(source);
+        test.TestState.AdditionalFiles.Add(additionalFile);
+        test.DisabledDiagnostics.Add(disabledDiagnosticId);
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
+    public static async Task VerifyAnalyzerWithAnalyzerConfigAsync(
+        string source,
+        (string filename, string content) additionalFile,
+        string analyzerConfig,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateAnalyzerTest(source);
+        test.TestState.AdditionalFiles.Add(additionalFile);
+        test.TestState.AnalyzerConfigFiles.Add(("/.globalconfig", analyzerConfig));
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
+    public static async Task VerifyAnalyzerWithAnalyzerConfigAsync(
+        string source,
+        (string filename, string content)[] additionalFiles,
+        (string filename, string content) analyzerConfig,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateAnalyzerTest(source);
+        foreach (var additionalFile in additionalFiles)
+        {
+            test.TestState.AdditionalFiles.Add(additionalFile);
+        }
+
+        test.TestState.AnalyzerConfigFiles.Add(analyzerConfig);
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
+    public static async Task VerifyAnalyzerAsync(
+        string source,
         (string filename, string content)[] additionalFiles,
         params DiagnosticResult[] expected)
     {

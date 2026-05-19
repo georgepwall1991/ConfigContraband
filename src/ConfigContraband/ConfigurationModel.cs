@@ -18,7 +18,10 @@ internal sealed class ConfigurationSnapshot
 
     public bool HasFiles => !_files.IsDefaultOrEmpty;
 
-    public static ConfigurationSnapshot Create(ImmutableArray<AdditionalText> additionalFiles, System.Threading.CancellationToken cancellationToken)
+    public static ConfigurationSnapshot Create(
+        ImmutableArray<AdditionalText> additionalFiles,
+        Func<AdditionalText, bool> isStrictUnknownConfigurationKeySuppressed,
+        System.Threading.CancellationToken cancellationToken)
     {
         var builder = ImmutableArray.CreateBuilder<ConfigurationFile>();
 
@@ -37,7 +40,10 @@ internal sealed class ConfigurationSnapshot
                 continue;
             }
 
-            var root = JsonConfigurationParser.Parse(file.Path, text);
+            var root = JsonConfigurationParser.Parse(
+                file.Path,
+                text,
+                isStrictUnknownConfigurationKeySuppressed(file));
             if (root is not null)
             {
                 builder.Add(new ConfigurationFile(file.Path, root));
@@ -205,7 +211,8 @@ internal sealed class ConfigurationSnapshot
             existing.Key,
             existing.FullPath,
             new ConfigurationNode(properties.ToImmutable()),
-            existing.Location);
+            existing.Location,
+            existing.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig);
     }
 
     private static ConfigurationProperty CreateProjectedProperty(
@@ -224,7 +231,12 @@ internal sealed class ConfigurationSnapshot
                 fullPath,
                 source)));
 
-        return new ConfigurationProperty(key, fullPath, value, source.Location);
+        return new ConfigurationProperty(
+            key,
+            fullPath,
+            value,
+            source.Location,
+            source.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig);
     }
 
     private static bool TryGetChildPathPart(string fullPath, string[] parentPathParts, out string childPart)
@@ -329,25 +341,43 @@ internal sealed class ConfigurationNode
 
 internal sealed class ConfigurationProperty
 {
-    public ConfigurationProperty(string key, string fullPath, ConfigurationNode value, Location location)
+    public ConfigurationProperty(
+        string key,
+        string fullPath,
+        ConfigurationNode value,
+        Location location,
+        bool strictUnknownConfigurationKeySuppressedByAnalyzerConfig)
     {
         Key = key;
         FullPath = fullPath;
         Value = value;
         Location = location;
+        StrictUnknownConfigurationKeySuppressedByAnalyzerConfig = strictUnknownConfigurationKeySuppressedByAnalyzerConfig;
     }
 
     public string Key { get; }
     public string FullPath { get; }
     public ConfigurationNode Value { get; }
     public Location Location { get; }
+    public bool StrictUnknownConfigurationKeySuppressedByAnalyzerConfig { get; }
 }
 
 internal static class JsonConfigurationParser
 {
     public static ConfigurationNode? Parse(string path, SourceText text)
     {
-        var parser = new Parser(path, text);
+        return Parse(
+            path,
+            text,
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
+    }
+
+    public static ConfigurationNode? Parse(
+        string path,
+        SourceText text,
+        bool strictUnknownConfigurationKeySuppressedByAnalyzerConfig)
+    {
+        var parser = new Parser(path, text, strictUnknownConfigurationKeySuppressedByAnalyzerConfig);
         return parser.ParseRoot();
     }
 
@@ -355,12 +385,18 @@ internal static class JsonConfigurationParser
     {
         private readonly string _path;
         private readonly SourceText _text;
+        private readonly bool _strictUnknownConfigurationKeySuppressedByAnalyzerConfig;
         private int _position;
 
-        public Parser(string path, SourceText text)
+        public Parser(
+            string path,
+            SourceText text,
+            bool strictUnknownConfigurationKeySuppressedByAnalyzerConfig)
         {
             _path = path;
             _text = text;
+            _strictUnknownConfigurationKeySuppressedByAnalyzerConfig =
+                strictUnknownConfigurationKeySuppressedByAnalyzerConfig;
         }
 
         public ConfigurationNode? ParseRoot()
@@ -401,7 +437,8 @@ internal static class JsonConfigurationParser
                     key,
                     fullPath,
                     value,
-                    CreateLocation(TextSpan.FromBounds(keyStart, keyEnd))));
+                    CreateLocation(TextSpan.FromBounds(keyStart, keyEnd)),
+                    _strictUnknownConfigurationKeySuppressedByAnalyzerConfig));
 
                 SkipWhitespace();
                 if (Current == ',')
@@ -462,7 +499,8 @@ internal static class JsonConfigurationParser
                     itemKey,
                     itemPath,
                     value,
-                    CreateLocation(TextSpan.FromBounds(itemStart, Math.Min(_position, _text.Length)))));
+                    CreateLocation(TextSpan.FromBounds(itemStart, Math.Min(_position, _text.Length))),
+                    _strictUnknownConfigurationKeySuppressedByAnalyzerConfig));
                 index++;
 
                 SkipWhitespace();

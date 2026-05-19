@@ -7,4 +7,5 @@ public static class DiagnosticIds
     public const string DataAnnotationsNotEnabled = "CFG004";
     public const string NestedValidationNotRecursive = "CFG005";
     public const string UnknownConfigurationKey = "CFG006";
+    public const string UnknownConfigurationKeyWillThrow = "CFG007";
 }

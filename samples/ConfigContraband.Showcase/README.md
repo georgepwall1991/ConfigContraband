@@ -15,5 +15,6 @@ Expected diagnostics:
 | `CFG004` | An options type uses `[Required]`, but `ValidateDataAnnotations()` is missing. |
 | `CFG005` | A nested options object has validation attributes, but the parent property is not marked for recursive validation. |
 | `CFG006` | `appsettings.json` contains `WebookSecret`, which does not match `WebhookSecret`. |
+| `CFG007` | `ErrorOnUnknownConfiguration` is enabled, so the unknown `WebookSecret` key will fail binding. |
 
 The sample is not included in the main solution, so normal package and test builds stay clean. Its local `.globalconfig` promotes `CFG006` from `Info` to `warning` so it is visible with the other showcase diagnostics.

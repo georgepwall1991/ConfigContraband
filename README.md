@@ -19,6 +19,7 @@ It focuses on the boring production failures:
 - `[Required]` properties that are never wired into Options validation
 - nested options that look validated but are silently skipped
 - misspelled JSON keys hiding under a bound section
+- strict binding that will throw because an unknown key is present
 
 Use it when your app relies on strongly typed options and you want configuration validation feedback in the editor, in pull requests, and in CI before a bad setting reaches production.
 
@@ -31,11 +32,12 @@ Use it when your app relies on strongly typed options and you want configuration
 | DataAnnotations | Finds `[Required]`, `[Range]`, and inherited validation attributes without `ValidateDataAnnotations()`. |
 | Nested validation | Detects nested options objects and collections that need recursive validation attributes. |
 | JSON key drift | Reports likely misspelled keys under bound sections while staying conservative for flexible binding shapes. |
+| Strict binding | Warns when `ErrorOnUnknownConfiguration` makes an unknown key a binding failure. |
 
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.1.11" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.2.0" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -111,6 +113,7 @@ When the analyzer cannot prove a configuration shape statically, it stays quiet.
 | `CFG004` | DataAnnotations are not enabled for options validation | Warning | `[Required]`, `[Range]`, inherited annotations, or `IValidatableObject` without `ValidateDataAnnotations()`. |
 | `CFG005` | Nested options validation is not recursive | Warning | Nested objects or item types with annotations or `IValidatableObject`, but no recursive validation attribute. |
 | `CFG006` | Unknown configuration key under bound section | Info | JSON keys that do not match bindable options properties or aliases. |
+| `CFG007` | Unknown configuration key will throw during binding | Warning | JSON keys that do not match bindable options properties while `ErrorOnUnknownConfiguration` is enabled. |
 
 ## Fast Feedback Loop
 
@@ -319,6 +322,43 @@ Visible `appsettings.json` and `appsettings.*.json` files are treated as a merge
 
 Dictionary entry names and scalar array items are treated as values rather than property names. Arbitrary keys under `Dictionary<string, string>` and values inside `string[]` are not reported as unknown options properties.
 
+### `CFG007`: Strict Binding Turns Unknown Keys Into Failures
+
+`CFG006` is informational by default because .NET configuration binding is flexible. When a binding call explicitly enables `BinderOptions.ErrorOnUnknownConfiguration`, the same unknown-key shape becomes a binding exception instead of harmless drift.
+
+Before:
+
+```csharp
+services.AddOptions<StripeOptions>()
+    .BindConfiguration(
+        "Stripe",
+        options => options.ErrorOnUnknownConfiguration = true)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+```
+
+```json
+{
+  "Stripe": {
+    "ApiKey": "secret",
+    "WebookSecret": "typo"
+  }
+}
+```
+
+After:
+
+```json
+{
+  "Stripe": {
+    "ApiKey": "secret",
+    "WebhookSecret": "secret"
+  }
+}
+```
+
+`CFG007` mostly follows the same property graph as `CFG006`, but only reports when the final value of `ErrorOnUnknownConfiguration` is provably constant `true` on the actual binder-options lambda parameter. It also catches strict-mode failures that loose binding allows, including `[ConfigurationKeyName]` alias keys rejected by the current strict binder, object-shaped data under scalar properties such as `"ApiKey": { "Foo": "x" }`, null/default-initialized settable nested objects, constructor-initialized get-only object values, rejected object-shaped entries inside scalar collections or dictionaries, and unknown object keys behind nested dictionaries, including object collections. CLR property names on scalar objects, null CLR-only nullable values, open interface/object declared or value shapes, property- or constructor-initialized polymorphic reference shapes, matching initializer- or constructor-prepopulated polymorphic dictionary entries including ignore-case dictionary comparers, and nested dictionary entries that the strict binder accepts, unrelated `BinderOptions` instances, escaped binder-options helper calls, non-constant assignments, compound writes, assignments reset to `false`, early-return/control-flow cases, and default binding behaviour stay quiet or on the existing `CFG006` informational path.
+
 ## Design Principles
 
 - Prefer warnings for configuration failures that are likely to break production.
@@ -334,6 +374,7 @@ ConfigContraband currently focuses on:
 - `AddOptions<T>().BindConfiguration("Section")` registrations.
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
 - Direct `Configure<T>(configuration.GetSection("Section"))` registrations for section and JSON-key drift.
+- Strict `ErrorOnUnknownConfiguration` binder options for unknown-key failures.
 - String-literal section names.
 - Public bindable properties on options types, including inherited and constructor-bound bindable properties.
 - `[ConfigurationKeyName]` key-name overrides.

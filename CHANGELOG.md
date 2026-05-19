@@ -2,6 +2,14 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## Unreleased
+
+## 0.2.0 - 2026-05-19
+
+- Added `CFG007`, a warning for unknown appsettings keys when the binding call explicitly enables `BinderOptions.ErrorOnUnknownConfiguration`.
+- Reused the existing `CFG006` bindable-property model for strict binding so `BindConfiguration(...)`, `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))`, nested object keys, `[ConfigurationKeyName]` aliases rejected by strict binding, object-shaped scalar values, null/default-initialized settable nested objects, constructor-initialized get-only object values, rejected object-shaped scalar collection/dictionary entries, and nested dictionary scalar, object, or object-collection values report only when the key would fail binding, while scalar CLR property names, null CLR-only nullable values, interface/object declared or value shapes, property- or constructor-initialized polymorphic reference shapes, matching initializer- or constructor-prepopulated polymorphic dictionary entries including ignore-case dictionary comparers, escaped binder-options helpers or non-local aliases, and nested dictionary entries accepted by strict binding stay quiet or informational.
+- Tightened review blockers so constructor/object-creation `BinderOptions` escapes, field/property alias storage, and invoked local binder-options helpers including delegate `Invoke()` forms invalidate strict proof, constructor-initialized get-only nested objects stay visible to validation diagnostics, constructor-assigned dictionary comparers are preserved, empty collection-expression dictionary initializers are not treated as prepopulated, nested prepopulated polymorphic dictionary entries honor case-insensitive comparers, including `IEqualityComparer<string>` aliases, per dictionary level instead of applying ignore-case matching to the whole path, creatable reference collection/dictionary item CLR members accepted by strict binding do not warn, and strict-only registrations fall back to `CFG006` when `CFG007` is disabled through compilation diagnostic suppression.
+
 ## 0.1.11 - 2026-05-04
 
 - Hardened `CFG003` and `CFG004` chain analysis so only the real framework `OptionsBuilder<TOptions>` validation APIs count as validation or startup validation.
