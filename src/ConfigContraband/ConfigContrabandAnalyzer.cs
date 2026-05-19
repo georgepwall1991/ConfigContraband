@@ -1282,6 +1282,16 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                      .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
                      .OfType<InvocationExpressionSyntax>())
         {
+            if (InvocationMayRunLocalBinderOptionsHelper(
+                    invocation,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                return true;
+            }
+
             if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
                 semanticModel.GetSymbolInfo(invocation).Symbol is IMethodSymbol { ReducedFrom: not null } &&
                 IsRuntimeBinderOptionsReference(
@@ -1329,6 +1339,175 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             if (ContainsRuntimeBinderOptionsArgument(
                     implicitObjectCreation.ArgumentList?.Arguments,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool InvocationMayRunLocalBinderOptionsHelper(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol> binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions)
+    {
+        if (semanticModel.GetSymbolInfo(invocation).Symbol is IMethodSymbol { MethodKind: MethodKind.LocalFunction } localFunction &&
+            LocalFunctionReferencesRuntimeBinderOptions(
+                localFunction,
+                semanticModel,
+                binderOptionsParameter,
+                binderOptionsAliases,
+                parameterStillTargetsRuntimeOptions))
+        {
+            return true;
+        }
+
+        if (semanticModel.GetSymbolInfo(invocation.Expression).Symbol is ILocalSymbol local &&
+            local.Type.TypeKind == TypeKind.Delegate &&
+            LocalDelegateMayReferenceRuntimeBinderOptions(
+                local,
+                semanticModel,
+                binderOptionsParameter,
+                binderOptionsAliases,
+                parameterStillTargetsRuntimeOptions))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool LocalFunctionReferencesRuntimeBinderOptions(
+        IMethodSymbol localFunction,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol> binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions)
+    {
+        foreach (var declaration in localFunction.DeclaringSyntaxReferences
+                     .Select(reference => reference.GetSyntax())
+                     .OfType<LocalFunctionStatementSyntax>())
+        {
+            if (declaration.ExpressionBody?.Expression is { } expressionBody &&
+                ContainsRuntimeBinderOptionsReference(
+                    expressionBody,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                return true;
+            }
+
+            if (declaration.Body is { } body &&
+                ContainsRuntimeBinderOptionsReference(
+                    body,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool LocalDelegateMayReferenceRuntimeBinderOptions(
+        ILocalSymbol local,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol> binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions)
+    {
+        foreach (var declaration in local.DeclaringSyntaxReferences
+                     .Select(reference => reference.GetSyntax())
+                     .OfType<VariableDeclaratorSyntax>())
+        {
+            if (declaration.Initializer?.Value is null)
+            {
+                return true;
+            }
+
+            return declaration.Initializer.Value switch
+            {
+                SimpleLambdaExpressionSyntax simpleLambda => AnonymousFunctionReferencesRuntimeBinderOptions(
+                    simpleLambda.ExpressionBody,
+                    simpleLambda.Block,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions),
+                ParenthesizedLambdaExpressionSyntax parenthesizedLambda => AnonymousFunctionReferencesRuntimeBinderOptions(
+                    parenthesizedLambda.ExpressionBody,
+                    parenthesizedLambda.Block,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions),
+                AnonymousMethodExpressionSyntax anonymousMethod => anonymousMethod.Block is null ||
+                    ContainsRuntimeBinderOptionsReference(
+                        anonymousMethod.Block,
+                        semanticModel,
+                        binderOptionsParameter,
+                        binderOptionsAliases,
+                        parameterStillTargetsRuntimeOptions),
+                _ => true
+            };
+        }
+
+        return true;
+    }
+
+    private static bool AnonymousFunctionReferencesRuntimeBinderOptions(
+        CSharpSyntaxNode? expressionBody,
+        BlockSyntax? block,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol> binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions)
+    {
+        if (expressionBody is not null &&
+            ContainsRuntimeBinderOptionsReference(
+                expressionBody,
+                semanticModel,
+                binderOptionsParameter,
+                binderOptionsAliases,
+                parameterStillTargetsRuntimeOptions))
+        {
+            return true;
+        }
+
+        return block is not null &&
+               ContainsRuntimeBinderOptionsReference(
+                   block,
+                   semanticModel,
+                   binderOptionsParameter,
+                   binderOptionsAliases,
+                   parameterStillTargetsRuntimeOptions);
+    }
+
+    private static bool ContainsRuntimeBinderOptionsReference(
+        SyntaxNode node,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol> binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions)
+    {
+        foreach (var expression in node
+                     .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
+                     .OfType<ExpressionSyntax>())
+        {
+            if (IsRuntimeBinderOptionsReference(
+                    expression,
                     semanticModel,
                     binderOptionsParameter,
                     binderOptionsAliases,

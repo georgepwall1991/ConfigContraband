@@ -3925,6 +3925,52 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg007_reports_polymorphic_dictionary_value_when_collection_expression_initializer_is_empty()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<string, BaseEndpoint> Map { get; } = [];
+            }
+
+            public class BaseEndpoint
+            {
+                public string Url { get; set; } = "";
+            }
+
+            public sealed class DerivedEndpoint : BaseEndpoint
+            {
+                public string Token { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKeyWillThrow)
+            .WithSpan("appsettings.json", 5, 9, 5, 16)
+            .WithArguments("App:Map:primary:Token", "BaseEndpoint", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Map": {
+                  "primary": {
+                    "Token": "secret",
+                    "Url": "https://example.test"
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_stays_info_for_case_mismatched_prepopulated_polymorphic_dictionary_value_when_comparer_is_ignore_case()
     {
         var source = OptionsSource("""
@@ -6167,6 +6213,70 @@ public sealed class ConfigContrabandAnalyzerTests
             {
                 options.ErrorOnUnknownConfiguration = false;
             }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "value",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_stays_info_when_error_on_unknown_configuration_is_reset_through_invoked_local_function()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options =>
+                {
+                    options.ErrorOnUnknownConfiguration = true;
+                    void DisableStrict() => options.ErrorOnUnknownConfiguration = false;
+                    DisableStrict();
+                })
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "value",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_stays_info_when_error_on_unknown_configuration_is_reset_through_invoked_delegate()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options =>
+                {
+                    options.ErrorOnUnknownConfiguration = true;
+                    System.Action disableStrict = () => options.ErrorOnUnknownConfiguration = false;
+                    disableStrict();
+                })
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
             """);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)

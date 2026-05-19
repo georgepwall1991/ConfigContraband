@@ -785,6 +785,7 @@ internal sealed class OptionsTypeMetadata
         {
             ObjectCreationExpressionSyntax { Initializer: null, ArgumentList.Arguments.Count: 0 } => false,
             ImplicitObjectCreationExpressionSyntax { Initializer: null, ArgumentList.Arguments.Count: 0 } => false,
+            CollectionExpressionSyntax { Elements.Count: 0 } => false,
             ObjectCreationExpressionSyntax { Initializer: null } objectCreation =>
                 !IsEmptyDictionaryConstructorCall(objectCreation, compilation),
             ImplicitObjectCreationExpressionSyntax { Initializer: null } implicitObjectCreation =>
