@@ -1369,6 +1369,64 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             }
         }
 
+        foreach (var objectCreation in node
+                     .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
+                     .OfType<ObjectCreationExpressionSyntax>())
+        {
+            if (ContainsRuntimeBinderOptionsArgument(
+                    objectCreation.ArgumentList?.Arguments,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                return true;
+            }
+        }
+
+        foreach (var implicitObjectCreation in node
+                     .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
+                     .OfType<ImplicitObjectCreationExpressionSyntax>())
+        {
+            if (ContainsRuntimeBinderOptionsArgument(
+                    implicitObjectCreation.ArgumentList?.Arguments,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsRuntimeBinderOptionsArgument(
+        SeparatedSyntaxList<ArgumentSyntax>? arguments,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol> binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions)
+    {
+        if (arguments is null)
+        {
+            return false;
+        }
+
+        foreach (var argument in arguments.Value)
+        {
+            if (IsRuntimeBinderOptionsReference(
+                    argument.Expression,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                return true;
+            }
+        }
+
         return false;
     }
 

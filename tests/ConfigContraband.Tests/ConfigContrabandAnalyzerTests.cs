@@ -3937,6 +3937,168 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_stays_info_for_nested_prepopulated_polymorphic_dictionary_value_when_outer_comparer_is_ignore_case()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<string, Dictionary<string, BaseEndpoint>> Map { get; } = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["tenant"] = new()
+                    {
+                        ["primary"] = new DerivedEndpoint()
+                    }
+                };
+            }
+
+            public class BaseEndpoint
+            {
+                public string Url { get; set; } = "";
+            }
+
+            public sealed class DerivedEndpoint : BaseEndpoint
+            {
+                public string Token { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 6, 11, 6, 18)
+            .WithArguments("App:Map:TENANT:primary:Token", "BaseEndpoint", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Map": {
+                  "TENANT": {
+                    "primary": {
+                      "Token": "secret",
+                      "Url": "https://primary.example.test"
+                    }
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_stays_info_for_nested_prepopulated_polymorphic_dictionary_value_when_inner_comparer_matches_case_mismatch()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<string, Dictionary<string, BaseEndpoint>> Map { get; } = new()
+                {
+                    ["tenant"] = new(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["primary"] = new DerivedEndpoint()
+                    }
+                };
+            }
+
+            public class BaseEndpoint
+            {
+                public string Url { get; set; } = "";
+            }
+
+            public sealed class DerivedEndpoint : BaseEndpoint
+            {
+                public string Token { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 6, 11, 6, 18)
+            .WithArguments("App:Map:tenant:PRIMARY:Token", "BaseEndpoint", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Map": {
+                  "tenant": {
+                    "PRIMARY": {
+                      "Token": "secret",
+                      "Url": "https://primary.example.test"
+                    }
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg007_reports_nested_prepopulated_polymorphic_dictionary_value_when_only_inner_comparer_is_ignore_case()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<string, Dictionary<string, BaseEndpoint>> Map { get; } = new()
+                {
+                    ["tenant"] = new(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["primary"] = new DerivedEndpoint()
+                    }
+                };
+            }
+
+            public class BaseEndpoint
+            {
+                public string Url { get; set; } = "";
+            }
+
+            public sealed class DerivedEndpoint : BaseEndpoint
+            {
+                public string Token { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKeyWillThrow)
+            .WithSpan("appsettings.json", 6, 11, 6, 18)
+            .WithArguments("App:Map:TENANT:primary:Token", "BaseEndpoint", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Map": {
+                  "TENANT": {
+                    "primary": {
+                      "Token": "secret",
+                      "Url": "https://primary.example.test"
+                    }
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_stays_info_for_constructor_prepopulated_polymorphic_dictionary_values_when_strict_binding_is_enabled()
     {
         var source = OptionsSource("""
@@ -5752,6 +5914,45 @@ public sealed class ConfigContrabandAnalyzerTests
             public static class BinderOptionsExtensions
             {
                 public static void DisableStrict(this BinderOptions options)
+                {
+                    options.ErrorOnUnknownConfiguration = false;
+                }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "value",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_stays_info_when_error_on_unknown_configuration_escapes_to_constructor()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options =>
+                {
+                    options.ErrorOnUnknownConfiguration = true;
+                    _ = new StrictDisabler(options);
+                })
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", extraMembers: """
+            private sealed class StrictDisabler
+            {
+                public StrictDisabler(BinderOptions options)
                 {
                     options.ErrorOnUnknownConfiguration = false;
                 }

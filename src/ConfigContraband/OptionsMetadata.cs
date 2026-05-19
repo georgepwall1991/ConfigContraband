@@ -979,7 +979,7 @@ internal sealed class OptionsTypeMetadata
             GetDictionaryValueTypeForPath(dictionaryType, keyPath),
             keyPath,
             compilation,
-            DictionaryPathUsesCaseInsensitiveStringComparer(property, dictionaryType, keyPath, compilation));
+            DictionaryPathCaseInsensitiveSegments(property, dictionaryType, keyPath, compilation));
     }
 
     private static void AddPotentialPolymorphicDictionaryAddInvocationKey(
@@ -1005,7 +1005,7 @@ internal sealed class OptionsTypeMetadata
             GetDictionaryValueTypeForPath(dictionaryType, entryPath),
             entryPath,
             compilation,
-            DictionaryPathUsesCaseInsensitiveStringComparer(property, dictionaryType, entryPath, compilation));
+            DictionaryPathCaseInsensitiveSegments(property, dictionaryType, entryPath, compilation));
     }
 
     private static void AddPotentialPolymorphicDictionaryValueInitializerKeys(
@@ -1014,7 +1014,7 @@ internal sealed class OptionsTypeMetadata
         ITypeSymbol dictionaryType,
         ImmutableArray<string> keyPath,
         Compilation? compilation,
-        bool caseInsensitivePath = false)
+        ImmutableArray<bool> caseInsensitivePath = default)
     {
         if (!TryGetDictionaryValueType(dictionaryType, out var valueType))
         {
@@ -1060,6 +1060,9 @@ internal sealed class OptionsTypeMetadata
             }
 
             var entryPath = AddDictionaryPathSegment(keyPath, keyExpression, compilation);
+            var entryCaseInsensitivePath = AddDictionaryCaseInsensitivePathSegment(
+                caseInsensitivePath,
+                dictionaryUsesCaseInsensitiveKeys);
             if (TryGetDictionaryValueType(valueType, out _))
             {
                 AddPotentialPolymorphicDictionaryValueInitializerKeys(
@@ -1067,19 +1070,31 @@ internal sealed class OptionsTypeMetadata
                     valueExpression,
                     valueType,
                     entryPath,
-                    compilation);
+                    compilation,
+                    entryCaseInsensitivePath);
                 continue;
             }
 
             if (CanHavePolymorphicRuntimeValue(valueType) &&
                 !IsInitializerDefinitelyDeclaredType(valueExpression, valueType, compilation))
             {
-                AddPotentialPolymorphicDictionaryPath(keys, entryPath, dictionaryUsesCaseInsensitiveKeys);
+                AddPotentialPolymorphicDictionaryPath(keys, entryPath, entryCaseInsensitivePath);
             }
         }
     }
 
-    private static bool DictionaryPathUsesCaseInsensitiveStringComparer(
+    private static ImmutableArray<bool> AddDictionaryCaseInsensitivePathSegment(
+        ImmutableArray<bool> path,
+        bool segmentUsesCaseInsensitiveKeys)
+    {
+        var builder = path.IsDefault
+            ? ImmutableArray.CreateBuilder<bool>()
+            : path.ToBuilder();
+        builder.Add(segmentUsesCaseInsensitiveKeys);
+        return builder.ToImmutable();
+    }
+
+    private static ImmutableArray<bool> DictionaryPathCaseInsensitiveSegments(
         IPropertySymbol property,
         ITypeSymbol dictionaryType,
         ImmutableArray<string> keyPath,
@@ -1087,10 +1102,28 @@ internal sealed class OptionsTypeMetadata
     {
         if (keyPath.IsDefaultOrEmpty)
         {
-            return false;
+            return ImmutableArray<bool>.Empty;
         }
 
-        var dictionaryPath = RemoveLastPathSegment(keyPath);
+        var builder = ImmutableArray.CreateBuilder<bool>(keyPath.Length);
+        for (var i = 0; i < keyPath.Length; i++)
+        {
+            builder.Add(DictionaryPathUsesCaseInsensitiveStringComparer(
+                property,
+                dictionaryType,
+                GetPathPrefix(keyPath, i),
+                compilation));
+        }
+
+        return builder.ToImmutable();
+    }
+
+    private static bool DictionaryPathUsesCaseInsensitiveStringComparer(
+        IPropertySymbol property,
+        ITypeSymbol dictionaryType,
+        ImmutableArray<string> dictionaryPath,
+        Compilation? compilation)
+    {
         foreach (var declaration in property.DeclaringSyntaxReferences
                      .Select(reference => reference.GetSyntax())
                      .OfType<PropertyDeclarationSyntax>())
@@ -1107,6 +1140,22 @@ internal sealed class OptionsTypeMetadata
         }
 
         return false;
+    }
+
+    private static ImmutableArray<string> GetPathPrefix(ImmutableArray<string> path, int length)
+    {
+        if (length <= 0)
+        {
+            return ImmutableArray<string>.Empty;
+        }
+
+        var builder = ImmutableArray.CreateBuilder<string>(length);
+        for (var i = 0; i < length; i++)
+        {
+            builder.Add(path[i]);
+        }
+
+        return builder.ToImmutable();
     }
 
     private static bool DictionaryInitializerForPathUsesCaseInsensitiveStringComparer(
@@ -1392,7 +1441,7 @@ internal sealed class OptionsTypeMetadata
     private static void AddPotentialPolymorphicDictionaryPath(
         ImmutableHashSet<string>.Builder keys,
         ImmutableArray<string> path,
-        bool caseInsensitive = false)
+        ImmutableArray<bool> caseInsensitivePath = default)
     {
         if (path.IsDefaultOrEmpty ||
             path.Contains(BindableProperty.AnyPotentialPolymorphicDictionaryValueKey))
@@ -1403,9 +1452,13 @@ internal sealed class OptionsTypeMetadata
 
         var key = string.Join(":", path);
         keys.Add(key);
-        if (caseInsensitive)
+        if (!caseInsensitivePath.IsDefaultOrEmpty &&
+            caseInsensitivePath.Any(static segment => segment))
         {
-            keys.Add(BindableProperty.CaseInsensitivePotentialPolymorphicDictionaryValueKeyPrefix + key);
+            keys.Add(BindableProperty.CaseInsensitivePotentialPolymorphicDictionaryValueKeyPrefix +
+                     string.Concat(caseInsensitivePath.Select(static segment => segment ? "1" : "0")) +
+                     ":" +
+                     key);
         }
     }
 
@@ -2018,7 +2071,7 @@ internal sealed class BindableProperty
     {
         return PotentialPolymorphicDictionaryValueKeys.Contains(AnyPotentialPolymorphicDictionaryValueKey) ||
                PotentialPolymorphicDictionaryValueKeys.Contains(key) ||
-               ContainsCaseInsensitivePotentialPolymorphicDictionaryValueKey(key);
+               ContainsCaseInsensitivePotentialPolymorphicDictionaryValueKey(ImmutableArray.Create(key));
     }
 
     public bool HasPotentialPolymorphicDictionaryValueInitializerForPath(ImmutableArray<string> path)
@@ -2035,18 +2088,47 @@ internal sealed class BindableProperty
 
         var key = string.Join(":", path);
         return PotentialPolymorphicDictionaryValueKeys.Contains(key) ||
-               ContainsCaseInsensitivePotentialPolymorphicDictionaryValueKey(key);
+               ContainsCaseInsensitivePotentialPolymorphicDictionaryValueKey(path);
     }
 
-    private bool ContainsCaseInsensitivePotentialPolymorphicDictionaryValueKey(string key)
+    private bool ContainsCaseInsensitivePotentialPolymorphicDictionaryValueKey(ImmutableArray<string> path)
     {
         foreach (var candidate in PotentialPolymorphicDictionaryValueKeys)
         {
-            if (candidate.StartsWith(CaseInsensitivePotentialPolymorphicDictionaryValueKeyPrefix, StringComparison.Ordinal) &&
-                string.Equals(
-                    candidate.Substring(CaseInsensitivePotentialPolymorphicDictionaryValueKeyPrefix.Length),
-                    key,
-                    StringComparison.OrdinalIgnoreCase))
+            if (!candidate.StartsWith(CaseInsensitivePotentialPolymorphicDictionaryValueKeyPrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var candidateBody = candidate.Substring(CaseInsensitivePotentialPolymorphicDictionaryValueKeyPrefix.Length);
+            var separatorIndex = candidateBody.IndexOf(':');
+            if (separatorIndex < 0)
+            {
+                continue;
+            }
+
+            var caseInsensitiveSegments = candidateBody.Substring(0, separatorIndex);
+            var candidateSegments = candidateBody.Substring(separatorIndex + 1).Split(':');
+            if (caseInsensitiveSegments.Length != path.Length ||
+                candidateSegments.Length != path.Length)
+            {
+                continue;
+            }
+
+            var matches = true;
+            for (var i = 0; i < path.Length; i++)
+            {
+                if (!string.Equals(
+                        candidateSegments[i],
+                        path[i],
+                        caseInsensitiveSegments[i] == '1' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches)
             {
                 return true;
             }
