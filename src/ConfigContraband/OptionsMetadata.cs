@@ -61,7 +61,7 @@ internal sealed class OptionsTypeMetadata
             type,
             properties.ToImmutable(),
             ImplementsInterface(type, "System.ComponentModel.DataAnnotations.IValidatableObject"),
-            ContainsValidationAttributes(type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), bindsNonPublicProperties),
+            ContainsValidationAttributes(type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), bindsNonPublicProperties, compilation),
             bindsNonPublicProperties,
             compilation);
     }
@@ -309,7 +309,7 @@ internal sealed class OptionsTypeMetadata
             if (TryGetCollectionElementType(property.Symbol.Type, out var elementType))
             {
                 if (IsPotentialNestedObject(elementType) &&
-                    ContainsValidationAttributes(elementType, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), _bindsNonPublicProperties) &&
+                    ContainsValidationAttributes(elementType, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), _bindsNonPublicProperties, _compilation) &&
                     !HasAttribute(property.Symbol, "Microsoft.Extensions.Options.ValidateEnumeratedItemsAttribute"))
                 {
                     builder.Add(new NestedValidationCandidate(property, "ValidateEnumeratedItems", isCollection: true));
@@ -320,7 +320,7 @@ internal sealed class OptionsTypeMetadata
             }
 
             if (IsPotentialNestedObject(property.Symbol.Type) &&
-                ContainsValidationAttributes(property.Symbol.Type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), _bindsNonPublicProperties) &&
+                ContainsValidationAttributes(property.Symbol.Type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), _bindsNonPublicProperties, _compilation) &&
                 !HasAttribute(property.Symbol, "Microsoft.Extensions.Options.ValidateObjectMembersAttribute"))
             {
                 builder.Add(new NestedValidationCandidate(property, "ValidateObjectMembers", isCollection: false));
@@ -593,7 +593,8 @@ internal sealed class OptionsTypeMetadata
     private static bool ContainsValidationAttributes(
         ITypeSymbol type,
         HashSet<ITypeSymbol> visited,
-        bool bindsNonPublicProperties)
+        bool bindsNonPublicProperties,
+        Compilation? compilation)
     {
         if (!visited.Add(type))
         {
@@ -615,7 +616,7 @@ internal sealed class OptionsTypeMetadata
             return true;
         }
 
-        foreach (var candidate in GetBindableProperties(namedType, bindsNonPublicProperties, compilation: null))
+        foreach (var candidate in GetBindableProperties(namedType, bindsNonPublicProperties, compilation))
         {
             var property = candidate.Property;
             if (HasValidationAttribute(property))
@@ -626,7 +627,7 @@ internal sealed class OptionsTypeMetadata
             if (TryGetCollectionElementType(property.Type, out var elementType))
             {
                 if (IsPotentialNestedObject(elementType) &&
-                    ContainsValidationAttributes(elementType, visited, bindsNonPublicProperties))
+                    ContainsValidationAttributes(elementType, visited, bindsNonPublicProperties, compilation))
                 {
                     return true;
                 }
@@ -635,7 +636,7 @@ internal sealed class OptionsTypeMetadata
             }
 
             if (IsPotentialNestedObject(property.Type) &&
-                ContainsValidationAttributes(property.Type, visited, bindsNonPublicProperties))
+                ContainsValidationAttributes(property.Type, visited, bindsNonPublicProperties, compilation))
             {
                 return true;
             }
@@ -871,6 +872,7 @@ internal sealed class OptionsTypeMetadata
                     keys,
                     expressionBodyElementAssignment,
                     property,
+                    rootType,
                     dictionaryType,
                     compilation);
             }
@@ -881,6 +883,7 @@ internal sealed class OptionsTypeMetadata
                     keys,
                     expressionBodyInvocation,
                     property,
+                    rootType,
                     dictionaryType,
                     compilation);
             }
@@ -908,6 +911,7 @@ internal sealed class OptionsTypeMetadata
                     keys,
                     assignment,
                     property,
+                    rootType,
                     dictionaryType,
                     compilation);
             }
@@ -920,6 +924,7 @@ internal sealed class OptionsTypeMetadata
                     keys,
                     invocation,
                     property,
+                    rootType,
                     dictionaryType,
                     compilation);
             }
@@ -961,6 +966,7 @@ internal sealed class OptionsTypeMetadata
         ImmutableHashSet<string>.Builder keys,
         AssignmentExpressionSyntax assignment,
         IPropertySymbol property,
+        INamedTypeSymbol rootType,
         ITypeSymbol dictionaryType,
         Compilation? compilation)
     {
@@ -979,13 +985,14 @@ internal sealed class OptionsTypeMetadata
             GetDictionaryValueTypeForPath(dictionaryType, keyPath),
             keyPath,
             compilation,
-            DictionaryPathCaseInsensitiveSegments(property, dictionaryType, keyPath, compilation));
+            DictionaryPathCaseInsensitiveSegments(property, rootType, dictionaryType, keyPath, compilation));
     }
 
     private static void AddPotentialPolymorphicDictionaryAddInvocationKey(
         ImmutableHashSet<string>.Builder keys,
         InvocationExpressionSyntax invocation,
         IPropertySymbol property,
+        INamedTypeSymbol rootType,
         ITypeSymbol dictionaryType,
         Compilation? compilation)
     {
@@ -1005,7 +1012,7 @@ internal sealed class OptionsTypeMetadata
             GetDictionaryValueTypeForPath(dictionaryType, entryPath),
             entryPath,
             compilation,
-            DictionaryPathCaseInsensitiveSegments(property, dictionaryType, entryPath, compilation));
+            DictionaryPathCaseInsensitiveSegments(property, rootType, dictionaryType, entryPath, compilation));
     }
 
     private static void AddPotentialPolymorphicDictionaryValueInitializerKeys(
@@ -1096,6 +1103,7 @@ internal sealed class OptionsTypeMetadata
 
     private static ImmutableArray<bool> DictionaryPathCaseInsensitiveSegments(
         IPropertySymbol property,
+        INamedTypeSymbol rootType,
         ITypeSymbol dictionaryType,
         ImmutableArray<string> keyPath,
         Compilation? compilation)
@@ -1110,6 +1118,7 @@ internal sealed class OptionsTypeMetadata
         {
             builder.Add(DictionaryPathUsesCaseInsensitiveStringComparer(
                 property,
+                rootType,
                 dictionaryType,
                 GetPathPrefix(keyPath, i),
                 compilation));
@@ -1120,6 +1129,7 @@ internal sealed class OptionsTypeMetadata
 
     private static bool DictionaryPathUsesCaseInsensitiveStringComparer(
         IPropertySymbol property,
+        INamedTypeSymbol rootType,
         ITypeSymbol dictionaryType,
         ImmutableArray<string> dictionaryPath,
         Compilation? compilation)
@@ -1136,6 +1146,38 @@ internal sealed class OptionsTypeMetadata
                     compilation))
             {
                 return true;
+            }
+        }
+
+        foreach (var constructor in GetRuntimeConstructorDeclarations(rootType, property, compilation))
+        {
+            if (constructor.ExpressionBody?.Expression is AssignmentExpressionSyntax expressionBodyAssignment &&
+                IsAssignmentToProperty(expressionBodyAssignment, property, compilation) &&
+                DictionaryInitializerForPathUsesCaseInsensitiveStringComparer(
+                    expressionBodyAssignment.Right,
+                    dictionaryType,
+                    dictionaryPath,
+                    compilation))
+            {
+                return true;
+            }
+
+            if (constructor.Body is null)
+            {
+                continue;
+            }
+
+            foreach (var assignment in GetDefinitelyExecutedConstructorAssignments(constructor))
+            {
+                if (IsAssignmentToProperty(assignment, property, compilation) &&
+                    DictionaryInitializerForPathUsesCaseInsensitiveStringComparer(
+                        assignment.Right,
+                        dictionaryType,
+                        dictionaryPath,
+                        compilation))
+                {
+                    return true;
+                }
             }
         }
 

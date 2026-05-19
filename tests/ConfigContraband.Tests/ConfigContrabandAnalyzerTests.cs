@@ -1153,6 +1153,39 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_reports_constructor_initialized_get_only_nested_data_annotations_without_validate_data_annotations()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateOnStart()|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public AppOptions()
+                {
+                    Database = new();
+                }
+
+                [ValidateObjectMembers]
+                public DatabaseOptions Database { get; }
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg004_ignores_uninitialized_get_only_nested_data_annotations()
     {
         var source = OptionsSource("""
@@ -4218,6 +4251,58 @@ public sealed class ConfigContrabandAnalyzerTests
             """),
             expectedPrimary,
             expectedSecondary);
+    }
+
+    [Fact]
+    public async Task Cfg006_stays_info_for_case_mismatched_constructor_assigned_polymorphic_dictionary_value_when_comparer_is_ignore_case()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public AppOptions()
+                {
+                    Map = new(StringComparer.OrdinalIgnoreCase);
+                    Map["primary"] = new DerivedEndpoint();
+                }
+
+                public Dictionary<string, BaseEndpoint> Map { get; }
+            }
+
+            public class BaseEndpoint
+            {
+                public string Url { get; set; } = "";
+            }
+
+            public sealed class DerivedEndpoint : BaseEndpoint
+            {
+                public string Token { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 5, 9, 5, 16)
+            .WithArguments("App:Map:Primary:Token", "BaseEndpoint", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Map": {
+                  "Primary": {
+                    "Token": "secret",
+                    "Url": "https://primary.example.test"
+                  }
+                }
+              }
+            }
+            """),
+            expected);
     }
 
     [Fact]
