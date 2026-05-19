@@ -1369,8 +1369,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return true;
         }
 
-        if (semanticModel.GetSymbolInfo(invocation.Expression).Symbol is ILocalSymbol local &&
-            local.Type.TypeKind == TypeKind.Delegate &&
+        if (TryGetInvokedLocalDelegate(invocation, semanticModel, out var local) &&
             LocalDelegateMayReferenceRuntimeBinderOptions(
                 local,
                 semanticModel,
@@ -1381,6 +1380,63 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return true;
         }
 
+        return false;
+    }
+
+    private static bool TryGetInvokedLocalDelegate(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        out ILocalSymbol local)
+    {
+        if (semanticModel.GetSymbolInfo(invocation.Expression).Symbol is ILocalSymbol directLocal &&
+            directLocal.Type.TypeKind == TypeKind.Delegate)
+        {
+            local = directLocal;
+            return true;
+        }
+
+        if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
+            string.Equals(memberAccess.Name.Identifier.ValueText, "Invoke", StringComparison.Ordinal) &&
+            semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol is ILocalSymbol invokeLocal &&
+            invokeLocal.Type.TypeKind == TypeKind.Delegate)
+        {
+            local = invokeLocal;
+            return true;
+        }
+
+        if (invocation.Expression is MemberBindingExpressionSyntax memberBinding &&
+            string.Equals(memberBinding.Name.Identifier.ValueText, "Invoke", StringComparison.Ordinal) &&
+            TryGetConditionalAccess(invocation, out var conditionalAccess) &&
+            semanticModel.GetSymbolInfo(conditionalAccess.Expression).Symbol is ILocalSymbol conditionalLocal &&
+            conditionalLocal.Type.TypeKind == TypeKind.Delegate)
+        {
+            local = conditionalLocal;
+            return true;
+        }
+
+        local = null!;
+        return false;
+    }
+
+    private static bool TryGetConditionalAccess(
+        InvocationExpressionSyntax invocation,
+        out ConditionalAccessExpressionSyntax conditionalAccess)
+    {
+        if (invocation.Parent is ConditionalAccessExpressionSyntax directParent &&
+            directParent.WhenNotNull == invocation)
+        {
+            conditionalAccess = directParent;
+            return true;
+        }
+
+        if (invocation.Parent?.Parent is ConditionalAccessExpressionSyntax grandParent &&
+            grandParent.WhenNotNull == invocation.Parent)
+        {
+            conditionalAccess = grandParent;
+            return true;
+        }
+
+        conditionalAccess = null!;
         return false;
     }
 
