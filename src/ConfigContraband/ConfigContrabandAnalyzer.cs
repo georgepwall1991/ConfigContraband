@@ -287,9 +287,10 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             reportDiagnostic,
             sections,
             metadata,
-            registration.SectionPath,
-            registration.SectionExpression.GetLocation(),
-            compilation);
+            registration.SectionPath ?? "",
+            registration.BindLocation,
+            compilation,
+            registration.IsDataAnnotationsEnabled);
 
         foreach (var matchingSection in sections)
         {
@@ -310,8 +311,14 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         OptionsTypeMetadata metadata,
         string sectionPath,
         Location location,
-        Compilation compilation)
+        Compilation compilation,
+        bool dataAnnotationsEnabled)
     {
+        if (!dataAnnotationsEnabled)
+        {
+            return;
+        }
+
         foreach (var property in metadata.BindableProperties)
         {
             var found = false;
@@ -349,13 +356,17 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 var subPath = sectionPath + ":" + (matchedConfigName ?? property.Symbol.Name);
                 if (metadata.TryCreateNestedMetadata(property, out var nestedMetadata))
                 {
-                    AnalyzeRequiredKeysAcrossSections(
-                        reportDiagnostic,
-                        nestedSectionsBuilder.ToImmutable(),
-                        nestedMetadata,
-                        subPath,
-                        location,
-                        compilation);
+                    if (property.IsRecursiveValidationEnabled)
+                    {
+                        AnalyzeRequiredKeysAcrossSections(
+                            reportDiagnostic,
+                            nestedSectionsBuilder.ToImmutable(),
+                            nestedMetadata,
+                            subPath,
+                            location,
+                            compilation,
+                            dataAnnotationsEnabled);
+                    }
                 }
                 else if (metadata.TryCreateDictionaryValueMetadata(property, out var dictionaryMetadata))
                 {
@@ -381,38 +392,107 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                             dictionaryMetadata,
                             subPath + ":" + entry.Key,
                             location,
-                            compilation);
+                            compilation,
+                            dataAnnotationsEnabled);
                     }
                 }
                 else if (metadata.TryCreateCollectionElementMetadata(property, out var elementMetadata))
                 {
-                    var elementEntries = new Dictionary<string, ImmutableArray<ConfigurationNode>.Builder>(StringComparer.Ordinal);
+                    if (property.IsRecursiveValidationEnabled)
+                    {
+                        var elementEntries = new Dictionary<string, ImmutableArray<ConfigurationNode>.Builder>(StringComparer.Ordinal);
+                        foreach (var section in nestedSectionsBuilder)
+                        {
+                            foreach (var entry in section.Properties)
+                            {
+                                if (int.TryParse(entry.Key, out _))
+                                {
+                                    if (!elementEntries.TryGetValue(entry.Key, out var builder))
+                                    {
+                                        builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
+                                        elementEntries[entry.Key] = builder;
+                                    }
+                                    builder.Add(entry.Value);
+                                }
+                            }
+                        }
+
+                        foreach (var entry in elementEntries)
+                        {
+                            AnalyzeRequiredKeysAcrossSections(
+                                reportDiagnostic,
+                                entry.Value.ToImmutable(),
+                                elementMetadata,
+                                subPath + ":" + entry.Key,
+                                location,
+                                compilation,
+                                dataAnnotationsEnabled);
+                        }
+                    }
+                }
+                else if (metadata.TryCreateDictionaryValueCollectionElementMetadata(property, out var dictionaryCollectionMetadata))
+                {
+                    var dictionaryEntries = new Dictionary<string, ImmutableArray<ConfigurationNode>.Builder>(StringComparer.OrdinalIgnoreCase);
                     foreach (var section in nestedSectionsBuilder)
                     {
                         foreach (var entry in section.Properties)
                         {
-                            if (int.TryParse(entry.Key, out _))
+                            if (!dictionaryEntries.TryGetValue(entry.Key, out var builder))
                             {
-                                if (!elementEntries.TryGetValue(entry.Key, out var builder))
-                                {
-                                    builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
-                                    elementEntries[entry.Key] = builder;
-                                }
-                                builder.Add(entry.Value);
+                                builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
+                                dictionaryEntries[entry.Key] = builder;
                             }
+                            builder.Add(entry.Value);
                         }
                     }
 
-                    foreach (var entry in elementEntries)
+                    foreach (var entry in dictionaryEntries)
                     {
-                        AnalyzeRequiredKeysAcrossSections(
-                            reportDiagnostic,
-                            entry.Value.ToImmutable(),
-                            elementMetadata,
-                            subPath + ":" + entry.Key,
-                            location,
-                            compilation);
+                        var elementEntries = new Dictionary<string, ImmutableArray<ConfigurationNode>.Builder>(StringComparer.Ordinal);
+                        foreach (var node in entry.Value)
+                        {
+                            foreach (var element in node.Properties)
+                            {
+                                if (int.TryParse(element.Key, out _))
+                                {
+                                    if (!elementEntries.TryGetValue(element.Key, out var builder))
+                                    {
+                                        builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
+                                        elementEntries[element.Key] = builder;
+                                    }
+                                    builder.Add(element.Value);
+                                }
+                            }
+                        }
+
+                        foreach (var element in elementEntries)
+                        {
+                            AnalyzeRequiredKeysAcrossSections(
+                                reportDiagnostic,
+                                element.Value.ToImmutable(),
+                                dictionaryCollectionMetadata,
+                                subPath + ":" + entry.Key + ":" + element.Key,
+                                location,
+                                compilation,
+                                dataAnnotationsEnabled);
+                        }
                     }
+                }
+            }
+            else if (property.IsRecursiveValidationEnabled)
+            {
+                // Recurse into initialized objects even if the section is missing from config
+                var subPath = sectionPath + ":" + property.Symbol.Name;
+                if (metadata.TryCreateNestedMetadata(property, out var nestedMetadata))
+                {
+                    AnalyzeRequiredKeysAcrossSections(
+                        reportDiagnostic,
+                        ImmutableArray<ConfigurationNode>.Empty,
+                        nestedMetadata,
+                        subPath,
+                        location,
+                        compilation,
+                        dataAnnotationsEnabled);
                 }
             }
         }
@@ -1117,19 +1197,22 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel);
         var bindsNonPublicProperties = HasBindNonPublicPropertiesEnabled(invocation, semanticModel);
         var errorsOnUnknownConfiguration = HasErrorOnUnknownConfigurationEnabled(invocation, semanticModel);
+        var supportsValidationRules = true;
 
         registration = new OptionsRegistration(
             optionsType,
             sectionPath,
             sectionExpression,
             chain.OutermostInvocation,
-            supportsValidationRules: true,
+            supportsValidationRules,
             sectionExpressionContainsFullPath,
             chain.MethodNames.Contains("ValidateDataAnnotations"),
-            hasValidateOnStart,
-            chain.MethodNames.Any(IsValidationMethod),
+            chain.MethodNames.Contains("ValidateOnStart") || HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel),
+            chain.MethodNames.Any(IsValidationMethod) || HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel),
             bindsNonPublicProperties,
-            errorsOnUnknownConfiguration);
+            errorsOnUnknownConfiguration,
+            !supportsValidationRules || chain.MethodNames.Contains("ValidateDataAnnotations"),
+            sectionExpression.GetLocation());
         return true;
     }
 
@@ -1203,12 +1286,14 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 sectionExpression,
                 invocation,
                 supportsValidationRules: false,
-                sectionExpressionContainsFullPath,
+                sectionExpressionContainsFullPath: sectionExpressionContainsFullPath,
                 hasValidateDataAnnotations: false,
                 hasValidateOnStart: false,
                 hasValidation: false,
-                HasBindNonPublicPropertiesEnabled(invocation, semanticModel),
-                HasErrorOnUnknownConfigurationEnabled(invocation, semanticModel));
+                bindsNonPublicProperties: HasBindNonPublicPropertiesEnabled(invocation, semanticModel),
+                errorsOnUnknownConfiguration: HasErrorOnUnknownConfigurationEnabled(invocation, semanticModel),
+                isDataAnnotationsEnabled: true,
+                bindLocation: sectionExpression.GetLocation());
             return true;
         }
 
@@ -2273,7 +2358,9 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             bool hasValidateOnStart,
             bool hasValidation,
             bool bindsNonPublicProperties,
-            bool errorsOnUnknownConfiguration)
+            bool errorsOnUnknownConfiguration,
+            bool isDataAnnotationsEnabled,
+            Location bindLocation)
         {
             OptionsType = optionsType;
             SectionPath = sectionPath;
@@ -2286,6 +2373,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             HasValidation = hasValidation;
             BindsNonPublicProperties = bindsNonPublicProperties;
             ErrorsOnUnknownConfiguration = errorsOnUnknownConfiguration;
+            IsDataAnnotationsEnabled = isDataAnnotationsEnabled;
+            BindLocation = bindLocation;
         }
 
         public INamedTypeSymbol OptionsType { get; }
@@ -2299,6 +2388,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         public bool HasValidation { get; }
         public bool BindsNonPublicProperties { get; }
         public bool ErrorsOnUnknownConfiguration { get; }
+        public bool IsDataAnnotationsEnabled { get; }
+        public Location BindLocation { get; }
     }
 
     private sealed class InvocationChain

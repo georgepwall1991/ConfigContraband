@@ -889,6 +889,93 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg002_stays_quiet_if_data_annotations_not_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateOnStart();
+            """, """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        // Should still report CFG004
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithSpan(9, 9, 11, 23)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg002_stays_quiet_if_recursive_validation_not_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, """
+            public class AppOptions { public DatabaseOptions Database { get; set; } = new(); }
+            public class DatabaseOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        // Should still report CFG005
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithSpan(10, 9, 13, 23)
+            .WithSpan(3, 50, 3, 58)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Database": {}
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg002_reports_missing_key_in_initialized_nested_object_even_if_section_missing()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, """
+            using Microsoft.Extensions.Options;
+            public class AppOptions { [ValidateObjectMembers] public DatabaseOptions Database { get; set; } = new(); }
+            public class DatabaseOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithSpan(12, 24, 12, 29)
+            .WithArguments("ConnectionString", "App:Database");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_validation_without_validate_on_start()
     {
         var source = OptionsSource("""

@@ -54,6 +54,7 @@ internal sealed class OptionsTypeMetadata
                 member.ConstructorParameterCanUseDefault,
                 HasValidationAttribute(member.Property),
                 IsRequired(member.Property),
+                IsRecursiveValidationEnabled(member.Property),
                 HasPotentialPolymorphicInitializer(member.Property, type, compilation),
                 GetPotentialPolymorphicDictionaryValueInitializerKeys(member.Property, type, compilation)));
         }
@@ -167,6 +168,14 @@ internal sealed class OptionsTypeMetadata
 
         metadata = null!;
         return false;
+    }
+
+    private static bool IsRecursiveValidationEnabled(ISymbol symbol)
+    {
+        return symbol.GetAttributes().Any(attr =>
+            attr.AttributeClass?.ToDisplayString() is
+                "Microsoft.Extensions.Options.ValidateObjectMembersAttribute" or
+                "Microsoft.Extensions.Options.ValidateEnumeratedItemsAttribute");
     }
 
     public ImmutableArray<string> GetConfigurationNames()
@@ -2175,6 +2184,7 @@ internal sealed class BindableProperty
         bool constructorParameterCanUseDefault,
         bool hasValidationAttribute,
         bool isRequired,
+        bool isRecursiveValidationEnabled,
         bool hasPotentialPolymorphicInitializer,
         ImmutableHashSet<string> potentialPolymorphicDictionaryValueKeys)
     {
@@ -2184,6 +2194,7 @@ internal sealed class BindableProperty
         ConstructorParameterCanUseDefault = constructorParameterCanUseDefault;
         HasValidationAttribute = hasValidationAttribute;
         IsRequired = isRequired;
+        IsRecursiveValidationEnabled = isRecursiveValidationEnabled;
         HasPotentialPolymorphicInitializer = hasPotentialPolymorphicInitializer;
         PotentialPolymorphicDictionaryValueKeys = potentialPolymorphicDictionaryValueKeys;
     }
@@ -2194,6 +2205,7 @@ internal sealed class BindableProperty
     public bool ConstructorParameterCanUseDefault { get; }
     public bool HasValidationAttribute { get; }
     public bool IsRequired { get; }
+    public bool IsRecursiveValidationEnabled { get; }
     public bool HasPotentialPolymorphicInitializer { get; }
     public ImmutableHashSet<string> PotentialPolymorphicDictionaryValueKeys { get; }
 
