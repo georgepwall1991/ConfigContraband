@@ -11,14 +11,21 @@ internal sealed class ConfigurationSnapshot
 {
     private readonly ImmutableArray<ConfigurationFile> _files;
 
-    private ConfigurationSnapshot(ImmutableArray<ConfigurationFile> files)
+    private ConfigurationSnapshot(
+        ImmutableArray<ConfigurationFile> files,
+        bool strictUnknownConfigurationKeySuppressedByAnalyzerConfig)
     {
         _files = files;
+        StrictUnknownConfigurationKeySuppressedByAnalyzerConfig = strictUnknownConfigurationKeySuppressedByAnalyzerConfig;
     }
 
     public bool HasFiles => !_files.IsDefaultOrEmpty;
+    public bool StrictUnknownConfigurationKeySuppressedByAnalyzerConfig { get; }
 
-    public static ConfigurationSnapshot Create(ImmutableArray<AdditionalText> additionalFiles, System.Threading.CancellationToken cancellationToken)
+    public static ConfigurationSnapshot Create(
+        ImmutableArray<AdditionalText> additionalFiles,
+        bool strictUnknownConfigurationKeySuppressedByAnalyzerConfig,
+        System.Threading.CancellationToken cancellationToken)
     {
         var builder = ImmutableArray.CreateBuilder<ConfigurationFile>();
 
@@ -44,7 +51,9 @@ internal sealed class ConfigurationSnapshot
             }
         }
 
-        return new ConfigurationSnapshot(builder.ToImmutable());
+        return new ConfigurationSnapshot(
+            builder.ToImmutable(),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig);
     }
 
     public ImmutableArray<string> GetSiblingSectionNames(string sectionPath)

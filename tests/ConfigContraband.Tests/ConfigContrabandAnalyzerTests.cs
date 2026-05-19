@@ -2464,6 +2464,34 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_reports_strict_registration_when_cfg007_is_disabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "value",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            DiagnosticIds.UnknownConfigurationKeyWillThrow,
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_reports_loose_registration_when_strict_twin_uses_different_binder_options()
     {
         var source = OptionsSource("""

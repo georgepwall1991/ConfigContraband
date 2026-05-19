@@ -33,8 +33,13 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
         context.RegisterCompilationStartAction(compilationContext =>
         {
+            var strictUnknownConfigurationKeySuppressedByAnalyzerConfig = IsDiagnosticSuppressed(
+                compilationContext.Options,
+                compilationContext.Options.AdditionalFiles,
+                DiagnosticIds.UnknownConfigurationKeyWillThrow);
             var configuration = ConfigurationSnapshot.Create(
                 compilationContext.Options.AdditionalFiles,
+                strictUnknownConfigurationKeySuppressedByAnalyzerConfig,
                 compilationContext.CancellationToken);
             var nestedValidationReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
             var unknownKeysReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
@@ -57,17 +62,75 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
                     if (configuration.HasFiles)
                     {
+                        var strictUnknownConfigurationKeySuppressed = IsDiagnosticSuppressed(
+                                syntaxContext.Options,
+                                compilation,
+                                invocation.SyntaxTree,
+                                DiagnosticIds.UnknownConfigurationKeyWillThrow) ||
+                            configuration.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig;
                         AnalyzeConfigurationSection(syntaxContext.ReportDiagnostic, registration, configuration);
                         AnalyzeUnknownKeys(
-                            syntaxContext.ReportDiagnostic,
-                            registration,
-                            configuration,
-                            unknownKeysReported,
-                            compilation);
+                                syntaxContext.ReportDiagnostic,
+                                registration,
+                                configuration,
+                                unknownKeysReported,
+                                compilation,
+                                strictUnknownConfigurationKeySuppressed);
                     }
                 },
                 SyntaxKind.InvocationExpression);
         });
+    }
+
+    private static bool IsDiagnosticSuppressed(
+        AnalyzerOptions options,
+        Compilation compilation,
+        SyntaxTree syntaxTree,
+        string diagnosticId)
+    {
+        if (compilation.Options.SpecificDiagnosticOptions.TryGetValue(diagnosticId, out var reportDiagnostic) &&
+            reportDiagnostic == ReportDiagnostic.Suppress)
+        {
+            return true;
+        }
+
+        return HasSeverityNone(
+                   options.AnalyzerConfigOptionsProvider.GetOptions(syntaxTree),
+                   diagnosticId) ||
+               HasSeverityNone(options.AnalyzerConfigOptionsProvider.GlobalOptions, diagnosticId);
+    }
+
+    private static bool IsDiagnosticSuppressed(
+        AnalyzerOptions options,
+        ImmutableArray<AdditionalText> additionalFiles,
+        string diagnosticId)
+    {
+        if (HasSeverityNone(options.AnalyzerConfigOptionsProvider.GlobalOptions, diagnosticId))
+        {
+            return true;
+        }
+
+        foreach (var additionalFile in additionalFiles)
+        {
+            if (HasSeverityNone(options.AnalyzerConfigOptionsProvider.GetOptions(additionalFile), diagnosticId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasSeverityNone(AnalyzerConfigOptions options, string diagnosticId)
+    {
+        return HasSeverityNoneKey(options, "dotnet_diagnostic." + diagnosticId + ".severity") ||
+               HasSeverityNoneKey(options, "dotnet_diagnostic." + diagnosticId.ToLowerInvariant() + ".severity");
+    }
+
+    private static bool HasSeverityNoneKey(AnalyzerConfigOptions options, string key)
+    {
+        return options.TryGetValue(key, out var severity) &&
+               string.Equals(severity, "none", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsGeneratedSyntaxTree(SyntaxTree syntaxTree, SyntaxNode root)
@@ -219,7 +282,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         OptionsRegistration registration,
         ConfigurationSnapshot configuration,
         ConcurrentDictionary<string, byte> unknownKeysReported,
-        Compilation compilation)
+        Compilation compilation,
+        bool strictUnknownConfigurationKeySuppressed)
     {
         var sections = configuration.FindSections(registration.SectionPath);
         if (sections.IsDefaultOrEmpty)
@@ -239,6 +303,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 metadata,
                 unknownKeysReported,
                 registration.ErrorsOnUnknownConfiguration,
+                strictUnknownConfigurationKeySuppressed,
                 compilation);
         }
     }
@@ -249,8 +314,11 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         OptionsTypeMetadata metadata,
         ConcurrentDictionary<string, byte> unknownKeysReported,
         bool errorsOnUnknownConfiguration,
+        bool strictUnknownConfigurationKeySuppressed,
         Compilation compilation)
     {
+        var reportStrictUnknownKeys = errorsOnUnknownConfiguration &&
+            !strictUnknownConfigurationKeySuppressed;
         var knownNames = metadata.GetConfigurationNames();
         foreach (var property in section.Properties)
         {
@@ -258,7 +326,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             {
                 if (metadata.TryGetSettableConstructorBoundAlias(property.Key, section, out var constructorAliasProperty))
                 {
-                    if (errorsOnUnknownConfiguration &&
+                    if (reportStrictUnknownKeys &&
                         metadata.IsConfigurationAlias(constructorAliasProperty, property.Key))
                     {
                         ReportUnknownConfigurationKey(
@@ -276,7 +344,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     continue;
                 }
 
-                if (errorsOnUnknownConfiguration &&
+                if (reportStrictUnknownKeys &&
                     !property.Value.Properties.IsDefaultOrEmpty &&
                     metadata.TryGetClrPropertyNamed(property.Key, out var clrProperty) &&
                     clrProperty is not null &&
@@ -292,7 +360,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     continue;
                 }
 
-                var descriptor = errorsOnUnknownConfiguration &&
+                var descriptor = reportStrictUnknownKeys &&
                     !metadata.HasClrPropertyNamed(property.Key)
                     ? DiagnosticDescriptors.UnknownConfigurationKeyWillThrow
                     : DiagnosticDescriptors.UnknownConfigurationKey;
@@ -305,14 +373,14 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     property.FullPath,
                     property.Key,
                     metadata.TypeName,
-                    errorsOnUnknownConfiguration
+                    reportStrictUnknownKeys
                         ? metadata.GetStrictBindingSuggestionNames()
                         : knownNames);
 
                 continue;
             }
 
-            if (errorsOnUnknownConfiguration &&
+            if (reportStrictUnknownKeys &&
                 metadata.IsConfigurationAlias(bindableProperty, property.Key))
             {
                 ReportUnknownConfigurationKey(
@@ -343,6 +411,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     nestedMetadata,
                     unknownKeysReported,
                     nestedErrorsOnUnknownConfiguration,
+                    strictUnknownConfigurationKeySuppressed,
                     compilation);
                 continue;
             }
@@ -361,6 +430,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                             dictionaryValueMetadata,
                             unknownKeysReported,
                             dictionaryErrorsOnUnknownConfiguration,
+                            strictUnknownConfigurationKeySuppressed,
                             compilation);
                     }
                 }
@@ -378,11 +448,12 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         {
                             AnalyzeUnknownKeysInSection(
                                 reportDiagnostic,
-                                item.Value,
-                                dictionaryValueElementMetadata,
-                                unknownKeysReported,
-                                errorsOnUnknownConfiguration,
-                                compilation);
+                            item.Value,
+                            dictionaryValueElementMetadata,
+                            unknownKeysReported,
+                            errorsOnUnknownConfiguration,
+                            strictUnknownConfigurationKeySuppressed,
+                            compilation);
                         }
                     }
                 }
@@ -392,7 +463,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
             if (!metadata.TryCreateCollectionElementMetadata(bindableProperty, out var elementMetadata))
             {
-                if (errorsOnUnknownConfiguration)
+                if (reportStrictUnknownKeys)
                 {
                     var reportKeyPrefix = metadata.TypeKey + "|" + bindableProperty.Symbol.Name;
                     if (OptionsTypeMetadata.TryGetDictionaryValueType(bindableProperty.Symbol.Type, out var dictionaryValueType))
@@ -472,6 +543,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         elementMetadata,
                         unknownKeysReported,
                         errorsOnUnknownConfiguration,
+                        strictUnknownConfigurationKeySuppressed,
                         compilation);
                 }
             }
@@ -684,6 +756,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                             valueMetadata,
                             unknownKeysReported,
                             errorsOnUnknownConfiguration: !bindableProperty.HasPotentialPolymorphicDictionaryValueInitializerForPath(nestedPath),
+                            strictUnknownConfigurationKeySuppressed: false,
                             compilation: compilation);
                     }
                 }
@@ -712,6 +785,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         elementMetadata,
                         unknownKeysReported,
                         errorsOnUnknownConfiguration: true,
+                        strictUnknownConfigurationKeySuppressed: false,
                         compilation: compilation);
                 }
             }
