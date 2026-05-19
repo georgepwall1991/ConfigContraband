@@ -2464,6 +2464,54 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg007_file_scoped_suppression_does_not_downgrade_other_appsettings_files()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var enabledFileExpected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKeyWillThrow)
+            .WithSpan("appsettings.Production.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+        var suppressedFileExpected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKeyWillThrow)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerWithAnalyzerConfigAsync(
+            source,
+            new[]
+            {
+                ("appsettings.json", """
+                {
+                  "Stripe": {
+                    "ApiKey": "value",
+                    "WebookSecret": "typo"
+                  }
+                }
+                """),
+                ("appsettings.Production.json", """
+                {
+                  "Stripe": {
+                    "ApiKey": "value",
+                    "WebookSecret": "typo"
+                  }
+                }
+                """)
+            },
+            ("/.editorconfig", """
+            root = true
+
+            [appsettings.json]
+            dotnet_diagnostic.CFG007.severity = none
+            """),
+            enabledFileExpected,
+            suppressedFileExpected);
+    }
+
+    [Fact]
     public async Task Cfg006_reports_strict_registration_when_cfg007_is_disabled()
     {
         var source = OptionsSource("""
@@ -4219,6 +4267,60 @@ public sealed class ConfigContrabandAnalyzerTests
                         ["primary"] = new DerivedEndpoint()
                     }
                 };
+            }
+
+            public class BaseEndpoint
+            {
+                public string Url { get; set; } = "";
+            }
+
+            public sealed class DerivedEndpoint : BaseEndpoint
+            {
+                public string Token { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 6, 11, 6, 18)
+            .WithArguments("App:Map:tenant:PRIMARY:Token", "BaseEndpoint", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Map": {
+                  "tenant": {
+                    "PRIMARY": {
+                      "Token": "secret",
+                      "Url": "https://primary.example.test"
+                    }
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_stays_info_for_nested_prepopulated_polymorphic_dictionary_value_when_inner_comparer_is_assigned_in_constructor()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public AppOptions()
+                {
+                    Map["tenant"] = new(StringComparer.OrdinalIgnoreCase);
+                    Map["tenant"]["primary"] = new DerivedEndpoint();
+                }
+
+                public Dictionary<string, Dictionary<string, BaseEndpoint>> Map { get; } = new();
             }
 
             public class BaseEndpoint
@@ -6366,6 +6468,39 @@ public sealed class ConfigContrabandAnalyzerTests
                     options.ErrorOnUnknownConfiguration = true;
                     System.Action? disableStrict = () => options.ErrorOnUnknownConfiguration = false;
                     disableStrict?.Invoke();
+                })
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "value",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_stays_info_when_error_on_unknown_configuration_is_reset_through_reassigned_invoked_delegate()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options =>
+                {
+                    options.ErrorOnUnknownConfiguration = true;
+                    System.Action later = () => { };
+                    later = () => options.ErrorOnUnknownConfiguration = false;
+                    later();
                 })
                 .ValidateDataAnnotations()
                 .ValidateOnStart();

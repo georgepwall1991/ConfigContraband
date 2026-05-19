@@ -33,13 +33,12 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
         context.RegisterCompilationStartAction(compilationContext =>
         {
-            var strictUnknownConfigurationKeySuppressedByAnalyzerConfig = IsDiagnosticSuppressed(
-                compilationContext.Options,
-                compilationContext.Options.AdditionalFiles,
-                DiagnosticIds.UnknownConfigurationKeyWillThrow);
             var configuration = ConfigurationSnapshot.Create(
                 compilationContext.Options.AdditionalFiles,
-                strictUnknownConfigurationKeySuppressedByAnalyzerConfig,
+                additionalFile => IsDiagnosticSuppressed(
+                    compilationContext.Options,
+                    additionalFile,
+                    DiagnosticIds.UnknownConfigurationKeyWillThrow),
                 compilationContext.CancellationToken);
             var nestedValidationReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
             var unknownKeysReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
@@ -63,11 +62,10 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     if (configuration.HasFiles)
                     {
                         var strictUnknownConfigurationKeySuppressed = IsDiagnosticSuppressed(
-                                syntaxContext.Options,
-                                compilation,
-                                invocation.SyntaxTree,
-                                DiagnosticIds.UnknownConfigurationKeyWillThrow) ||
-                            configuration.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig;
+                            syntaxContext.Options,
+                            compilation,
+                            invocation.SyntaxTree,
+                            DiagnosticIds.UnknownConfigurationKeyWillThrow);
                         AnalyzeConfigurationSection(syntaxContext.ReportDiagnostic, registration, configuration);
                         AnalyzeUnknownKeys(
                                 syntaxContext.ReportDiagnostic,
@@ -102,23 +100,11 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
     private static bool IsDiagnosticSuppressed(
         AnalyzerOptions options,
-        ImmutableArray<AdditionalText> additionalFiles,
+        AdditionalText additionalFile,
         string diagnosticId)
     {
-        if (HasSeverityNone(options.AnalyzerConfigOptionsProvider.GlobalOptions, diagnosticId))
-        {
-            return true;
-        }
-
-        foreach (var additionalFile in additionalFiles)
-        {
-            if (HasSeverityNone(options.AnalyzerConfigOptionsProvider.GetOptions(additionalFile), diagnosticId))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return HasSeverityNone(options.AnalyzerConfigOptionsProvider.GetOptions(additionalFile), diagnosticId) ||
+               HasSeverityNone(options.AnalyzerConfigOptionsProvider.GlobalOptions, diagnosticId);
     }
 
     private static bool HasSeverityNone(AnalyzerConfigOptions options, string diagnosticId)
@@ -317,11 +303,15 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         bool strictUnknownConfigurationKeySuppressed,
         Compilation compilation)
     {
-        var reportStrictUnknownKeys = errorsOnUnknownConfiguration &&
-            !strictUnknownConfigurationKeySuppressed;
         var knownNames = metadata.GetConfigurationNames();
         foreach (var property in section.Properties)
         {
+            var propertyStrictUnknownConfigurationKeySuppressed =
+                strictUnknownConfigurationKeySuppressed ||
+                property.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig;
+            var reportStrictUnknownKeys = errorsOnUnknownConfiguration &&
+                !propertyStrictUnknownConfigurationKeySuppressed;
+
             if (!metadata.TryGetConfigurationProperty(property.Key, out var bindableProperty))
             {
                 if (metadata.TryGetSettableConstructorBoundAlias(property.Key, section, out var constructorAliasProperty))
@@ -356,7 +346,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         metadata.TypeKey + "|" + clrProperty.Name,
                         clrProperty.Type,
                         property.Value,
-                        suppressKnownClrProperties: true);
+                        suppressKnownClrProperties: true,
+                        strictUnknownConfigurationKeySuppressed);
                     continue;
                 }
 
@@ -479,6 +470,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                                 bindableProperty,
                                 ImmutableArray<string>.Empty,
                                 metadata.BindsNonPublicProperties,
+                                strictUnknownConfigurationKeySuppressed,
                                 compilation);
                             continue;
                         }
@@ -492,7 +484,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                                 unknownKeysReported,
                                 reportKeyPrefix,
                                 dictionaryValueElementType,
-                                property.Value);
+                                property.Value,
+                                strictUnknownConfigurationKeySuppressed);
                         }
                         else if (IsStrictScalarValueType(dictionaryValueType) &&
                                  !IsOpenRuntimeShape(dictionaryValueType))
@@ -502,7 +495,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                                 unknownKeysReported,
                                 reportKeyPrefix,
                                 dictionaryValueType,
-                                property.Value);
+                                property.Value,
+                                strictUnknownConfigurationKeySuppressed);
                         }
                     }
                     else if (OptionsTypeMetadata.TryGetCollectionElementType(bindableProperty.Symbol.Type, out var collectionElementType))
@@ -515,7 +509,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                                 unknownKeysReported,
                                 reportKeyPrefix,
                                 collectionElementType,
-                                property.Value);
+                                property.Value,
+                                strictUnknownConfigurationKeySuppressed);
                         }
                     }
                     else if (!IsOpenRuntimeShape(bindableProperty.Symbol.Type))
@@ -526,7 +521,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                             reportKeyPrefix,
                             bindableProperty.Symbol.Type,
                             property.Value,
-                            suppressKnownClrProperties: CanSuppressKnownBindableScalarClrProperties(metadata, bindableProperty));
+                            suppressKnownClrProperties: CanSuppressKnownBindableScalarClrProperties(metadata, bindableProperty),
+                            strictUnknownConfigurationKeySuppressed);
                     }
                 }
 
@@ -562,7 +558,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         string reportKeyPrefix,
         ITypeSymbol valueType,
         ConfigurationNode value,
-        bool suppressKnownClrProperties)
+        bool suppressKnownClrProperties,
+        bool strictUnknownConfigurationKeySuppressed)
     {
         var effectiveValueType = UnwrapNullableValueType(valueType);
         var canSuppressKnownClrProperties = suppressKnownClrProperties &&
@@ -572,6 +569,12 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             : ImmutableArray<string>.Empty;
         foreach (var child in value.Properties)
         {
+            if (strictUnknownConfigurationKeySuppressed ||
+                child.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig)
+            {
+                continue;
+            }
+
             if (canSuppressKnownClrProperties &&
                 OptionsTypeMetadata.TryGetClrProperty(effectiveValueType, child.Key, out var childProperty))
             {
@@ -587,7 +590,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         reportKeyPrefix,
                         childProperty.Type,
                         child.Value,
-                        suppressKnownClrProperties: true);
+                        suppressKnownClrProperties: true,
+                        strictUnknownConfigurationKeySuppressed);
                 }
 
                 continue;
@@ -611,7 +615,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         ConcurrentDictionary<string, byte> unknownKeysReported,
         string reportKeyPrefix,
         ITypeSymbol elementType,
-        ConfigurationNode collectionValue)
+        ConfigurationNode collectionValue,
+        bool strictUnknownConfigurationKeySuppressed)
     {
         foreach (var item in collectionValue.Properties)
         {
@@ -623,7 +628,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     reportKeyPrefix,
                     elementType,
                     item.Value,
-                    suppressKnownClrProperties: CanSuppressKnownStrictCollectionItemClrProperties(elementType));
+                    suppressKnownClrProperties: CanSuppressKnownStrictCollectionItemClrProperties(elementType),
+                    strictUnknownConfigurationKeySuppressed);
             }
         }
     }
@@ -633,7 +639,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         ConcurrentDictionary<string, byte> unknownKeysReported,
         string reportKeyPrefix,
         ITypeSymbol valueType,
-        ConfigurationNode dictionaryValue)
+        ConfigurationNode dictionaryValue,
+        bool strictUnknownConfigurationKeySuppressed)
     {
         foreach (var entry in dictionaryValue.Properties)
         {
@@ -645,7 +652,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     reportKeyPrefix,
                     valueType,
                     entry.Value,
-                    suppressKnownClrProperties: CanSuppressKnownStrictCollectionItemClrProperties(valueType));
+                    suppressKnownClrProperties: CanSuppressKnownStrictCollectionItemClrProperties(valueType),
+                    strictUnknownConfigurationKeySuppressed);
             }
         }
     }
@@ -655,7 +663,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         ConcurrentDictionary<string, byte> unknownKeysReported,
         string reportKeyPrefix,
         ITypeSymbol elementType,
-        ConfigurationNode dictionaryValue)
+        ConfigurationNode dictionaryValue,
+        bool strictUnknownConfigurationKeySuppressed)
     {
         foreach (var entry in dictionaryValue.Properties)
         {
@@ -664,7 +673,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 unknownKeysReported,
                 reportKeyPrefix,
                 elementType,
-                entry.Value);
+                entry.Value,
+                strictUnknownConfigurationKeySuppressed);
         }
     }
 
@@ -677,6 +687,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         BindableProperty bindableProperty,
         ImmutableArray<string> dictionaryPath,
         bool bindsNonPublicProperties,
+        bool strictUnknownConfigurationKeySuppressed,
         Compilation compilation)
     {
         if (!OptionsTypeMetadata.TryGetDictionaryValueType(dictionaryType, out var valueType))
@@ -703,6 +714,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     bindableProperty,
                     entryPath,
                     bindsNonPublicProperties,
+                    strictUnknownConfigurationKeySuppressed,
                     compilation);
             }
             else if (OptionsTypeMetadata.TryGetCollectionElementType(valueType, out var elementType))
@@ -716,7 +728,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         unknownKeysReported,
                         reportKeyPrefix,
                         elementType,
-                        entry.Value);
+                        entry.Value,
+                        strictUnknownConfigurationKeySuppressed);
                 }
                 else if (elementType is INamedTypeSymbol namedElementType &&
                          IsUserDefinedReferenceObject(elementType))
@@ -727,6 +740,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         namedElementType,
                         entry.Value,
                         bindsNonPublicProperties,
+                        strictUnknownConfigurationKeySuppressed,
                         compilation);
                 }
             }
@@ -739,7 +753,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     unknownKeysReported,
                     reportKeyPrefix,
                     valueType,
-                    entry.Value);
+                    entry.Value,
+                    strictUnknownConfigurationKeySuppressed);
             }
             else if (valueType is INamedTypeSymbol namedValueType &&
                      IsUserDefinedReferenceObject(valueType))
@@ -756,7 +771,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                             valueMetadata,
                             unknownKeysReported,
                             errorsOnUnknownConfiguration: !bindableProperty.HasPotentialPolymorphicDictionaryValueInitializerForPath(nestedPath),
-                            strictUnknownConfigurationKeySuppressed: false,
+                            strictUnknownConfigurationKeySuppressed: strictUnknownConfigurationKeySuppressed,
                             compilation: compilation);
                     }
                 }
@@ -770,6 +785,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         INamedTypeSymbol elementType,
         ConfigurationNode dictionaryValue,
         bool bindsNonPublicProperties,
+        bool strictUnknownConfigurationKeySuppressed,
         Compilation compilation)
     {
         var elementMetadata = OptionsTypeMetadata.Create(elementType, bindsNonPublicProperties, compilation);
@@ -785,7 +801,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         elementMetadata,
                         unknownKeysReported,
                         errorsOnUnknownConfiguration: true,
-                        strictUnknownConfigurationKeySuppressed: false,
+                        strictUnknownConfigurationKeySuppressed: strictUnknownConfigurationKeySuppressed,
                         compilation: compilation);
                 }
             }
@@ -1583,6 +1599,11 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 return true;
             }
 
+            if (LocalDelegateIsReassigned(local, declaration, semanticModel))
+            {
+                return true;
+            }
+
             return declaration.Initializer.Value switch
             {
                 SimpleLambdaExpressionSyntax simpleLambda => AnonymousFunctionReferencesRuntimeBinderOptions(
@@ -1611,6 +1632,37 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         }
 
         return true;
+    }
+
+    private static bool LocalDelegateIsReassigned(
+        ILocalSymbol local,
+        VariableDeclaratorSyntax declaration,
+        SemanticModel semanticModel)
+    {
+        var containingBlock = declaration.FirstAncestorOrSelf<BlockSyntax>();
+        if (containingBlock is null)
+        {
+            return true;
+        }
+
+        foreach (var assignment in containingBlock
+                     .DescendantNodes(ShouldDescendIntoBinderOptionsNode)
+                     .OfType<AssignmentExpressionSyntax>())
+        {
+            if (assignment.Left.SpanStart <= declaration.SpanStart)
+            {
+                continue;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(
+                    semanticModel.GetSymbolInfo(assignment.Left).Symbol,
+                    local))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool AnonymousFunctionReferencesRuntimeBinderOptions(

@@ -1179,10 +1179,56 @@ internal sealed class OptionsTypeMetadata
                 {
                     return true;
                 }
+
+                if (!dictionaryPath.IsDefaultOrEmpty &&
+                    assignment.Left is ElementAccessExpressionSyntax elementAccess &&
+                    TryGetDictionaryElementAccessPath(elementAccess, property, compilation, out var assignedPath) &&
+                    DictionaryPathsEqualForRuntime(
+                        assignedPath,
+                        dictionaryPath,
+                        property,
+                        rootType,
+                        dictionaryType,
+                        compilation) &&
+                    UsesCaseInsensitiveStringComparer(assignment.Right, compilation))
+                {
+                    return true;
+                }
             }
         }
 
         return false;
+    }
+
+    private static bool DictionaryPathsEqualForRuntime(
+        ImmutableArray<string> left,
+        ImmutableArray<string> right,
+        IPropertySymbol property,
+        INamedTypeSymbol rootType,
+        ITypeSymbol dictionaryType,
+        Compilation? compilation)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Length; i++)
+        {
+            var parentPath = GetPathPrefix(right, i);
+            var ignoreCase = DictionaryPathUsesCaseInsensitiveStringComparer(
+                property,
+                rootType,
+                dictionaryType,
+                parentPath,
+                compilation);
+            if (!DictionaryKeysEqual(left[i], right[i], ignoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static ImmutableArray<string> GetPathPrefix(ImmutableArray<string> path, int length)
