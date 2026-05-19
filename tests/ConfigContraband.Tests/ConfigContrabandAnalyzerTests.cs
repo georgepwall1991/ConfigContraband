@@ -6327,6 +6327,47 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_stays_info_when_error_on_unknown_configuration_is_reset_through_nested_parameter_alias()
+    {
+        var source = OptionsSource("""
+            var flag = GetFlag();
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options =>
+                {
+                    options.ErrorOnUnknownConfiguration = true;
+                    if (flag)
+                    {
+                        var alias = options;
+                        alias.ErrorOnUnknownConfiguration = false;
+                    }
+                })
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraMembers: """
+            private static bool GetFlag()
+            {
+                return false;
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "value",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_stays_info_when_error_on_unknown_configuration_is_reset_through_helper_escape()
     {
         var source = OptionsSource("""

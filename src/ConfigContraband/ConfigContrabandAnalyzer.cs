@@ -439,12 +439,12 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         {
                             AnalyzeUnknownKeysInSection(
                                 reportDiagnostic,
-                            item.Value,
-                            dictionaryValueElementMetadata,
-                            unknownKeysReported,
-                            errorsOnUnknownConfiguration,
-                            strictUnknownConfigurationKeySuppressed,
-                            compilation);
+                                item.Value,
+                                dictionaryValueElementMetadata,
+                                unknownKeysReported,
+                                errorsOnUnknownConfiguration,
+                                strictUnknownConfigurationKeySuppressed,
+                                compilation);
                         }
                     }
                 }
@@ -1274,6 +1274,16 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 finalValue = null;
             }
 
+            if (ContainsRuntimeBinderOptionsAliasDeclaration(
+                    statement,
+                    semanticModel,
+                    binderOptionsParameter,
+                    runtimeBinderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                finalValue = null;
+            }
+
             if (ContainsRuntimeBinderOptionsEscape(
                     statement,
                     semanticModel,
@@ -1355,6 +1365,35 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     propertyName))
             {
                 return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsRuntimeBinderOptionsAliasDeclaration(
+        SyntaxNode node,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol> binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions)
+    {
+        foreach (var localDeclaration in node
+                     .DescendantNodes(ShouldDescendIntoBinderOptionsNode)
+                     .OfType<LocalDeclarationStatementSyntax>())
+        {
+            foreach (var variable in localDeclaration.Declaration.Variables)
+            {
+                if (variable.Initializer?.Value is { } initializer &&
+                    IsRuntimeBinderOptionsReference(
+                        initializer,
+                        semanticModel,
+                        binderOptionsParameter,
+                        binderOptionsAliases,
+                        parameterStillTargetsRuntimeOptions))
+                {
+                    return true;
+                }
             }
         }
 
