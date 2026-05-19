@@ -4,6 +4,8 @@ All notable changes to ConfigContraband will be documented in this file.
 
 ## Unreleased
 
+## 0.2.0 - 2026-05-19
+
 - Added `CFG007`, a warning for unknown appsettings keys when the binding call explicitly enables `BinderOptions.ErrorOnUnknownConfiguration`.
 - Reused the existing `CFG006` bindable-property model for strict binding so `BindConfiguration(...)`, `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))`, nested object keys, `[ConfigurationKeyName]` aliases rejected by strict binding, object-shaped scalar values, null/default-initialized settable nested objects, constructor-initialized get-only object values, rejected object-shaped scalar collection/dictionary entries, and nested dictionary scalar, object, or object-collection values report only when the key would fail binding, while scalar CLR property names, null CLR-only nullable values, interface/object declared or value shapes, property- or constructor-initialized polymorphic reference shapes, matching initializer- or constructor-prepopulated polymorphic dictionary entries including ignore-case dictionary comparers, escaped binder-options helpers, and nested dictionary entries accepted by strict binding stay quiet or informational.
 

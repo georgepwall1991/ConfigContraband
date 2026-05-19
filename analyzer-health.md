@@ -2,9 +2,9 @@
 
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
-Last refreshed: 2026-05-18
-Package version: `0.1.11`
-Base audited commit: `53263cf`
+Last refreshed: 2026-05-19
+Package version: `0.2.0`
+Base audited commit: `4f6088a`
 
 ## Scoring Rubric
 
@@ -35,7 +35,7 @@ Priority means "next investment priority", not diagnostic severity:
 
 ## Current Posture
 
-The analyzer has a compact, coherent rule set: six diagnostics, four code-fix families, `BindConfiguration(...)`, explicit `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))` section/key checks, strict `ErrorOnUnknownConfiguration` unknown-key warnings, fluent-chain validation checks before and after binding calls, `buildTransitive` appsettings discovery, README rule documentation, changelog/version metadata, and CI that restores, builds, tests, packs, uploads test results, and uploads packages. The best next improvements should still come from real-world edge cases or adoption polish, not speculative rule widening.
+The analyzer has a compact, coherent rule set: seven diagnostics, four code-fix families, `BindConfiguration(...)`, explicit `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))` section/key checks, strict `ErrorOnUnknownConfiguration` unknown-key warnings, fluent-chain validation checks before and after binding calls, `buildTransitive` appsettings discovery, README rule documentation, changelog/version metadata, and CI that restores, builds, tests, packs, uploads test results, and uploads packages. The best next improvements should still come from real-world edge cases or adoption polish, not speculative rule widening.
 
 ## Improvement Changelog
 
@@ -81,7 +81,7 @@ The analyzer has a compact, coherent rule set: six diagnostics, four code-fix fa
 | 2026-05-05 | 38 | `CFG004`, `CFG006` | `BindNonPublicProperties` detection symbol-checked the property assignment but not the receiver, so assigning `true` on an unrelated `BinderOptions` instance inside the lambda could make private-set members look bindable. | Require the assignment receiver to be the actual binder-options lambda parameter, with warning and unknown-key regressions for unrelated `BinderOptions` assignments. | `CFG004` stays `4.60` and `CFG006` stays `4.50`, with a tighter false-positive boundary around private-set options. |
 | 2026-05-05 | 39 | `CFG001` | Raw string section fixes used a single-line raw token even when the suggested decoded section name contained a line break, which could produce invalid fixed code. | Fall back to a normal escaped string literal for raw section replacements containing `\r` or `\n`, with a regression for decoded JSON newline suggestions. | `CFG001` stays `4.85`, with safer automatic fixes for unusual but valid configuration keys. |
 | 2026-05-13 | 40 | Monitor | No actionable precision debt surfaced this sweep; refreshed audit metadata only. | Bumped `Last refreshed` to 2026-05-13 and `Base audited commit` to `c44bfaf` to reflect the v0.1.11 release as the audited baseline; no analyzer, code-fix, or test changes. | No score changes. Every rule remains P3 / monitor and the Current Shortlist holds. |
-| 2026-05-18 | 41 | `CFG007` | `CFG006` correctly reported unknown appsettings keys as Info, but bindings that explicitly leave `BinderOptions.ErrorOnUnknownConfiguration = true` turn the same typo into a binding exception. | Added `CFG007` as a Warning for strict binder-options registrations, reusing the existing unknown-key model for `BindConfiguration(...)`, `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))`, nested object keys, strict-rejected `[ConfigurationKeyName]` aliases, object-shaped scalar values, null/default-initialized settable nested objects, constructor-initialized get-only object values, object-shaped scalar collection/dictionary entries, and nested dictionary scalar, object, or object-collection values while preserving final-assignment, compound-write, CLR-property-name, null-CLR-only-nullable, open-shape, property/constructor-initialized-polymorphic, matching initializer/constructor-prepopulated-polymorphic-dictionary-entry including ignore-case dictionary comparers, control-flow, helper-escape, and unrelated-`BinderOptions` guards. | New rule scores `5.00`: high production impact, narrow final-constant-true detection, and no automatic fix because the diagnostic points at JSON additional files. |
+| 2026-05-19 | 41 | `CFG007` | `CFG006` correctly reported unknown appsettings keys as Info, but bindings that explicitly leave `BinderOptions.ErrorOnUnknownConfiguration = true` turn the same typo into a binding exception. | Added `CFG007` as a Warning for strict binder-options registrations, reusing the existing unknown-key model for `BindConfiguration(...)`, `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))`, nested object keys, strict-rejected `[ConfigurationKeyName]` aliases, object-shaped scalar values, null/default-initialized settable nested objects, constructor-initialized get-only object values, object-shaped scalar collection/dictionary entries, and nested dictionary scalar, object, or object-collection values while preserving final-assignment, compound-write, CLR-property-name, null-CLR-only-nullable, open-shape, property/constructor-initialized-polymorphic, matching initializer/constructor-prepopulated-polymorphic-dictionary-entry including ignore-case dictionary comparers, control-flow, helper-escape, and unrelated-`BinderOptions` guards. | New rule scores `5.00`: high production impact, narrow final-constant-true detection, no automatic fix because the diagnostic points at JSON additional files, and `0.2.0` release metadata tracks the new public warning rule. |
 
 ## Health Baseline
 
