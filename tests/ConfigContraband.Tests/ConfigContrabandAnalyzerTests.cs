@@ -2323,7 +2323,7 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
-    public async Task Cfg007_suppresses_cfg006_duplicate_when_loose_and_strict_registrations_share_section()
+    public async Task Cfg006_and_cfg007_report_when_loose_and_strict_registrations_share_section()
     {
         var source = OptionsSource("""
             services.AddOptions<StripeOptions>("loose")
@@ -2337,7 +2337,10 @@ public sealed class ConfigContrabandAnalyzerTests
                 .ValidateOnStart();
             """);
 
-        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKeyWillThrow)
+        var expectedInfo = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+        var expectedWarning = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKeyWillThrow)
             .WithSpan("appsettings.json", 4, 5, 4, 19)
             .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
 
@@ -2351,11 +2354,12 @@ public sealed class ConfigContrabandAnalyzerTests
               }
             }
             """),
-            expected);
+            expectedInfo,
+            expectedWarning);
     }
 
     [Fact]
-    public async Task Cfg007_suppresses_cfg006_duplicate_when_strict_registration_uses_different_section_casing()
+    public async Task Cfg006_and_cfg007_report_when_strict_registration_uses_different_section_casing()
     {
         var source = OptionsSource("""
             services.AddOptions<StripeOptions>("loose")
@@ -2369,7 +2373,10 @@ public sealed class ConfigContrabandAnalyzerTests
                 .ValidateOnStart();
             """);
 
-        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKeyWillThrow)
+        var expectedInfo = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+        var expectedWarning = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKeyWillThrow)
             .WithSpan("appsettings.json", 4, 5, 4, 19)
             .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
 
@@ -2383,7 +2390,8 @@ public sealed class ConfigContrabandAnalyzerTests
               }
             }
             """),
-            expected);
+            expectedInfo,
+            expectedWarning);
     }
 
     [Fact]
@@ -2416,6 +2424,42 @@ public sealed class ConfigContrabandAnalyzerTests
             }
             """),
             DiagnosticIds.UnknownConfigurationKeyWillThrow,
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_loose_registration_when_matching_strict_cfg007_is_disabled_by_analyzer_config()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>("loose")
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+
+            services.AddOptions<StripeOptions>("strict")
+                .BindConfiguration("Stripe", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerWithAnalyzerConfigAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "value",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            """
+            is_global = true
+            dotnet_diagnostic.CFG007.severity = none
+            """,
             expected);
     }
 
@@ -3276,6 +3320,36 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg007_does_not_report_known_child_under_creatable_reference_collection_item_when_error_on_unknown_configuration_is_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public List<Version> Versions { get; set; } = [];
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Versions": [
+                  {
+                    "Major": 1
+                  }
+                ]
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg007_does_not_report_dictionary_entries_inside_collection_when_error_on_unknown_configuration_is_enabled()
     {
         var source = OptionsSource("""
@@ -3336,6 +3410,36 @@ public sealed class ConfigContrabandAnalyzerTests
                   "origin": {
                     "X": 1,
                     "Y": 2
+                  }
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg007_does_not_report_known_child_under_creatable_reference_dictionary_value_when_error_on_unknown_configuration_is_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<string, Version> Versions { get; set; } = [];
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Versions": {
+                  "stable": {
+                    "Major": 1
                   }
                 }
               }

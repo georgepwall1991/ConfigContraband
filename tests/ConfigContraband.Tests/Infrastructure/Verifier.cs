@@ -63,6 +63,19 @@ internal static class Verifier
         await test.RunAsync();
     }
 
+    public static async Task VerifyAnalyzerWithAnalyzerConfigAsync(
+        string source,
+        (string filename, string content) additionalFile,
+        string analyzerConfig,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateAnalyzerTest(source);
+        test.TestState.AdditionalFiles.Add(additionalFile);
+        test.TestState.AnalyzerConfigFiles.Add(("/.globalconfig", analyzerConfig));
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
     public static async Task VerifyAnalyzerAsync(
         string source,
         (string filename, string content)[] additionalFiles,

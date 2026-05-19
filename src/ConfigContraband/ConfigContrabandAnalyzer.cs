@@ -3,7 +3,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -39,14 +38,6 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 compilationContext.CancellationToken);
             var nestedValidationReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
             var unknownKeysReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
-            var strictUnknownKeyDiagnosticsEnabled = !IsDiagnosticSuppressed(
-                compilationContext.Compilation,
-                DiagnosticIds.UnknownConfigurationKeyWillThrow);
-            var strictUnknownKeyRegistrations = configuration.HasFiles && strictUnknownKeyDiagnosticsEnabled
-                ? CollectStrictUnknownKeyRegistrationKeys(
-                    compilationContext.Compilation,
-                    compilationContext.CancellationToken)
-                : ImmutableHashSet<string>.Empty;
 
             compilationContext.RegisterSyntaxNodeAction(
                 syntaxContext =>
@@ -72,53 +63,11 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                             registration,
                             configuration,
                             unknownKeysReported,
-                            strictUnknownKeyRegistrations,
-                            strictUnknownKeyDiagnosticsEnabled,
                             compilation);
                     }
                 },
                 SyntaxKind.InvocationExpression);
         });
-    }
-
-    private static bool IsDiagnosticSuppressed(Compilation compilation, string diagnosticId)
-    {
-        return compilation.Options.SpecificDiagnosticOptions.TryGetValue(diagnosticId, out var reportDiagnostic) &&
-               reportDiagnostic == ReportDiagnostic.Suppress;
-    }
-
-    private static ImmutableHashSet<string> CollectStrictUnknownKeyRegistrationKeys(
-        Compilation compilation,
-        CancellationToken cancellationToken)
-    {
-        var keys = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
-
-        foreach (var syntaxTree in compilation.SyntaxTrees)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var root = syntaxTree.GetRoot(cancellationToken);
-            if (IsGeneratedSyntaxTree(syntaxTree, root))
-            {
-                continue;
-            }
-
-#pragma warning disable RS1030
-            var semanticModel = compilation.GetSemanticModel(syntaxTree);
-#pragma warning restore RS1030
-            foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                if (TryCreateRegistration(invocation, semanticModel, out var registration) &&
-                    registration.ErrorsOnUnknownConfiguration)
-                {
-                    keys.Add(GetUnknownKeyRegistrationKey(registration));
-                }
-            }
-        }
-
-        return keys.ToImmutable();
     }
 
     private static bool IsGeneratedSyntaxTree(SyntaxTree syntaxTree, SyntaxNode root)
@@ -270,21 +219,10 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         OptionsRegistration registration,
         ConfigurationSnapshot configuration,
         ConcurrentDictionary<string, byte> unknownKeysReported,
-        ImmutableHashSet<string> strictUnknownKeyRegistrations,
-        bool strictUnknownKeyDiagnosticsEnabled,
         Compilation compilation)
     {
         var sections = configuration.FindSections(registration.SectionPath);
         if (sections.IsDefaultOrEmpty)
-        {
-            return;
-        }
-
-        var errorsOnUnknownConfiguration =
-            registration.ErrorsOnUnknownConfiguration &&
-            strictUnknownKeyDiagnosticsEnabled;
-        if (!errorsOnUnknownConfiguration &&
-            strictUnknownKeyRegistrations.Contains(GetUnknownKeyRegistrationKey(registration)))
         {
             return;
         }
@@ -300,18 +238,9 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 matchingSection,
                 metadata,
                 unknownKeysReported,
-                errorsOnUnknownConfiguration,
+                registration.ErrorsOnUnknownConfiguration,
                 compilation);
         }
-    }
-
-    private static string GetUnknownKeyRegistrationKey(OptionsRegistration registration)
-    {
-        return registration.OptionsType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) +
-               "|" +
-               registration.SectionPath.ToUpperInvariant() +
-               "|" +
-               registration.BindsNonPublicProperties.ToString();
     }
 
     private static void AnalyzeUnknownKeysInSection(
@@ -808,7 +737,17 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
     private static bool CanSuppressKnownStrictCollectionItemClrProperties(ITypeSymbol type)
     {
-        return type.IsValueType;
+        return type.IsValueType ||
+               CanCreateDefaultReferenceValue(type);
+    }
+
+    private static bool CanCreateDefaultReferenceValue(ITypeSymbol type)
+    {
+        return type.TypeKind == TypeKind.Class &&
+               type is INamedTypeSymbol { IsAbstract: false } namedType &&
+               namedType.InstanceConstructors.Any(static constructor =>
+                   constructor.DeclaredAccessibility == Accessibility.Public &&
+                   constructor.Parameters.Length == 0);
     }
 
     private static bool CanSuppressKnownBindableScalarClrProperties(
