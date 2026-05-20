@@ -53,6 +53,8 @@ internal sealed class OptionsTypeMetadata
                 member.IsConstructorBound,
                 member.ConstructorParameterCanUseDefault,
                 HasValidationAttribute(member.Property),
+                IsRequired(member.Property),
+                IsRecursiveValidationEnabled(member.Property),
                 HasPotentialPolymorphicInitializer(member.Property, type, compilation),
                 GetPotentialPolymorphicDictionaryValueInitializerKeys(member.Property, type, compilation)));
         }
@@ -166,6 +168,14 @@ internal sealed class OptionsTypeMetadata
 
         metadata = null!;
         return false;
+    }
+
+    private static bool IsRecursiveValidationEnabled(ISymbol symbol)
+    {
+        return symbol.GetAttributes().Any(attr =>
+            attr.AttributeClass?.ToDisplayString() is
+                "Microsoft.Extensions.Options.ValidateObjectMembersAttribute" or
+                "Microsoft.Extensions.Options.ValidateEnumeratedItemsAttribute");
     }
 
     public ImmutableArray<string> GetConfigurationNames()
@@ -588,6 +598,19 @@ internal sealed class OptionsTypeMetadata
     private static bool HasValidationAttribute(ISymbol symbol)
     {
         return symbol.GetAttributes().Any(attribute => InheritsFrom(attribute.AttributeClass, "System.ComponentModel.DataAnnotations.ValidationAttribute"));
+    }
+
+    private static bool IsRequired(ISymbol symbol)
+    {
+        if (symbol.GetAttributes().Any(attribute =>
+                string.Equals(attribute.AttributeClass?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal)))
+        {
+            return symbol is not IPropertySymbol property ||
+                   !property.Type.IsValueType ||
+                   IsNullableValueType(property.Type);
+        }
+
+        return false;
     }
 
     private static bool ContainsValidationAttributes(
@@ -2157,6 +2180,8 @@ internal sealed class BindableProperty
         bool isConstructorBound,
         bool constructorParameterCanUseDefault,
         bool hasValidationAttribute,
+        bool isRequired,
+        bool isRecursiveValidationEnabled,
         bool hasPotentialPolymorphicInitializer,
         ImmutableHashSet<string> potentialPolymorphicDictionaryValueKeys)
     {
@@ -2165,6 +2190,8 @@ internal sealed class BindableProperty
         IsConstructorBound = isConstructorBound;
         ConstructorParameterCanUseDefault = constructorParameterCanUseDefault;
         HasValidationAttribute = hasValidationAttribute;
+        IsRequired = isRequired;
+        IsRecursiveValidationEnabled = isRecursiveValidationEnabled;
         HasPotentialPolymorphicInitializer = hasPotentialPolymorphicInitializer;
         PotentialPolymorphicDictionaryValueKeys = potentialPolymorphicDictionaryValueKeys;
     }
@@ -2174,6 +2201,8 @@ internal sealed class BindableProperty
     public bool IsConstructorBound { get; }
     public bool ConstructorParameterCanUseDefault { get; }
     public bool HasValidationAttribute { get; }
+    public bool IsRequired { get; }
+    public bool IsRecursiveValidationEnabled { get; }
     public bool HasPotentialPolymorphicInitializer { get; }
     public ImmutableHashSet<string> PotentialPolymorphicDictionaryValueKeys { get; }
 

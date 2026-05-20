@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Testing;
 
@@ -45,6 +46,18 @@ internal static class Verifier
         params DiagnosticResult[] expected)
     {
         var test = CreateAnalyzerTest(source);
+        test.TestState.AdditionalFiles.Add(additionalFile);
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
+    public static async Task VerifyAnalyzerConsoleAsync(
+        string source,
+        (string filename, string content) additionalFile,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateAnalyzerTest(source);
+        test.TestState.OutputKind = OutputKind.ConsoleApplication;
         test.TestState.AdditionalFiles.Add(additionalFile);
         test.ExpectedDiagnostics.AddRange(expected);
         await test.RunAsync();

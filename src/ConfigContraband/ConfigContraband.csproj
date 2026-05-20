@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.2.0</Version>
+    <Version>0.3.1</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Add CFG007, a warning for unknown appsettings keys that will throw when a supported binding call explicitly leaves BinderOptions.ErrorOnUnknownConfiguration enabled; reuse CFG006's bindable-property model for strict BindConfiguration, Bind(GetSection(...)), and direct Configure(GetSection(...)) shapes while preserving conservative guards for non-final strict options, constructor/helper/local-helper/delegate-Invoke/non-local-alias escapes, open or polymorphic value shapes, empty collection-expression dictionaries, keys accepted by the strict runtime binder, constructor-assigned dictionary comparers, generic equality-comparer aliases, creatable reference collection and dictionary item members, nested dictionary paths with per-level case-insensitive comparers, and CFG006 fallback visibility when CFG007 is disabled through compilation diagnostic suppression.</PackageReleaseNotes>
+    <PackageReleaseNotes>Harden CFG002 to match runtime DataAnnotations behaviour: required-key diagnostics now stay quiet for C# required members, non-nullable value types, direct Configure&lt;T&gt;(GetSection(...)) registrations without validation, and dictionary value object graphs that Options validation does not recursively validate, while separately validated direct bindings still report missing required keys.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
