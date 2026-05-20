@@ -14,7 +14,7 @@ public static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "The section passed to BindConfiguration should exist in appsettings configuration files.");
-    
+
     public static readonly DiagnosticDescriptor MissingRequiredConfigurationKey = new(
         id: DiagnosticIds.MissingRequiredConfigurationKey,
         title: "Required configuration key is missing",
@@ -22,7 +22,7 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Properties marked with [Required] or the required keyword should be present in the configuration section.");
+        description: "DataAnnotations [Required] properties that can fail validation should be present in the configuration section.");
 
     public static readonly DiagnosticDescriptor ValidationNotOnStart = new(
         id: DiagnosticIds.ValidationNotOnStart,

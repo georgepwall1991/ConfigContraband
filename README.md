@@ -29,7 +29,7 @@ Use it when your app relies on strongly typed options and you want configuration
 | Area | What ConfigContraband does |
 |------|----------------------------|
 | Section binding | Checks supported options bindings against visible `appsettings.json` and `appsettings.*.json` files. |
-| Required keys | Warns when a property with `[Required]` or the `required` keyword is missing from all visible configuration files. |
+| Required keys | Warns when a DataAnnotations-required key is missing from all visible configuration files. |
 | Startup validation | Flags options validation that is registered but not forced to run at startup. |
 | DataAnnotations | Finds `[Required]`, `[Range]`, and inherited validation attributes without `ValidateDataAnnotations()`. |
 | Nested validation | Detects nested options objects and collections that need recursive validation attributes. |
@@ -39,7 +39,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.3.0" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.3.1" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -111,7 +111,7 @@ When the analyzer cannot prove a configuration shape statically, it stays quiet.
 | ID | Rule | Default | Catches |
 |----|------|---------|---------|
 | `CFG001` | Bound configuration section does not exist | Warning | `BindConfiguration("Strpie")` when only `Stripe` exists. |
-| `CFG002` | Required configuration key is missing | Warning | `[Required]` or `required` property missing from all visible `appsettings*.json` sections. |
+| `CFG002` | Required configuration key is missing | Warning | `[Required]` reference, string, or nullable value property missing from all visible `appsettings*.json` sections when DataAnnotations validation is enabled. |
 | `CFG003` | Options validation does not run on startup | Warning | Validation is registered but `ValidateOnStart()` is missing. |
 | `CFG004` | DataAnnotations are not enabled for options validation | Warning | `[Required]`, `[Range]`, inherited annotations, or `IValidatableObject` without `ValidateDataAnnotations()`. |
 | `CFG005` | Nested options validation is not recursive | Warning | Nested objects or item types with annotations or `IValidatableObject`, but no recursive validation attribute. |
@@ -182,6 +182,44 @@ services.AddOptions<StripeOptions>()
 For nested typos, the fix keeps the parent path and replaces only the bad leaf section. If the code says `Features:Strpie` and the file contains `Features:Stripe`, the fix changes it to `Features:Stripe`.
 
 The analyzer checks every visible `appsettings.json` and `appsettings.*.json` additional file for section existence, including commented files, JSON string escapes, colon-delimited keys such as `"Features:Stripe"`, and duplicate JSON section members when resolving nested section paths. Lookalike files such as `appsettingsBackup.json` are ignored. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
+
+### `CFG002`: Required Configuration Keys Must Be Present
+
+`CFG002` runs when a supported binding has a visible DataAnnotations validation path. That includes `OptionsBuilder<TOptions>` chains with `ValidateDataAnnotations()` and direct `Configure<TOptions>(GetSection(...))` calls when the same top-level block also registers matching `AddOptions<TOptions>().ValidateDataAnnotations()`. It reports `[Required]` reference, string, or nullable value properties that are missing from every visible `appsettings.json` and `appsettings.*.json` section for that binding.
+
+Before:
+
+```csharp
+public sealed class StripeOptions
+{
+    [Required]
+    public string ApiKey { get; set; } = "";
+}
+
+services.AddOptions<StripeOptions>()
+    .BindConfiguration("Stripe")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+```
+
+```json
+{
+  "Stripe": {
+  }
+}
+```
+
+After:
+
+```json
+{
+  "Stripe": {
+    "ApiKey": "secret"
+  }
+}
+```
+
+The rule follows the same runtime validation boundaries as Options validation. C# `required` members are compile-time object-initializer checks, not DataAnnotations validation, so they are not reported. `[Required]` on non-nullable value types is also ignored because the default value is not null. Nested object and collection items are checked only when recursive validation attributes make Options validation walk those values; dictionary value objects stay quiet.
 
 ### `CFG003`: Validation Should Run When The App Starts
 

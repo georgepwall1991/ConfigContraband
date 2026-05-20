@@ -18,6 +18,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
     internal const string HasValidateOnStartPropertyName = "HasValidateOnStart";
     internal const string RecursiveAttributePropertyName = "RecursiveAttribute";
 
+    private const string ConfigureAllOptionsName = "\0configure-all";
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => ImmutableArray.Create(
         DiagnosticDescriptors.MissingConfigurationSection,
         DiagnosticDescriptors.MissingRequiredConfigurationKey,
@@ -368,34 +370,6 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                             dataAnnotationsEnabled);
                     }
                 }
-                else if (metadata.TryCreateDictionaryValueMetadata(property, out var dictionaryMetadata))
-                {
-                    var dictionaryEntries = new Dictionary<string, ImmutableArray<ConfigurationNode>.Builder>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var section in nestedSectionsBuilder)
-                    {
-                        foreach (var entry in section.Properties)
-                        {
-                            if (!dictionaryEntries.TryGetValue(entry.Key, out var builder))
-                            {
-                                builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
-                                dictionaryEntries[entry.Key] = builder;
-                            }
-                            builder.Add(entry.Value);
-                        }
-                    }
-
-                    foreach (var entry in dictionaryEntries)
-                    {
-                        AnalyzeRequiredKeysAcrossSections(
-                            reportDiagnostic,
-                            entry.Value.ToImmutable(),
-                            dictionaryMetadata,
-                            subPath + ":" + entry.Key,
-                            location,
-                            compilation,
-                            dataAnnotationsEnabled);
-                    }
-                }
                 else if (metadata.TryCreateCollectionElementMetadata(property, out var elementMetadata))
                 {
                     if (property.IsRecursiveValidationEnabled)
@@ -424,54 +398,6 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                                 entry.Value.ToImmutable(),
                                 elementMetadata,
                                 subPath + ":" + entry.Key,
-                                location,
-                                compilation,
-                                dataAnnotationsEnabled);
-                        }
-                    }
-                }
-                else if (metadata.TryCreateDictionaryValueCollectionElementMetadata(property, out var dictionaryCollectionMetadata))
-                {
-                    var dictionaryEntries = new Dictionary<string, ImmutableArray<ConfigurationNode>.Builder>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var section in nestedSectionsBuilder)
-                    {
-                        foreach (var entry in section.Properties)
-                        {
-                            if (!dictionaryEntries.TryGetValue(entry.Key, out var builder))
-                            {
-                                builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
-                                dictionaryEntries[entry.Key] = builder;
-                            }
-                            builder.Add(entry.Value);
-                        }
-                    }
-
-                    foreach (var entry in dictionaryEntries)
-                    {
-                        var elementEntries = new Dictionary<string, ImmutableArray<ConfigurationNode>.Builder>(StringComparer.Ordinal);
-                        foreach (var node in entry.Value)
-                        {
-                            foreach (var element in node.Properties)
-                            {
-                                if (int.TryParse(element.Key, out _))
-                                {
-                                    if (!elementEntries.TryGetValue(element.Key, out var builder))
-                                    {
-                                        builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
-                                        elementEntries[element.Key] = builder;
-                                    }
-                                    builder.Add(element.Value);
-                                }
-                            }
-                        }
-
-                        foreach (var element in elementEntries)
-                        {
-                            AnalyzeRequiredKeysAcrossSections(
-                                reportDiagnostic,
-                                element.Value.ToImmutable(),
-                                dictionaryCollectionMetadata,
-                                subPath + ":" + entry.Key + ":" + element.Key,
                                 location,
                                 compilation,
                                 dataAnnotationsEnabled);
@@ -1280,6 +1206,14 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
+            var hasKnownOptionsName = TryGetConfigureOptionsName(
+                invocation,
+                argument,
+                semanticModel,
+                out var optionsName);
+            var isDataAnnotationsEnabled = hasKnownOptionsName &&
+                HasSameBlockDataAnnotationsValidation(invocation, optionsType, optionsName, semanticModel);
+
             registration = new OptionsRegistration(
                 optionsType,
                 sectionPath,
@@ -1292,12 +1226,335 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 hasValidation: false,
                 bindsNonPublicProperties: HasBindNonPublicPropertiesEnabled(invocation, semanticModel),
                 errorsOnUnknownConfiguration: HasErrorOnUnknownConfigurationEnabled(invocation, semanticModel),
-                isDataAnnotationsEnabled: true,
+                isDataAnnotationsEnabled: isDataAnnotationsEnabled,
                 bindLocation: sectionExpression.GetLocation());
             return true;
         }
 
         return false;
+    }
+
+    private static bool TryGetConfigureOptionsName(
+        InvocationExpressionSyntax configureInvocation,
+        ArgumentSyntax sectionArgument,
+        SemanticModel semanticModel,
+        out string? optionsName)
+    {
+        optionsName = null;
+        foreach (var argument in configureInvocation.ArgumentList.Arguments)
+        {
+            if (argument.NameColon is not null &&
+                string.Equals(argument.NameColon.Name.Identifier.ValueText, "name", StringComparison.Ordinal))
+            {
+                return TryGetConstantOptionsName(
+                    argument.Expression,
+                    semanticModel,
+                    out optionsName,
+                    nullMeansConfigureAll: true);
+            }
+        }
+
+        var sectionArgumentIndex = configureInvocation.ArgumentList.Arguments.IndexOf(sectionArgument);
+        if (sectionArgumentIndex <= 0)
+        {
+            return true;
+        }
+
+        for (var index = 0; index < sectionArgumentIndex; index++)
+        {
+            var argument = configureInvocation.ArgumentList.Arguments[index];
+            if (argument.NameColon is not null)
+            {
+                continue;
+            }
+
+            return TryGetConstantOptionsName(
+                argument.Expression,
+                semanticModel,
+                out optionsName,
+                nullMeansConfigureAll: true);
+        }
+
+        return true;
+    }
+
+    private static bool HasSameBlockDataAnnotationsValidation(
+        InvocationExpressionSyntax configureInvocation,
+        INamedTypeSymbol optionsType,
+        string? optionsName,
+        SemanticModel semanticModel)
+    {
+        foreach (var invocation in GetSameExecutableScopeInvocations(configureInvocation))
+        {
+            if (invocation == configureInvocation ||
+                !IsOptionsBuilderValidateDataAnnotationsInvocation(invocation, semanticModel))
+            {
+                continue;
+            }
+
+            if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
+                TryGetOptionsBuilderFactoryTarget(
+                    memberAccess.Expression,
+                    semanticModel,
+                    out var validationOptionsType,
+                    out var validationOptionsName) &&
+                SymbolEqualityComparer.Default.Equals(validationOptionsType, optionsType) &&
+                OptionsNamesMatch(optionsName, validationOptionsName))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<InvocationExpressionSyntax> GetSameExecutableScopeInvocations(
+        InvocationExpressionSyntax configureInvocation)
+    {
+        var block = configureInvocation.FirstAncestorOrSelf<BlockSyntax>();
+        if (block is not null)
+        {
+            foreach (var statement in block.Statements)
+            {
+                foreach (var invocation in GetTopLevelStatementInvocations(statement))
+                {
+                    yield return invocation;
+                }
+            }
+
+            yield break;
+        }
+
+        var globalStatement = configureInvocation.FirstAncestorOrSelf<GlobalStatementSyntax>();
+        if (globalStatement?.Parent is CompilationUnitSyntax compilationUnit)
+        {
+            foreach (var statement in compilationUnit.Members
+                         .OfType<GlobalStatementSyntax>()
+                         .Select(static member => member.Statement))
+            {
+                foreach (var invocation in GetTopLevelStatementInvocations(statement))
+                {
+                    yield return invocation;
+                }
+            }
+
+            yield break;
+        }
+
+        var expressionBody = configureInvocation.FirstAncestorOrSelf<ArrowExpressionClauseSyntax>()?.Expression;
+        if (expressionBody is not null)
+        {
+            foreach (var invocation in expressionBody
+                         .DescendantNodesAndSelf(ShouldDescendIntoSameExecutableScope)
+                         .OfType<InvocationExpressionSyntax>())
+            {
+                yield return invocation;
+            }
+
+            yield break;
+        }
+
+        yield return configureInvocation;
+    }
+
+    private static IEnumerable<InvocationExpressionSyntax> GetTopLevelStatementInvocations(StatementSyntax statement)
+    {
+        SyntaxNode? scanRoot = statement switch
+        {
+            ExpressionStatementSyntax expressionStatement => expressionStatement.Expression,
+            LocalDeclarationStatementSyntax => statement,
+            ReturnStatementSyntax { Expression: { } expression } => expression,
+            _ => null
+        };
+        if (scanRoot is null)
+        {
+            yield break;
+        }
+
+        foreach (var invocation in scanRoot
+                     .DescendantNodesAndSelf(ShouldDescendIntoSameExecutableScope)
+                     .OfType<InvocationExpressionSyntax>())
+        {
+            yield return invocation;
+        }
+    }
+
+    private static bool ShouldDescendIntoSameExecutableScope(SyntaxNode node)
+    {
+        return node is not LocalFunctionStatementSyntax &&
+               node is not AnonymousFunctionExpressionSyntax;
+    }
+
+    private static bool TryGetOptionsBuilderFactoryTarget(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        out INamedTypeSymbol optionsType,
+        out string? optionsName)
+    {
+        optionsType = null!;
+        optionsName = null;
+        var visitedLocals = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
+
+        while (true)
+        {
+            if (expression is InvocationExpressionSyntax invocation)
+            {
+                if (TryGetAddOptionsFactoryTarget(invocation, semanticModel, out optionsType, out optionsName))
+                {
+                    return true;
+                }
+
+                if (invocation.Expression is MemberAccessExpressionSyntax memberAccess)
+                {
+                    expression = memberAccess.Expression;
+                    continue;
+                }
+
+                return false;
+            }
+
+            if (expression is IdentifierNameSyntax identifier &&
+                semanticModel.GetSymbolInfo(identifier).Symbol is ILocalSymbol localSymbol)
+            {
+                if (!visitedLocals.Add(localSymbol))
+                {
+                    return false;
+                }
+
+                var declaration = localSymbol.DeclaringSyntaxReferences
+                    .Select(static reference => reference.GetSyntax())
+                    .OfType<VariableDeclaratorSyntax>()
+                    .FirstOrDefault();
+                if (declaration?.Initializer?.Value is null)
+                {
+                    return false;
+                }
+
+                expression = declaration.Initializer.Value;
+                continue;
+            }
+
+            return false;
+        }
+    }
+
+    private static bool TryGetAddOptionsFactoryTarget(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        out INamedTypeSymbol optionsType,
+        out string? optionsName)
+    {
+        optionsType = null!;
+        optionsName = null;
+
+        var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+        var original = symbol?.ReducedFrom ?? symbol;
+        if (original is null ||
+            !IsOptionsBuilderFactoryMethod(original) ||
+            symbol?.TypeArguments.Length != 1 ||
+            symbol.TypeArguments[0] is not INamedTypeSymbol candidateOptionsType)
+        {
+            return false;
+        }
+
+        if (invocation.ArgumentList.Arguments.Count == 0)
+        {
+            optionsType = candidateOptionsType;
+            return true;
+        }
+
+        if (!TryGetConstantOptionsName(invocation.ArgumentList.Arguments[0].Expression, semanticModel, out optionsName))
+        {
+            return false;
+        }
+
+        optionsType = candidateOptionsType;
+        return true;
+    }
+
+    private static bool IsOptionsBuilderFactoryMethod(IMethodSymbol method)
+    {
+        return (string.Equals(method.Name, "AddOptions", StringComparison.Ordinal) ||
+                string.Equals(method.Name, "AddOptionsWithValidateOnStart", StringComparison.Ordinal)) &&
+               string.Equals(
+                   method.ContainingType.ToDisplayString(),
+                   "Microsoft.Extensions.DependencyInjection.OptionsServiceCollectionExtensions",
+                   StringComparison.Ordinal);
+    }
+
+    private static bool IsOptionsBuilderValidateDataAnnotationsInvocation(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+        var original = symbol?.ReducedFrom ?? symbol;
+        return original is not null &&
+               string.Equals(original.Name, "ValidateDataAnnotations", StringComparison.Ordinal) &&
+               string.Equals(
+                   original.ContainingType.ToDisplayString(),
+                   "Microsoft.Extensions.DependencyInjection.OptionsBuilderDataAnnotationsExtensions",
+                   StringComparison.Ordinal);
+    }
+
+    private static bool TryGetConstantOptionsName(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        out string? optionsName,
+        bool nullMeansConfigureAll = false)
+    {
+        var constant = semanticModel.GetConstantValue(expression);
+        if (constant.HasValue)
+        {
+            if (constant.Value is string value)
+            {
+                optionsName = value;
+                return true;
+            }
+
+            if (constant.Value is null)
+            {
+                optionsName = nullMeansConfigureAll ? ConfigureAllOptionsName : "";
+                return true;
+            }
+        }
+
+        var symbol = semanticModel.GetSymbolInfo(expression).Symbol;
+        if ((symbol is IFieldSymbol or IPropertySymbol) &&
+            string.Equals(symbol.Name, "DefaultName", StringComparison.Ordinal) &&
+            string.Equals(symbol.ContainingType.ToDisplayString(), "Microsoft.Extensions.Options.Options", StringComparison.Ordinal))
+        {
+            optionsName = "";
+            return true;
+        }
+
+        if (symbol is IFieldSymbol stringField &&
+            string.Equals(stringField.Name, "Empty", StringComparison.Ordinal) &&
+            stringField.ContainingType.SpecialType == SpecialType.System_String)
+        {
+            optionsName = "";
+            return true;
+        }
+
+        optionsName = null;
+        return false;
+    }
+
+    private static bool OptionsNamesMatch(string? configureOptionsName, string? validationOptionsName)
+    {
+        if (string.Equals(configureOptionsName, ConfigureAllOptionsName, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return string.Equals(
+            NormalizeOptionsName(validationOptionsName),
+            NormalizeOptionsName(configureOptionsName),
+            StringComparison.Ordinal);
+    }
+
+    private static string NormalizeOptionsName(string? optionsName)
+    {
+        return optionsName ?? "";
     }
 
     private static bool HasBindNonPublicPropertiesEnabled(

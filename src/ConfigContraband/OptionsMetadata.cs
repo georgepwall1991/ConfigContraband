@@ -605,12 +605,9 @@ internal sealed class OptionsTypeMetadata
         if (symbol.GetAttributes().Any(attribute =>
                 string.Equals(attribute.AttributeClass?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal)))
         {
-            return true;
-        }
-
-        if (symbol is IPropertySymbol property && property.IsRequired)
-        {
-            return true;
+            return symbol is not IPropertySymbol property ||
+                   !property.Type.IsValueType ||
+                   IsNullableValueType(property.Type);
         }
 
         return false;

@@ -2,6 +2,11 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.3.1 - 2026-05-19
+
+- Hardened `CFG002` to match runtime DataAnnotations validation behaviour: C# `required` members, non-nullable value types, direct `Configure<T>(GetSection(...))` bindings without validation, and dictionary value object graphs no longer produce required-key false positives, while separately validated direct bindings still report missing required keys.
+- Updated package release notes and README guidance so the required-key rule documents its DataAnnotations and recursive-validation boundaries.
+
 ## 0.3.0 - 2026-05-19
 
 - Added `CFG002`, a warning for required configuration keys missing from `appsettings.json` files.
