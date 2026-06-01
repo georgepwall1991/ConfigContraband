@@ -306,6 +306,56 @@ public sealed class RegistrationExtractorTests
         Assert.Empty(sections);
     }
 
+    [Fact]
+    public void Named_binding_is_not_validated_by_a_different_named_registration()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>("A").ValidateDataAnnotations();
+                    services.AddOptions<StripeOptions>("B").BindConfiguration("B");
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.Equal("B", section.SectionPath);
+        Assert.False(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
+    public void Ignores_unrelated_configure_helper()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    Helper.Configure<BillingOptions>(configuration.GetSection("Billing"));
+                }
+            }
+
+            public static class Helper
+            {
+                public static void Configure<T>(IConfiguration config)
+                {
+                }
+            }
+            """);
+
+        Assert.Empty(sections);
+    }
+
     private static IReadOnlyList<SchemaSection> Extract(string startupSource)
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)

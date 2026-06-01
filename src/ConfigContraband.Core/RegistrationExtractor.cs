@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -88,7 +89,8 @@ internal static class RegistrationExtractor
         }
 
         DetectBinderFlags(invocation, model, out var strict, out var bindsNonPublic);
-        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, OptionsTypeIsValidatedInScope(invocation, optionsType, model));
+        var optionsName = GetOptionsBuilderName(invocation, model);
+        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, OptionsInstanceIsValidatedInScope(invocation, optionsType, optionsName, model));
         return true;
     }
 
@@ -112,7 +114,8 @@ internal static class RegistrationExtractor
         }
 
         DetectBinderFlags(invocation, model, out var strict, out var bindsNonPublic);
-        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, OptionsTypeIsValidatedInScope(invocation, optionsType, model));
+        var optionsName = GetOptionsBuilderName(invocation, model);
+        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, OptionsInstanceIsValidatedInScope(invocation, optionsType, optionsName, model));
         return true;
     }
 
@@ -127,6 +130,12 @@ internal static class RegistrationExtractor
         if (!method.IsGenericMethod ||
             method.TypeArguments.Length != 1 ||
             method.TypeArguments[0] is not INamedTypeSymbol optionsType)
+        {
+            return false;
+        }
+
+        // Only the framework Configure<T> overload binds configuration; ignore unrelated Configure<T> helpers.
+        if (method.ContainingType?.ToDisplayString() != "Microsoft.Extensions.DependencyInjection.OptionsConfigurationServiceCollectionExtensions")
         {
             return false;
         }
@@ -151,7 +160,8 @@ internal static class RegistrationExtractor
         // Direct Configure<T>(GetSection(...)) enforces [Required] only when a matching
         // AddOptions<T>().ValidateDataAnnotations() is registered in the same scope (CFG002).
         DetectBinderFlags(invocation, model, out var strict, out var bindsNonPublic);
-        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, OptionsTypeIsValidatedInScope(invocation, optionsType, model));
+        var optionsName = GetConfigureName(invocation, model);
+        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, OptionsInstanceIsValidatedInScope(invocation, optionsType, optionsName, model));
         return true;
     }
 
@@ -203,14 +213,16 @@ internal static class RegistrationExtractor
         return true;
     }
 
-    private static bool OptionsTypeIsValidatedInScope(
+    private static bool OptionsInstanceIsValidatedInScope(
         InvocationExpressionSyntax invocation,
         INamedTypeSymbol optionsType,
+        string optionsName,
         SemanticModel model)
     {
-        // Look for an OptionsBuilder<T>.ValidateDataAnnotations() for the same options type within the
-        // enclosing method body (or the top-level statements). This covers both fluent chains and the
-        // split "Configure<T>(...); AddOptions<T>().ValidateDataAnnotations();" pattern CFG002 honors.
+        // Look for an OptionsBuilder<T>.ValidateDataAnnotations() for the same options instance (type and
+        // name) within the enclosing method body (or top-level statements). Matching the name avoids
+        // marking a "B" registration validated just because "A" of the same type is validated, while
+        // still covering the split "Configure<T>(...); AddOptions<T>().ValidateDataAnnotations();" pattern.
         SyntaxNode? scope = invocation.FirstAncestorOrSelf<BlockSyntax>();
         scope ??= invocation.FirstAncestorOrSelf<CompilationUnitSyntax>();
         if (scope is null)
@@ -223,13 +235,61 @@ internal static class RegistrationExtractor
             if (candidate.Expression is MemberAccessExpressionSyntax memberAccess &&
                 memberAccess.Name.Identifier.Text == "ValidateDataAnnotations" &&
                 GetOptionsBuilderTypeArgument(candidate, model) is { } validatedType &&
-                SymbolEqualityComparer.Default.Equals(validatedType, optionsType))
+                SymbolEqualityComparer.Default.Equals(validatedType, optionsType) &&
+                string.Equals(GetOptionsBuilderName(candidate, model), optionsName, StringComparison.Ordinal))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static string GetOptionsBuilderName(InvocationExpressionSyntax invocation, SemanticModel model)
+    {
+        // Walk down the fluent receiver chain to the AddOptions[WithValidateOnStart]<T>(name?) call and
+        // return its name literal, or the default (empty) name when unnamed or undeterminable.
+        InvocationExpressionSyntax? current = invocation;
+        while (current is not null)
+        {
+            if (current.Expression is not MemberAccessExpressionSyntax memberAccess)
+            {
+                break;
+            }
+
+            if (memberAccess.Name is GenericNameSyntax generic &&
+                (generic.Identifier.Text == "AddOptions" || generic.Identifier.Text == "AddOptionsWithValidateOnStart"))
+            {
+                foreach (var argument in current.ArgumentList.Arguments)
+                {
+                    if (model.GetConstantValue(argument.Expression).Value is string name)
+                    {
+                        return name;
+                    }
+                }
+
+                return string.Empty;
+            }
+
+            current = memberAccess.Expression as InvocationExpressionSyntax;
+        }
+
+        return string.Empty;
+    }
+
+    private static string GetConfigureName(InvocationExpressionSyntax invocation, SemanticModel model)
+    {
+        // The framework Configure<T> name overload passes the name as a string literal; the IConfiguration
+        // argument is a GetSection(...) call, not a constant string.
+        foreach (var argument in invocation.ArgumentList.Arguments)
+        {
+            if (model.GetConstantValue(argument.Expression).Value is string name)
+            {
+                return name;
+            }
+        }
+
+        return string.Empty;
     }
 
     private static void DetectBinderFlags(
