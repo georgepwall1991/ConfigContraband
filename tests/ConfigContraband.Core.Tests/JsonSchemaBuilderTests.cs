@@ -530,6 +530,37 @@ public sealed class JsonSchemaBuilderTests
     }
 
     [Fact]
+    public void Polymorphic_initialized_property_stays_open_under_strict_binding()
+    {
+        var schema = BuildSchema(
+            """
+            public class BaseOptions
+            {
+                public string Common { get; set; } = "";
+            }
+
+            public sealed class DerivedOptions : BaseOptions
+            {
+                public string Extra { get; set; } = "";
+            }
+
+            public sealed class RootOptions
+            {
+                public BaseOptions Section { get; set; } = new DerivedOptions();
+            }
+            """,
+            "RootOptions",
+            strict: true);
+
+        // The root stays strict, but the polymorphic Section must remain open so derived-only keys
+        // (which the runtime binder accepts) are not flagged as unknown.
+        var additionalPropertiesFalseCount =
+            schema.Split(["\"additionalProperties\": false"], StringSplitOptions.None).Length - 1;
+        Assert.Equal(1, additionalPropertiesFalseCount);
+        Assert.Contains("\"Common\"", schema);
+    }
+
+    [Fact]
     public void Nullable_enum_allows_null_in_both_type_and_enum()
     {
         var schema = BuildSchema(

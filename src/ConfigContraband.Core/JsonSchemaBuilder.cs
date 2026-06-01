@@ -32,13 +32,14 @@ internal static class JsonSchemaBuilder
         bool bindsNonPublicProperties = false,
         bool validatesDataAnnotations = false)
     {
-        var context = new SchemaBuildContext(compilation, strict, bindsNonPublicProperties);
-        return BuildObjectSchema(type, context, validatesDataAnnotations, new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default));
+        var context = new SchemaBuildContext(compilation, bindsNonPublicProperties);
+        return BuildObjectSchema(type, context, strict, validatesDataAnnotations, new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default));
     }
 
     private static JsonNode BuildObjectSchema(
         INamedTypeSymbol type,
         SchemaBuildContext context,
+        bool strict,
         bool validates,
         HashSet<INamedTypeSymbol> visited)
     {
@@ -62,10 +63,15 @@ internal static class JsonSchemaBuilder
         {
             var key = property.ConfigurationNames.FirstOrDefault() ?? property.Symbol.Name;
 
+            // A property declared as a base type but initialized with a derived type binds derived-only
+            // keys at runtime (the analyzer tracks this via polymorphic-initializer metadata). Keep its
+            // object open so strict mode does not reject those valid keys.
+            var childStrict = strict && !property.HasPotentialPolymorphicInitializer;
+
             // Validation only walks into a child object/collection when the property opts in with a
             // recursive validation attribute, mirroring CFG002/CFG005.
             var childValidates = validates && property.IsRecursiveValidationEnabled;
-            properties.Add(key, BuildValueSchema(property.Symbol.Type, context, childValidates, visited));
+            properties.Add(key, BuildValueSchema(property.Symbol.Type, context, childStrict, childValidates, visited));
 
             // [Required] is only enforced when DataAnnotations validation actually runs (CFG002).
             if (validates && property.IsRequired)
@@ -89,7 +95,7 @@ internal static class JsonSchemaBuilder
 
         // Mirror the runtime binder: strict bindings (ErrorOnUnknownConfiguration) reject unknown keys,
         // so the schema forbids extras; loose bindings stay open so flexible configuration is still valid.
-        if (context.Strict)
+        if (strict)
         {
             schema.Add("additionalProperties", JsonNode.Bool(false));
         }
@@ -100,6 +106,7 @@ internal static class JsonSchemaBuilder
     private static JsonNode BuildValueSchema(
         ITypeSymbol type,
         SchemaBuildContext context,
+        bool strict,
         bool validates,
         HashSet<INamedTypeSymbol> visited)
     {
@@ -109,19 +116,19 @@ internal static class JsonSchemaBuilder
             // enforcement does not carry into them.
             return JsonNode.Object()
                 .Add("type", JsonNode.Str("object"))
-                .Add("additionalProperties", BuildValueSchema(valueType, context, false, visited));
+                .Add("additionalProperties", BuildValueSchema(valueType, context, strict, false, visited));
         }
 
         if (OptionsTypeMetadata.TryGetCollectionElementType(type, out var elementType))
         {
             return JsonNode.Object()
                 .Add("type", JsonNode.Str("array"))
-                .Add("items", BuildValueSchema(elementType, context, validates, visited));
+                .Add("items", BuildValueSchema(elementType, context, strict, validates, visited));
         }
 
         if (OptionsTypeMetadata.IsPotentialNestedObject(type) && type is INamedTypeSymbol namedType)
         {
-            return BuildObjectSchema(namedType, context, validates, visited);
+            return BuildObjectSchema(namedType, context, strict, validates, visited);
         }
 
         return BuildScalarSchema(type);
@@ -221,16 +228,13 @@ internal static class JsonSchemaBuilder
 
     private sealed class SchemaBuildContext
     {
-        public SchemaBuildContext(Compilation compilation, bool strict, bool bindsNonPublicProperties)
+        public SchemaBuildContext(Compilation compilation, bool bindsNonPublicProperties)
         {
             Compilation = compilation;
-            Strict = strict;
             BindsNonPublicProperties = bindsNonPublicProperties;
         }
 
         public Compilation Compilation { get; }
-
-        public bool Strict { get; }
 
         public bool BindsNonPublicProperties { get; }
     }

@@ -62,6 +62,14 @@ internal static class SchemaCommand
             }
 
             var sections = RegistrationExtractor.ExtractAll(compilation);
+            if (sections.Count == 0)
+            {
+                // Projects without option bindings (helpers, tests, libraries) get no schema, so solution
+                // mode and --check do not demand an appsettings.schema.json from every project.
+                Console.WriteLine($"no option bindings in {project.Name}; skipping.");
+                continue;
+            }
+
             var json = SchemaDocumentBuilder.Build(sections, compilation).ToJsonString() + "\n";
             var schemaPath = output ?? Path.Combine(ProjectDirectory(project), DefaultSchemaFileName);
 
