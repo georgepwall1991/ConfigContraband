@@ -88,7 +88,7 @@ internal static class RegistrationExtractor
         }
 
         DetectBinderFlags(invocation, model, out var strict, out var bindsNonPublic);
-        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, ChainEnablesDataAnnotations(invocation));
+        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, OptionsTypeIsValidatedInScope(invocation, optionsType, model));
         return true;
     }
 
@@ -112,7 +112,7 @@ internal static class RegistrationExtractor
         }
 
         DetectBinderFlags(invocation, model, out var strict, out var bindsNonPublic);
-        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, ChainEnablesDataAnnotations(invocation));
+        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, OptionsTypeIsValidatedInScope(invocation, optionsType, model));
         return true;
     }
 
@@ -148,10 +148,10 @@ internal static class RegistrationExtractor
             return false;
         }
 
-        // Direct Configure<T>(GetSection(...)) needs a separate AddOptions<T>().ValidateDataAnnotations()
-        // registration to enforce [Required] (CFG002); stay conservative and do not mark required here.
+        // Direct Configure<T>(GetSection(...)) enforces [Required] only when a matching
+        // AddOptions<T>().ValidateDataAnnotations() is registered in the same scope (CFG002).
         DetectBinderFlags(invocation, model, out var strict, out var bindsNonPublic);
-        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, validatesDataAnnotations: false);
+        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, OptionsTypeIsValidatedInScope(invocation, optionsType, model));
         return true;
     }
 
@@ -203,19 +203,27 @@ internal static class RegistrationExtractor
         return true;
     }
 
-    private static bool ChainEnablesDataAnnotations(InvocationExpressionSyntax invocation)
+    private static bool OptionsTypeIsValidatedInScope(
+        InvocationExpressionSyntax invocation,
+        INamedTypeSymbol optionsType,
+        SemanticModel model)
     {
-        // Look for a ValidateDataAnnotations() call in the same fluent statement as the binding.
-        var statement = invocation.FirstAncestorOrSelf<StatementSyntax>();
-        if (statement is null)
+        // Look for an OptionsBuilder<T>.ValidateDataAnnotations() for the same options type within the
+        // enclosing method body (or the top-level statements). This covers both fluent chains and the
+        // split "Configure<T>(...); AddOptions<T>().ValidateDataAnnotations();" pattern CFG002 honors.
+        SyntaxNode? scope = invocation.FirstAncestorOrSelf<BlockSyntax>();
+        scope ??= invocation.FirstAncestorOrSelf<CompilationUnitSyntax>();
+        if (scope is null)
         {
             return false;
         }
 
-        foreach (var candidate in statement.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
+        foreach (var candidate in scope.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
             if (candidate.Expression is MemberAccessExpressionSyntax memberAccess &&
-                memberAccess.Name.Identifier.Text == "ValidateDataAnnotations")
+                memberAccess.Name.Identifier.Text == "ValidateDataAnnotations" &&
+                GetOptionsBuilderTypeArgument(candidate, model) is { } validatedType &&
+                SymbolEqualityComparer.Default.Equals(validatedType, optionsType))
             {
                 return true;
             }

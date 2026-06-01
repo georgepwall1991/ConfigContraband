@@ -95,6 +95,30 @@ public sealed class RegistrationExtractorTests
     }
 
     [Fact]
+    public void Direct_configure_is_validated_when_options_are_separately_validated()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    services.Configure<BillingOptions>(configuration.GetSection("Billing"));
+                    services.AddOptions<BillingOptions>().ValidateDataAnnotations();
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.Equal("Billing", section.SectionPath);
+        Assert.True(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
     public void Detects_strict_error_on_unknown_configuration()
     {
         var sections = Extract(

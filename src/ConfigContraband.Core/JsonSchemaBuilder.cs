@@ -129,7 +129,10 @@ internal static class JsonSchemaBuilder
 
     private static JsonNode BuildScalarSchema(ITypeSymbol type)
     {
-        var underlying = UnwrapNullable(type);
+        var nullable = type is INamedTypeSymbol nullableType &&
+                       nullableType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
+                       nullableType.TypeArguments.Length == 1;
+        var underlying = nullable ? ((INamedTypeSymbol)type).TypeArguments[0] : type;
 
         if (underlying.TypeKind == TypeKind.Enum && underlying is INamedTypeSymbol enumType)
         {
@@ -142,8 +145,11 @@ internal static class JsonSchemaBuilder
                 }
             }
 
+            // The binder also accepts enum names case-insensitively, but JSON Schema enum is
+            // case-sensitive. Emitting the canonical member names gives the best completion experience;
+            // non-canonical casing (e.g. "trace") is the rare case and is accepted as flagged.
             return JsonNode.Object()
-                .Add("type", JsonNode.Str("string"))
+                .Add("type", ScalarType("string", nullable))
                 .Add("enum", values);
         }
 
@@ -151,10 +157,18 @@ internal static class JsonSchemaBuilder
         var jsonType = MapScalarType(underlying);
         if (jsonType is not null)
         {
-            schema.Add("type", JsonNode.Str(jsonType));
+            schema.Add("type", ScalarType(jsonType, nullable));
         }
 
         return schema;
+    }
+
+    private static JsonNode ScalarType(string jsonType, bool nullable)
+    {
+        // A Nullable<T> option accepts an explicit JSON null in addition to its underlying type.
+        return nullable
+            ? JsonNode.Array().Add(JsonNode.Str(jsonType)).Add(JsonNode.Str("null"))
+            : JsonNode.Str(jsonType);
     }
 
     private static string? MapScalarType(ITypeSymbol type)
@@ -197,18 +211,6 @@ internal static class JsonSchemaBuilder
 
         // Unknown scalar shape: stay permissive so the schema never produces a false validation error.
         return null;
-    }
-
-    private static ITypeSymbol UnwrapNullable(ITypeSymbol type)
-    {
-        if (type is INamedTypeSymbol named &&
-            named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
-            named.TypeArguments.Length == 1)
-        {
-            return named.TypeArguments[0];
-        }
-
-        return type;
     }
 
     private sealed class SchemaBuildContext

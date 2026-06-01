@@ -298,7 +298,7 @@ public sealed class JsonSchemaBuilderTests
     }
 
     [Fact]
-    public void Nullable_value_types_are_unwrapped_to_the_underlying_type()
+    public void Nullable_value_types_unwrap_and_also_accept_null()
     {
         var schema = BuildSchema(
             """
@@ -318,10 +318,16 @@ public sealed class JsonSchemaBuilderTests
               "type": "object",
               "properties": {
                 "MaxRetries": {
-                  "type": "integer"
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
                 },
                 "Expiry": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               }
             }
