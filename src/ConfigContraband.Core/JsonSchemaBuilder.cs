@@ -15,19 +15,31 @@ internal static class JsonSchemaBuilder
     /// <summary>
     /// Builds the JSON Schema node describing how <paramref name="type"/> binds from configuration.
     /// </summary>
+    public static JsonNode BuildObjectSchema(SchemaSection section, Compilation compilation)
+    {
+        return BuildObjectSchema(
+            section.Type,
+            compilation,
+            section.Strict,
+            section.BindsNonPublicProperties,
+            section.ValidatesDataAnnotations);
+    }
+
     public static JsonNode BuildObjectSchema(
         INamedTypeSymbol type,
         Compilation compilation,
         bool strict = false,
-        bool bindsNonPublicProperties = false)
+        bool bindsNonPublicProperties = false,
+        bool validatesDataAnnotations = false)
     {
         var context = new SchemaBuildContext(compilation, strict, bindsNonPublicProperties);
-        return BuildObjectSchema(type, context, new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default));
+        return BuildObjectSchema(type, context, validatesDataAnnotations, new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default));
     }
 
     private static JsonNode BuildObjectSchema(
         INamedTypeSymbol type,
         SchemaBuildContext context,
+        bool validates,
         HashSet<INamedTypeSymbol> visited)
     {
         var schema = JsonNode.Object();
@@ -49,9 +61,14 @@ internal static class JsonSchemaBuilder
         foreach (var property in metadata.BindableProperties)
         {
             var key = property.ConfigurationNames.FirstOrDefault() ?? property.Symbol.Name;
-            properties.Add(key, BuildValueSchema(property.Symbol.Type, context, visited));
 
-            if (property.IsRequired)
+            // Validation only walks into a child object/collection when the property opts in with a
+            // recursive validation attribute, mirroring CFG002/CFG005.
+            var childValidates = validates && property.IsRecursiveValidationEnabled;
+            properties.Add(key, BuildValueSchema(property.Symbol.Type, context, childValidates, visited));
+
+            // [Required] is only enforced when DataAnnotations validation actually runs (CFG002).
+            if (validates && property.IsRequired)
             {
                 required.Add(JsonNode.Str(key));
                 hasRequired = true;
@@ -83,25 +100,28 @@ internal static class JsonSchemaBuilder
     private static JsonNode BuildValueSchema(
         ITypeSymbol type,
         SchemaBuildContext context,
+        bool validates,
         HashSet<INamedTypeSymbol> visited)
     {
         if (OptionsTypeMetadata.TryGetDictionaryValueType(type, out var valueType))
         {
+            // Options validation does not recurse into dictionary values (CFG005), so required-key
+            // enforcement does not carry into them.
             return JsonNode.Object()
                 .Add("type", JsonNode.Str("object"))
-                .Add("additionalProperties", BuildValueSchema(valueType, context, visited));
+                .Add("additionalProperties", BuildValueSchema(valueType, context, false, visited));
         }
 
         if (OptionsTypeMetadata.TryGetCollectionElementType(type, out var elementType))
         {
             return JsonNode.Object()
                 .Add("type", JsonNode.Str("array"))
-                .Add("items", BuildValueSchema(elementType, context, visited));
+                .Add("items", BuildValueSchema(elementType, context, validates, visited));
         }
 
         if (OptionsTypeMetadata.IsPotentialNestedObject(type) && type is INamedTypeSymbol namedType)
         {
-            return BuildObjectSchema(namedType, context, visited);
+            return BuildObjectSchema(namedType, context, validates, visited);
         }
 
         return BuildScalarSchema(type);

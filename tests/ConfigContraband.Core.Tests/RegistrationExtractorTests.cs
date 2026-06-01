@@ -43,6 +43,7 @@ public sealed class RegistrationExtractorTests
         Assert.Equal("StripeOptions", section.Type.Name);
         Assert.False(section.Strict);
         Assert.False(section.BindsNonPublicProperties);
+        Assert.True(section.ValidatesDataAnnotations);
     }
 
     [Fact]
@@ -67,6 +68,7 @@ public sealed class RegistrationExtractorTests
         var section = Assert.Single(sections);
         Assert.Equal("Features:Stripe", section.SectionPath);
         Assert.Equal("StripeOptions", section.Type.Name);
+        Assert.False(section.ValidatesDataAnnotations);
     }
 
     [Fact]
@@ -89,6 +91,7 @@ public sealed class RegistrationExtractorTests
         var section = Assert.Single(sections);
         Assert.Equal("Billing", section.SectionPath);
         Assert.Equal("BillingOptions", section.Type.Name);
+        Assert.False(section.ValidatesDataAnnotations);
     }
 
     [Fact]

@@ -92,6 +92,36 @@ internal sealed class JsonObject : JsonNode
         return this;
     }
 
+    /// <summary>Adds <paramref name="key"/>, or replaces its value in place if it already exists.</summary>
+    public JsonObject Set(string key, JsonNode value)
+    {
+        for (var i = 0; i < _members.Count; i++)
+        {
+            if (string.Equals(_members[i].Key, key, System.StringComparison.Ordinal))
+            {
+                _members[i] = new KeyValuePair<string, JsonNode>(key, value);
+                return this;
+            }
+        }
+
+        _members.Add(new KeyValuePair<string, JsonNode>(key, value));
+        return this;
+    }
+
+    /// <summary>Returns the member value if present and itself an object; otherwise null.</summary>
+    public JsonObject? GetObject(string key)
+    {
+        foreach (var member in _members)
+        {
+            if (string.Equals(member.Key, key, System.StringComparison.Ordinal) && member.Value is JsonObject obj)
+            {
+                return obj;
+            }
+        }
+
+        return null;
+    }
+
     internal override void Write(StringBuilder builder, int indentLevel)
     {
         if (_members.Count == 0)

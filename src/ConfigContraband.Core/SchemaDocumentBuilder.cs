@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Microsoft.CodeAnalysis;
 
@@ -5,16 +6,22 @@ namespace ConfigContraband;
 
 /// <summary>
 /// A single options binding the schema should describe: the configuration section path it binds to,
-/// the options type, and the binder flags that affect the emitted schema.
+/// the options type, and the binder/validation flags that affect the emitted schema.
 /// </summary>
 internal sealed class SchemaSection
 {
-    public SchemaSection(string sectionPath, INamedTypeSymbol type, bool strict, bool bindsNonPublicProperties)
+    public SchemaSection(
+        string sectionPath,
+        INamedTypeSymbol type,
+        bool strict,
+        bool bindsNonPublicProperties,
+        bool validatesDataAnnotations)
     {
         SectionPath = sectionPath;
         Type = type;
         Strict = strict;
         BindsNonPublicProperties = bindsNonPublicProperties;
+        ValidatesDataAnnotations = validatesDataAnnotations;
     }
 
     public string SectionPath { get; }
@@ -24,6 +31,13 @@ internal sealed class SchemaSection
     public bool Strict { get; }
 
     public bool BindsNonPublicProperties { get; }
+
+    /// <summary>
+    /// Whether the registration enables DataAnnotations validation. Required-key constraints are only
+    /// emitted when this is true, mirroring CFG002: <c>[Required]</c> does nothing without
+    /// <c>ValidateDataAnnotations()</c>.
+    /// </summary>
+    public bool ValidatesDataAnnotations { get; }
 }
 
 /// <summary>
@@ -51,19 +65,15 @@ internal static class SchemaDocumentBuilder
                 node = node.GetOrAddChild(segment);
             }
 
-            // Last binding for a given section wins; the typed schema is authoritative for that leaf.
-            node.Schema = JsonSchemaBuilder.BuildObjectSchema(
-                section.Type,
-                compilation,
-                section.Strict,
-                section.BindsNonPublicProperties);
+            // Last binding for a given section path wins.
+            node.Section = section;
         }
 
         var document = JsonNode.Object();
         document.Add("$schema", JsonNode.Str("http://json-schema.org/draft-07/schema#"));
         document.Add("type", JsonNode.Str("object"));
 
-        var properties = ToProperties(root);
+        var properties = ToProperties(root, compilation);
         if (properties.HasMembers)
         {
             document.Add("properties", properties);
@@ -72,32 +82,50 @@ internal static class SchemaDocumentBuilder
         return document;
     }
 
-    private static JsonNode ToJson(SectionNode node)
+    private static JsonNode ToJson(SectionNode node, Compilation compilation)
     {
-        // A node bound to an explicit options type uses that type's schema verbatim.
-        if (node.Schema is not null)
+        if (node.Section is { } section)
         {
-            return node.Schema;
+            var schema = JsonSchemaBuilder.BuildObjectSchema(section, compilation);
+
+            // If sub-sections are also bound under this node (e.g. both "Features" and "Features:Stripe"),
+            // fold those bindings into the type schema's properties so neither is dropped.
+            if (node.HasChildren && schema is JsonObject obj)
+            {
+                var properties = obj.GetObject("properties");
+                if (properties is null)
+                {
+                    properties = JsonNode.Object();
+                    obj.Set("properties", properties);
+                }
+
+                foreach (var child in node.Children)
+                {
+                    properties.Set(child.Key, ToJson(child.Value, compilation));
+                }
+            }
+
+            return schema;
         }
 
-        var schema = JsonNode.Object();
-        schema.Add("type", JsonNode.Str("object"));
+        var nested = JsonNode.Object();
+        nested.Add("type", JsonNode.Str("object"));
 
-        var properties = ToProperties(node);
-        if (properties.HasMembers)
+        var nestedProperties = ToProperties(node, compilation);
+        if (nestedProperties.HasMembers)
         {
-            schema.Add("properties", properties);
+            nested.Add("properties", nestedProperties);
         }
 
-        return schema;
+        return nested;
     }
 
-    private static JsonObject ToProperties(SectionNode node)
+    private static JsonObject ToProperties(SectionNode node, Compilation compilation)
     {
         var properties = JsonNode.Object();
         foreach (var child in node.Children)
         {
-            properties.Add(child.Key, ToJson(child.Value));
+            properties.Add(child.Key, ToJson(child.Value, compilation));
         }
 
         return properties;
@@ -109,13 +137,15 @@ internal static class SchemaDocumentBuilder
 
         public IEnumerable<KeyValuePair<string, SectionNode>> Children => _children;
 
-        public JsonNode? Schema { get; set; }
+        public bool HasChildren => _children.Count > 0;
+
+        public SchemaSection? Section { get; set; }
 
         public SectionNode GetOrAddChild(string segment)
         {
             foreach (var child in _children)
             {
-                if (string.Equals(child.Key, segment, System.StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(child.Key, segment, StringComparison.OrdinalIgnoreCase))
                 {
                     return child.Value;
                 }

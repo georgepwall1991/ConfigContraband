@@ -375,7 +375,7 @@ public sealed class JsonSchemaBuilderTests
 
         var sections = new[]
         {
-            new SchemaSection("Features:Stripe", type, strict: false, bindsNonPublicProperties: false),
+            new SchemaSection("Features:Stripe", type, strict: false, bindsNonPublicProperties: false, validatesDataAnnotations: false),
         };
 
         var document = SchemaDocumentBuilder.Build(sections, compilation).ToJsonString();
@@ -483,8 +483,8 @@ public sealed class JsonSchemaBuilderTests
 
         var sections = new[]
         {
-            new SchemaSection("Outer:First", first, strict: false, bindsNonPublicProperties: false),
-            new SchemaSection("Outer:Second", second, strict: false, bindsNonPublicProperties: false),
+            new SchemaSection("Outer:First", first, strict: false, bindsNonPublicProperties: false, validatesDataAnnotations: false),
+            new SchemaSection("Outer:Second", second, strict: false, bindsNonPublicProperties: false, validatesDataAnnotations: false),
         };
 
         var document = SchemaDocumentBuilder.Build(sections, compilation).ToJsonString();
@@ -523,10 +523,66 @@ public sealed class JsonSchemaBuilderTests
             ignoreLineEndingDifferences: true);
     }
 
-    private static string BuildSchema(string source, string typeName, bool strict = false)
+    [Fact]
+    public void Required_is_omitted_when_data_annotations_validation_is_not_enabled()
+    {
+        // [Required] without ValidateDataAnnotations() is not enforced at runtime (CFG002), so the
+        // schema must not mark the key required.
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class DbOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+            """,
+            "DbOptions",
+            validates: false);
+
+        Assert.Contains("\"ConnectionString\"", schema);
+        Assert.DoesNotContain("\"required\"", schema);
+    }
+
+    [Fact]
+    public void Document_keeps_child_section_when_parent_is_also_bound()
+    {
+        var (compilation, parent) = Compile(
+            """
+            public sealed class FeaturesOptions
+            {
+                public bool Enabled { get; set; }
+            }
+
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; set; } = "";
+            }
+            """,
+            "FeaturesOptions");
+        var stripe = compilation.GetTypeByMetadataName("StripeOptions")!;
+
+        var sections = new[]
+        {
+            new SchemaSection("Features", parent, strict: false, bindsNonPublicProperties: false, validatesDataAnnotations: false),
+            new SchemaSection("Features:Stripe", stripe, strict: false, bindsNonPublicProperties: false, validatesDataAnnotations: false),
+        };
+
+        var document = SchemaDocumentBuilder.Build(sections, compilation).ToJsonString();
+
+        // The parent type's own property survives, and the separately-bound child section is folded in.
+        Assert.Contains("\"Enabled\"", document);
+        Assert.Contains("\"Stripe\"", document);
+        Assert.Contains("\"ApiKey\"", document);
+    }
+
+    private static string BuildSchema(string source, string typeName, bool strict = false, bool validates = true)
     {
         var (compilation, type) = Compile(source, typeName);
-        return JsonSchemaBuilder.BuildObjectSchema(type, compilation, strict).ToJsonString();
+        return JsonSchemaBuilder
+            .BuildObjectSchema(type, compilation, strict, bindsNonPublicProperties: false, validatesDataAnnotations: validates)
+            .ToJsonString();
     }
 
     private static (Compilation compilation, INamedTypeSymbol type) Compile(string source, string typeName)

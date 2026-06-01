@@ -88,7 +88,7 @@ internal static class RegistrationExtractor
         }
 
         DetectBinderFlags(invocation, model, out var strict, out var bindsNonPublic);
-        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic);
+        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, ChainEnablesDataAnnotations(invocation));
         return true;
     }
 
@@ -112,7 +112,7 @@ internal static class RegistrationExtractor
         }
 
         DetectBinderFlags(invocation, model, out var strict, out var bindsNonPublic);
-        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic);
+        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, ChainEnablesDataAnnotations(invocation));
         return true;
     }
 
@@ -148,8 +148,10 @@ internal static class RegistrationExtractor
             return false;
         }
 
+        // Direct Configure<T>(GetSection(...)) needs a separate AddOptions<T>().ValidateDataAnnotations()
+        // registration to enforce [Required] (CFG002); stay conservative and do not mark required here.
         DetectBinderFlags(invocation, model, out var strict, out var bindsNonPublic);
-        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic);
+        section = new SchemaSection(sectionPath, optionsType, strict, bindsNonPublic, validatesDataAnnotations: false);
         return true;
     }
 
@@ -199,6 +201,27 @@ internal static class RegistrationExtractor
             ? prefix + ":" + segment
             : segment;
         return true;
+    }
+
+    private static bool ChainEnablesDataAnnotations(InvocationExpressionSyntax invocation)
+    {
+        // Look for a ValidateDataAnnotations() call in the same fluent statement as the binding.
+        var statement = invocation.FirstAncestorOrSelf<StatementSyntax>();
+        if (statement is null)
+        {
+            return false;
+        }
+
+        foreach (var candidate in statement.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
+        {
+            if (candidate.Expression is MemberAccessExpressionSyntax memberAccess &&
+                memberAccess.Name.Identifier.Text == "ValidateDataAnnotations")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void DetectBinderFlags(
