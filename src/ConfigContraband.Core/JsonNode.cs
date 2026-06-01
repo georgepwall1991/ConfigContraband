@@ -19,6 +19,8 @@ internal abstract class JsonNode
 
     public static JsonNode Bool(bool value) => new JsonBoolNode(value);
 
+    public static JsonNode Null() => new JsonNullNode();
+
     public string ToJsonString()
     {
         var builder = new StringBuilder();
@@ -213,5 +215,13 @@ internal sealed class JsonBoolNode : JsonNode
     internal override void Write(StringBuilder builder, int indentLevel)
     {
         builder.Append(_value ? "true" : "false");
+    }
+}
+
+internal sealed class JsonNullNode : JsonNode
+{
+    internal override void Write(StringBuilder builder, int indentLevel)
+    {
+        builder.Append("null");
     }
 }

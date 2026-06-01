@@ -530,6 +530,43 @@ public sealed class JsonSchemaBuilderTests
     }
 
     [Fact]
+    public void Nullable_enum_allows_null_in_both_type_and_enum()
+    {
+        var schema = BuildSchema(
+            """
+            public enum Level { Trace, Debug }
+
+            public sealed class LogOptions
+            {
+                public Level? MinimumLevel { get; set; }
+            }
+            """,
+            "LogOptions");
+
+        Assert.Equal(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "MinimumLevel": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "Trace",
+                    "Debug",
+                    null
+                  ]
+                }
+              }
+            }
+            """,
+            schema,
+            ignoreLineEndingDifferences: true);
+    }
+
+    [Fact]
     public void Required_is_omitted_when_data_annotations_validation_is_not_enabled()
     {
         // [Required] without ValidateDataAnnotations() is not enforced at runtime (CFG002), so the

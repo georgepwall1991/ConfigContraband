@@ -145,6 +145,12 @@ internal static class JsonSchemaBuilder
                 }
             }
 
+            // A nullable enum accepts an explicit null, which must satisfy the enum constraint too.
+            if (nullable)
+            {
+                values.Add(JsonNode.Null());
+            }
+
             // The binder also accepts enum names case-insensitively, but JSON Schema enum is
             // case-sensitive. Emitting the canonical member names gives the best completion experience;
             // non-canonical casing (e.g. "trace") is the rare case and is accepted as flagged.
