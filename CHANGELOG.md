@@ -2,6 +2,20 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.4.0 - 2026-06-01
+
+- Added `appsettings.json` schema generation: the new `ConfigContraband.Tool` dotnet tool
+  (`configcontraband schema`) emits an `appsettings.schema.json` from your options types, so editors
+  give live autocomplete, type checking, required-key hints, enum completion, and unknown-key warnings
+  while editing configuration. `--check` fails CI when the committed schema is stale.
+- The generated schema mirrors the analyzer's runtime semantics: required keys from `[Required]`,
+  `[ConfigurationKeyName]` aliases, nested objects, collections, and dictionaries, and
+  `additionalProperties: false` only for strict (`ErrorOnUnknownConfiguration`) bindings so loose
+  configuration stays valid.
+- Extracted the analyzer's bindable-property and configuration model into a shared
+  `ConfigContraband.Core` library (bundled inside the analyzer package). This is a behavior-preserving
+  refactor; `CFG001`-`CFG007` diagnostics are unchanged.
+
 ## 0.3.1 - 2026-05-19
 
 - Hardened `CFG002` to match runtime DataAnnotations validation behaviour: C# `required` members, non-nullable value types, direct `Configure<T>(GetSection(...))` bindings without validation, and dictionary value object graphs no longer produce required-key false positives, while separately validated direct bindings still report missing required keys.

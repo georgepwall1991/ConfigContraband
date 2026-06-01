@@ -118,6 +118,50 @@ When the analyzer cannot prove a configuration shape statically, it stays quiet.
 | `CFG006` | Unknown configuration key under bound section | Info | JSON keys that do not match bindable options properties or aliases. |
 | `CFG007` | Unknown configuration key will throw during binding | Warning | JSON keys that do not match bindable options properties while `ErrorOnUnknownConfiguration` is enabled. |
 
+## appsettings IntelliSense (schema generation)
+
+ConfigContraband also works the other way around. Instead of only flagging `appsettings.json` mistakes
+after the fact, it can **generate a JSON Schema from your options types** so your editor gives you
+autocomplete, type checking, required-key hints, and unknown-key warnings *while you type*.
+
+Install the companion tool and generate the schema:
+
+```bash
+dotnet tool install --global ConfigContraband.Tool
+configcontraband schema --project src/MyApp/MyApp.csproj
+```
+
+That writes `appsettings.schema.json` next to your project. Point your settings file at it:
+
+```json
+{
+  "$schema": "appsettings.schema.json",
+  "Stripe": {
+    "ApiKey": "sk_live_..."
+  }
+}
+```
+
+Now VS Code, Rider, and Visual Studio give you, live as you edit JSON:
+
+- **Key completion** for every bound section and property, derived from your options classes.
+- **Type checking** (string vs number vs boolean) and **enum value completion**.
+- **Required-field hints** for `[Required]` properties — the same contract `CFG002` enforces.
+- **Unknown-key warnings** in the JSON itself. For bindings that set `ErrorOnUnknownConfiguration = true`,
+  the schema marks the section `additionalProperties: false`, so the editor flags the typo before the
+  app ever starts — the `CFG007` failure, caught while typing.
+
+The generator reuses the same bindable-property model as the analyzer, including `[ConfigurationKeyName]`
+aliases, nested objects, collections, and dictionaries. Loose bindings stay open (`additionalProperties`
+is not set) so flexible configuration remains valid.
+
+Keep the committed schema honest in CI with `--check`, which regenerates in memory and exits non-zero
+when the schema is out of date:
+
+```bash
+configcontraband schema --project src/MyApp/MyApp.csproj --check
+```
+
 ## Fast Feedback Loop
 
 The repository includes a showcase project with one intentional example for each rule:

@@ -406,6 +406,123 @@ public sealed class JsonSchemaBuilderTests
             ignoreLineEndingDifferences: true);
     }
 
+    [Theory]
+    [InlineData("byte", "integer")]
+    [InlineData("sbyte", "integer")]
+    [InlineData("short", "integer")]
+    [InlineData("ushort", "integer")]
+    [InlineData("int", "integer")]
+    [InlineData("uint", "integer")]
+    [InlineData("long", "integer")]
+    [InlineData("ulong", "integer")]
+    [InlineData("float", "number")]
+    [InlineData("double", "number")]
+    [InlineData("decimal", "number")]
+    [InlineData("bool", "boolean")]
+    [InlineData("char", "string")]
+    [InlineData("string", "string")]
+    [InlineData("System.Guid", "string")]
+    [InlineData("System.Uri", "string")]
+    [InlineData("System.Version", "string")]
+    [InlineData("System.TimeSpan", "string")]
+    [InlineData("System.DateTime", "string")]
+    [InlineData("System.DateTimeOffset", "string")]
+    [InlineData("System.DateOnly", "string")]
+    [InlineData("System.TimeOnly", "string")]
+    public void Clr_scalar_types_map_to_expected_json_type(string clrType, string jsonType)
+    {
+        var schema = BuildSchema(
+            $"public sealed class O {{ public {clrType} P {{ get; set; }} = default!; }}",
+            "O");
+
+        Assert.Contains($"\"type\": \"{jsonType}\"", schema);
+    }
+
+    [Fact]
+    public void Unknown_scalar_types_stay_permissive_with_no_type_constraint()
+    {
+        var schema = BuildSchema(
+            "public struct Custom { } public sealed class O { public Custom P { get; set; } }",
+            "O");
+
+        Assert.Contains("\"P\": {}", schema);
+    }
+
+    [Fact]
+    public void Options_type_with_no_bindable_properties_emits_bare_object()
+    {
+        var schema = BuildSchema("public sealed class O { }", "O");
+
+        Assert.Equal(
+            """
+            {
+              "type": "object"
+            }
+            """,
+            schema,
+            ignoreLineEndingDifferences: true);
+    }
+
+    [Fact]
+    public void Document_merges_sections_that_share_a_prefix()
+    {
+        var (compilation, first) = Compile(
+            """
+            public sealed class FirstOptions
+            {
+                public string A { get; set; } = "";
+            }
+
+            public sealed class SecondOptions
+            {
+                public int B { get; set; }
+            }
+            """,
+            "FirstOptions");
+        var second = compilation.GetTypeByMetadataName("SecondOptions")!;
+
+        var sections = new[]
+        {
+            new SchemaSection("Outer:First", first, strict: false, bindsNonPublicProperties: false),
+            new SchemaSection("Outer:Second", second, strict: false, bindsNonPublicProperties: false),
+        };
+
+        var document = SchemaDocumentBuilder.Build(sections, compilation).ToJsonString();
+
+        Assert.Equal(
+            """
+            {
+              "$schema": "http://json-schema.org/draft-07/schema#",
+              "type": "object",
+              "properties": {
+                "Outer": {
+                  "type": "object",
+                  "properties": {
+                    "First": {
+                      "type": "object",
+                      "properties": {
+                        "A": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "Second": {
+                      "type": "object",
+                      "properties": {
+                        "B": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """,
+            document,
+            ignoreLineEndingDifferences: true);
+    }
+
     private static string BuildSchema(string source, string typeName, bool strict = false)
     {
         var (compilation, type) = Compile(source, typeName);

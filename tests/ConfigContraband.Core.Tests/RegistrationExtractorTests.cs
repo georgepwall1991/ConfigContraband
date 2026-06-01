@@ -158,6 +158,127 @@ public sealed class RegistrationExtractorTests
         Assert.Empty(sections);
     }
 
+    [Fact]
+    public void Discovers_configure_with_get_required_section()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    services.Configure<BillingOptions>(configuration.GetRequiredSection("Billing"));
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.Equal("Billing", section.SectionPath);
+    }
+
+    [Fact]
+    public void Ignores_configure_with_action_delegate()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.Configure<BillingOptions>(options => options.RetryCount = 3);
+                }
+            }
+            """);
+
+        Assert.Empty(sections);
+    }
+
+    [Fact]
+    public void Ignores_empty_section_names()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>().BindConfiguration("");
+                }
+            }
+            """);
+
+        Assert.Empty(sections);
+    }
+
+    [Fact]
+    public void Ignores_bind_that_is_not_on_an_options_builder()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    configuration.Bind(new StripeOptions());
+                }
+            }
+            """);
+
+        Assert.Empty(sections);
+    }
+
+    [Fact]
+    public void Ignores_get_section_with_non_literal_name()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, IConfiguration configuration, string name)
+                {
+                    services.Configure<BillingOptions>(configuration.GetSection(name));
+                }
+            }
+            """);
+
+        Assert.Empty(sections);
+    }
+
+    [Fact]
+    public void Ignores_bind_of_whole_configuration_root()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    services.AddOptions<StripeOptions>().Bind(configuration);
+                }
+            }
+            """);
+
+        Assert.Empty(sections);
+    }
+
     private static IReadOnlyList<SchemaSection> Extract(string startupSource)
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)

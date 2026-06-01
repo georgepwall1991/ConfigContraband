@@ -37,6 +37,11 @@ Priority means "next investment priority", not diagnostic severity:
 
 The analyzer has a compact, coherent rule set: seven diagnostics, four code-fix families, `BindConfiguration(...)`, explicit `Bind(GetSection(...))`, direct `Configure<T>(GetSection(...))` section/key checks, strict `ErrorOnUnknownConfiguration` unknown-key warnings, fluent-chain validation checks before and after binding calls, `buildTransitive` appsettings discovery, README rule documentation, changelog/version metadata, and CI that restores, builds, tests, packs, uploads test results, and uploads packages. The best next improvements should still come from real-world edge cases or adoption polish, not speculative rule widening.
 
+As of `0.4.0`, the bindable-property and configuration model lives in a shared `ConfigContraband.Core`
+library (bundled inside the analyzer package), and a companion `ConfigContraband.Tool` reuses that model
+to generate `appsettings.schema.json` for editor IntelliSense. The analyzer diagnostics are unchanged by
+that refactor; schema generation is a new consumer of the same model, not a new rule.
+
 ## Improvement Changelog
 
 | Date | Iteration | Rules | Finding | Change | Rating impact |
