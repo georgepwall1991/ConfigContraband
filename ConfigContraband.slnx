@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/ConfigContraband.Core/ConfigContraband.Core.csproj" />
     <Project Path="src/ConfigContraband/ConfigContraband.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/ConfigContraband.Core.Tests/ConfigContraband.Core.Tests.csproj" />
     <Project Path="tests/ConfigContraband.Tests/ConfigContraband.Tests.csproj" />
   </Folder>
 </Solution>

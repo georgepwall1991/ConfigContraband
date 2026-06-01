@@ -38,6 +38,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\ConfigContraband.Core\ConfigContraband.Core.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>ConfigContraband.Tests</_Parameter1>
     </AssemblyAttribute>
@@ -45,6 +49,7 @@
 
   <ItemGroup>
     <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="$(OutputPath)\ConfigContraband.Core.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     <None Include="buildTransitive\ConfigContraband.props" Pack="true" PackagePath="buildTransitive\ConfigContraband.props" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\assets\configcontraband-icon.png" Pack="true" PackagePath="assets\" />
