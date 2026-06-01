@@ -43,7 +43,9 @@ jobs:
           use_oidc: true
 
       - name: Pack
-        run: dotnet pack src/ConfigContraband/ConfigContraband.csproj --configuration Release --no-build --output artifacts/packages
+        run: |
+          dotnet pack src/ConfigContraband/ConfigContraband.csproj --configuration Release --no-build --output artifacts/packages
+          dotnet pack src/ConfigContraband.Tool/ConfigContraband.Tool.csproj --configuration Release --no-build --output artifacts/packages
 
       - name: Upload test results
         if: always()

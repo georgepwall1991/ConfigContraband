@@ -9,6 +9,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Reference both the analyzer and its Core dependency as analyzers so the analyzer load context
+         can resolve ConfigContraband.Core at design/build time (the NuGet package bundles both DLLs). -->
+    <ProjectReference Include="..\..\src\ConfigContraband.Core\ConfigContraband.Core.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
     <ProjectReference Include="..\..\src\ConfigContraband\ConfigContraband.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
     <AdditionalFiles Include="appsettings.json;appsettings.*.json" />
   </ItemGroup>

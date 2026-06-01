@@ -1,0 +1,241 @@
+using System.Collections.Generic;
+using System.Linq;
+using Microsoft.CodeAnalysis;
+
+namespace ConfigContraband;
+
+/// <summary>
+/// Translates the bindable-property graph that ConfigContraband already models for diagnostics
+/// (<see cref="OptionsTypeMetadata"/>) into a JSON Schema (draft-07) object node. This is the inverse
+/// of the analyzer: instead of validating <c>appsettings.json</c> against the options contract, it
+/// emits the contract so editors can offer completion, type checking, and required-key hints.
+/// </summary>
+internal static class JsonSchemaBuilder
+{
+    /// <summary>
+    /// Builds the JSON Schema node describing how <paramref name="type"/> binds from configuration.
+    /// </summary>
+    public static JsonNode BuildObjectSchema(SchemaSection section, Compilation compilation)
+    {
+        return BuildObjectSchema(
+            section.Type,
+            compilation,
+            section.Strict,
+            section.BindsNonPublicProperties,
+            section.ValidatesDataAnnotations);
+    }
+
+    public static JsonNode BuildObjectSchema(
+        INamedTypeSymbol type,
+        Compilation compilation,
+        bool strict = false,
+        bool bindsNonPublicProperties = false,
+        bool validatesDataAnnotations = false)
+    {
+        var context = new SchemaBuildContext(compilation, bindsNonPublicProperties);
+        return BuildObjectSchema(type, context, strict, validatesDataAnnotations, new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default));
+    }
+
+    private static JsonNode BuildObjectSchema(
+        INamedTypeSymbol type,
+        SchemaBuildContext context,
+        bool strict,
+        bool validates,
+        HashSet<INamedTypeSymbol> visited)
+    {
+        var schema = JsonNode.Object();
+        schema.Add("type", JsonNode.Str("object"));
+
+        // Stop walking cyclic option graphs (e.g. a property typed as its own declaring class).
+        // SymbolEqualityComparer.Default ignores nullable annotations, so NodeOptions and NodeOptions?
+        // count as the same type for cycle detection.
+        if (!visited.Add(type))
+        {
+            return schema;
+        }
+
+        var metadata = OptionsTypeMetadata.Create(type, context.BindsNonPublicProperties, context.Compilation);
+        var properties = JsonNode.Object();
+        var required = JsonNode.Array();
+        var hasRequired = false;
+
+        foreach (var property in metadata.BindableProperties)
+        {
+            var key = property.ConfigurationNames.FirstOrDefault() ?? property.Symbol.Name;
+
+            // A property declared as a base type but initialized with a derived type binds derived-only
+            // keys at runtime (the analyzer tracks this via polymorphic-initializer metadata). Keep its
+            // object open so strict mode does not reject those valid keys.
+            var childStrict = strict && !property.HasPotentialPolymorphicInitializer;
+
+            // Validation only walks into a child object/collection when the property opts in with a
+            // recursive validation attribute, mirroring CFG002/CFG005.
+            var childValidates = validates && property.IsRecursiveValidationEnabled;
+            properties.Add(key, BuildValueSchema(property.Symbol.Type, context, childStrict, childValidates, visited));
+
+            // [Required] is only enforced when DataAnnotations validation actually runs (CFG002).
+            if (validates && property.IsRequired)
+            {
+                required.Add(JsonNode.Str(key));
+                hasRequired = true;
+            }
+        }
+
+        visited.Remove(type);
+
+        if (properties.HasMembers)
+        {
+            schema.Add("properties", properties);
+        }
+
+        if (hasRequired)
+        {
+            schema.Add("required", required);
+        }
+
+        // Mirror the runtime binder: strict bindings (ErrorOnUnknownConfiguration) reject unknown keys,
+        // so the schema forbids extras; loose bindings stay open so flexible configuration is still valid.
+        if (strict)
+        {
+            schema.Add("additionalProperties", JsonNode.Bool(false));
+        }
+
+        return schema;
+    }
+
+    private static JsonNode BuildValueSchema(
+        ITypeSymbol type,
+        SchemaBuildContext context,
+        bool strict,
+        bool validates,
+        HashSet<INamedTypeSymbol> visited)
+    {
+        if (OptionsTypeMetadata.TryGetDictionaryValueType(type, out var valueType))
+        {
+            // Options validation does not recurse into dictionary values (CFG005), so required-key
+            // enforcement does not carry into them.
+            return JsonNode.Object()
+                .Add("type", JsonNode.Str("object"))
+                .Add("additionalProperties", BuildValueSchema(valueType, context, strict, false, visited));
+        }
+
+        if (OptionsTypeMetadata.TryGetCollectionElementType(type, out var elementType))
+        {
+            return JsonNode.Object()
+                .Add("type", JsonNode.Str("array"))
+                .Add("items", BuildValueSchema(elementType, context, strict, validates, visited));
+        }
+
+        if (OptionsTypeMetadata.IsPotentialNestedObject(type) && type is INamedTypeSymbol namedType)
+        {
+            return BuildObjectSchema(namedType, context, strict, validates, visited);
+        }
+
+        return BuildScalarSchema(type);
+    }
+
+    private static JsonNode BuildScalarSchema(ITypeSymbol type)
+    {
+        var nullable = type is INamedTypeSymbol nullableType &&
+                       nullableType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
+                       nullableType.TypeArguments.Length == 1;
+        var underlying = nullable ? ((INamedTypeSymbol)type).TypeArguments[0] : type;
+
+        if (underlying.TypeKind == TypeKind.Enum && underlying is INamedTypeSymbol enumType)
+        {
+            var values = JsonNode.Array();
+            foreach (var member in enumType.GetMembers().OfType<IFieldSymbol>())
+            {
+                if (member.HasConstantValue)
+                {
+                    values.Add(JsonNode.Str(member.Name));
+                }
+            }
+
+            // A nullable enum accepts an explicit null, which must satisfy the enum constraint too.
+            if (nullable)
+            {
+                values.Add(JsonNode.Null());
+            }
+
+            // The binder also accepts enum names case-insensitively, but JSON Schema enum is
+            // case-sensitive. Emitting the canonical member names gives the best completion experience;
+            // non-canonical casing (e.g. "trace") is the rare case and is accepted as flagged.
+            return JsonNode.Object()
+                .Add("type", ScalarType("string", nullable))
+                .Add("enum", values);
+        }
+
+        var schema = JsonNode.Object();
+        var jsonType = MapScalarType(underlying);
+        if (jsonType is not null)
+        {
+            schema.Add("type", ScalarType(jsonType, nullable));
+        }
+
+        return schema;
+    }
+
+    private static JsonNode ScalarType(string jsonType, bool nullable)
+    {
+        // A Nullable<T> option accepts an explicit JSON null in addition to its underlying type.
+        return nullable
+            ? JsonNode.Array().Add(JsonNode.Str(jsonType)).Add(JsonNode.Str("null"))
+            : JsonNode.Str(jsonType);
+    }
+
+    private static string? MapScalarType(ITypeSymbol type)
+    {
+        switch (type.SpecialType)
+        {
+            case SpecialType.System_String:
+            case SpecialType.System_Char:
+                return "string";
+            case SpecialType.System_Boolean:
+                return "boolean";
+            case SpecialType.System_Byte:
+            case SpecialType.System_SByte:
+            case SpecialType.System_Int16:
+            case SpecialType.System_UInt16:
+            case SpecialType.System_Int32:
+            case SpecialType.System_UInt32:
+            case SpecialType.System_Int64:
+            case SpecialType.System_UInt64:
+                return "integer";
+            case SpecialType.System_Single:
+            case SpecialType.System_Double:
+            case SpecialType.System_Decimal:
+                return "number";
+        }
+
+        // Common BCL types the configuration binder parses from string values.
+        switch (type.ToDisplayString())
+        {
+            case "System.TimeSpan":
+            case "System.DateTime":
+            case "System.DateTimeOffset":
+            case "System.DateOnly":
+            case "System.TimeOnly":
+            case "System.Guid":
+            case "System.Uri":
+            case "System.Version":
+                return "string";
+        }
+
+        // Unknown scalar shape: stay permissive so the schema never produces a false validation error.
+        return null;
+    }
+
+    private sealed class SchemaBuildContext
+    {
+        public SchemaBuildContext(Compilation compilation, bool bindsNonPublicProperties)
+        {
+            Compilation = compilation;
+            BindsNonPublicProperties = bindsNonPublicProperties;
+        }
+
+        public Compilation Compilation { get; }
+
+        public bool BindsNonPublicProperties { get; }
+    }
+}

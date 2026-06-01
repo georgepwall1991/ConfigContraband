@@ -704,7 +704,7 @@ internal sealed class OptionsTypeMetadata
             string.Equals(iface.ToDisplayString(), metadataName, StringComparison.Ordinal));
     }
 
-    private static bool IsPotentialNestedObject(ITypeSymbol type)
+    internal static bool IsPotentialNestedObject(ITypeSymbol type)
     {
         return type.TypeKind == TypeKind.Class &&
                type.SpecialType != SpecialType.System_String &&

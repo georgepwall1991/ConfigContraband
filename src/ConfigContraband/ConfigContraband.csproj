@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.3.1</Version>
+    <Version>0.4.0</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Harden CFG002 to match runtime DataAnnotations behaviour: required-key diagnostics now stay quiet for C# required members, non-nullable value types, direct Configure&lt;T&gt;(GetSection(...)) registrations without validation, and dictionary value object graphs that Options validation does not recursively validate, while separately validated direct bindings still report missing required keys.</PackageReleaseNotes>
+    <PackageReleaseNotes>Inverts ConfigContraband from a purely reactive linter into an authoring tool: the new ConfigContraband.Tool package generates appsettings.schema.json from your options types so editors give live autocomplete, type checking, required-key hints, and unknown-key warnings while you edit appsettings.json. The analyzer's bindable-property model now lives in a shared ConfigContraband.Core library (bundled with the analyzer); diagnostics CFG001-CFG007 are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
@@ -38,6 +38,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\ConfigContraband.Core\ConfigContraband.Core.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>ConfigContraband.Tests</_Parameter1>
     </AssemblyAttribute>
@@ -45,6 +49,7 @@
 
   <ItemGroup>
     <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="$(OutputPath)\ConfigContraband.Core.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     <None Include="buildTransitive\ConfigContraband.props" Pack="true" PackagePath="buildTransitive\ConfigContraband.props" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\assets\configcontraband-icon.png" Pack="true" PackagePath="assets\" />
