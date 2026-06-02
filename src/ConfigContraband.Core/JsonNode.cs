@@ -19,6 +19,12 @@ internal abstract class JsonNode
 
     public static JsonNode Bool(bool value) => new JsonBoolNode(value);
 
+    /// <summary>
+    /// A raw JSON number. <paramref name="literal"/> must already be a valid, culture-invariant JSON
+    /// number token (for example <c>"65535"</c> or <c>"1.5"</c>); formatting is the caller's responsibility.
+    /// </summary>
+    public static JsonNode Number(string literal) => new JsonNumberNode(literal);
+
     public static JsonNode Null() => new JsonNullNode();
 
     public string ToJsonString()
@@ -102,6 +108,35 @@ internal sealed class JsonObject : JsonNode
             if (string.Equals(_members[i].Key, key, System.StringComparison.Ordinal))
             {
                 _members[i] = new KeyValuePair<string, JsonNode>(key, value);
+                return this;
+            }
+        }
+
+        _members.Add(new KeyValuePair<string, JsonNode>(key, value));
+        return this;
+    }
+
+    /// <summary>
+    /// Sets <paramref name="key"/> to <paramref name="value"/>. If the key already exists its value is
+    /// replaced in place; otherwise the member is inserted immediately after <paramref name="afterKey"/>
+    /// (or appended when <paramref name="afterKey"/> is absent). Keeps schema output ordering deterministic.
+    /// </summary>
+    public JsonObject InsertAfter(string afterKey, string key, JsonNode value)
+    {
+        for (var i = 0; i < _members.Count; i++)
+        {
+            if (string.Equals(_members[i].Key, key, System.StringComparison.Ordinal))
+            {
+                _members[i] = new KeyValuePair<string, JsonNode>(key, value);
+                return this;
+            }
+        }
+
+        for (var i = 0; i < _members.Count; i++)
+        {
+            if (string.Equals(_members[i].Key, afterKey, System.StringComparison.Ordinal))
+            {
+                _members.Insert(i + 1, new KeyValuePair<string, JsonNode>(key, value));
                 return this;
             }
         }
@@ -215,6 +250,22 @@ internal sealed class JsonBoolNode : JsonNode
     internal override void Write(StringBuilder builder, int indentLevel)
     {
         builder.Append(_value ? "true" : "false");
+    }
+}
+
+internal sealed class JsonNumberNode : JsonNode
+{
+    private readonly string _literal;
+
+    public JsonNumberNode(string literal)
+    {
+        _literal = literal;
+    }
+
+    internal override void Write(StringBuilder builder, int indentLevel)
+    {
+        // Written verbatim: the caller guarantees a valid, culture-invariant JSON number token.
+        builder.Append(_literal);
     }
 }
 

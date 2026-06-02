@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Inverts ConfigContraband from a purely reactive linter into an authoring tool: the new ConfigContraband.Tool package generates appsettings.schema.json from your options types so editors give live autocomplete, type checking, required-key hints, and unknown-key warnings while you edit appsettings.json. The analyzer's bindable-property model now lives in a shared ConfigContraband.Core library (bundled with the analyzer); diagnostics CFG001-CFG007 are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Generated appsettings.schema.json now mirrors DataAnnotations validation as JSON Schema constraints ([Range] to minimum/maximum honoring exclusive bounds, [MaxLength]/[StringLength] to maxLength) and emits a description for each option from XML doc comments or [Description]/[DisplayName], so editors enforce bounds and show docs while you edit appsettings.json. Constraints are only emitted for validated bindings and never reject a value the runtime binder accepts, so loose configuration is never over-constrained. Diagnostics CFG001-CFG007 are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

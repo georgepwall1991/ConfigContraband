@@ -2,6 +2,26 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.5.0 - 2026-06-02
+
+- Generated `appsettings.schema.json` now carries **DataAnnotations validation constraints**, so editors
+  enforce them while you type instead of waiting for `ValidateDataAnnotations()` to fail at startup:
+  `[Range]` → `minimum`/`maximum` (honoring `MinimumIsExclusive`/`MaximumIsExclusive`) and
+  `[MaxLength]`/`[StringLength]` → `maxLength`. Every constraint mirrors what `Microsoft.Extensions.Options`
+  actually enforces and is only emitted for bindings that validate (matching CFG002/CFG004), so loose
+  configuration is never over-constrained and the schema never rejects a value the runtime binder would
+  accept. Numeric bounds use the invariant culture, combined `maxLength` validators keep the strictest bound,
+  and non-finite/negative-sentinel bounds are skipped. `[RegularExpression]`, `[EmailAddress]`/`[Url]`, and
+  `[MinLength]` are intentionally not mapped, because .NET regex / strict `format` grammars / UTF-16 length
+  counting differ from JSON Schema's ECMA-262 and code-point semantics enough that a translation could reject
+  runtime-valid configuration.
+- The generated schema now emits a **`description`** for each option from its `///` XML doc `<summary>` —
+  or a `[Description]`/`[DisplayName]` attribute, which take priority — on both properties and option types,
+  giving hover documentation for every setting. The schema CLI forces documentation parsing, so descriptions
+  appear even when the project does not set `<GenerateDocumentationFile>`.
+- These additions are purely additive annotations on existing scalar/object nodes; structure, required
+  keys, `additionalProperties`, and the `CFG001`-`CFG007` analyzer diagnostics are unchanged.
+
 ## 0.4.0 - 2026-06-01
 
 - Added `appsettings.json` schema generation: the new `ConfigContraband.Tool` dotnet tool
