@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
 
 namespace ConfigContraband.Tool;
@@ -52,8 +53,18 @@ internal static class SchemaCommand
         }
 
         var anyStale = false;
-        foreach (var project in projects)
+        foreach (var loadedProject in projects)
         {
+            // Force documentation parsing so option XML <summary> comments become schema descriptions even
+            // when the project does not set <GenerateDocumentationFile>. [Description]/[DisplayName] work
+            // regardless, but this makes the common doc-comment case light up without extra project setup.
+            var project = loadedProject;
+            if (project.ParseOptions is CSharpParseOptions parseOptions &&
+                parseOptions.DocumentationMode == DocumentationMode.None)
+            {
+                project = project.WithParseOptions(parseOptions.WithDocumentationMode(DocumentationMode.Parse));
+            }
+
             var compilation = await project.GetCompilationAsync();
             if (compilation is null)
             {

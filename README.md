@@ -39,7 +39,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.3.1" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.5.0" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -147,13 +147,59 @@ Now VS Code, Rider, and Visual Studio give you, live as you edit JSON:
 - **Key completion** for every bound section and property, derived from your options classes.
 - **Type checking** (string vs number vs boolean) and **enum value completion**.
 - **Required-field hints** for `[Required]` properties — the same contract `CFG002` enforces.
+- **Value constraints from DataAnnotations.** `[Range]` becomes `minimum`/`maximum` (honoring
+  `MinimumIsExclusive`/`MaximumIsExclusive`), and `[MaxLength]`/`[StringLength]` become `maxLength`. So an
+  out-of-range port or an over-long value is flagged in the editor — the same `ValidateDataAnnotations()`
+  failure, caught while typing instead of at startup.
+- **Hover documentation.** Your `///` XML doc comments — or `[Description]`/`[DisplayName]` — on options
+  properties and types become JSON Schema `description`s, so each setting explains itself on hover.
 - **Unknown-key warnings** in the JSON itself. For bindings that set `ErrorOnUnknownConfiguration = true`,
   the schema marks the section `additionalProperties: false`, so the editor flags the typo before the
   app ever starts — the `CFG007` failure, caught while typing.
 
+For example, these options:
+
+```csharp
+public sealed class ServerOptions
+{
+    /// <summary>TCP port the server listens on.</summary>
+    [Range(1, 65535)]
+    public int Port { get; set; }
+
+    /// <summary>API key used to authenticate outbound calls.</summary>
+    [StringLength(64)]
+    public string ApiKey { get; set; } = "";
+}
+```
+
+generate this schema fragment, so the editor enforces the range and maximum length and shows each
+setting's documentation on hover:
+
+```json
+"Port": {
+  "type": "integer",
+  "description": "TCP port the server listens on.",
+  "minimum": 1,
+  "maximum": 65535
+},
+"ApiKey": {
+  "type": "string",
+  "description": "API key used to authenticate outbound calls.",
+  "maxLength": 64
+}
+```
+
 The generator reuses the same bindable-property model as the analyzer, including `[ConfigurationKeyName]`
-aliases, nested objects, collections, and dictionaries. Loose bindings stay open (`additionalProperties`
-is not set) so flexible configuration remains valid.
+aliases, nested objects, collections, and dictionaries. Every emitted constraint mirrors what
+`Microsoft.Extensions.Options` validation actually enforces and is conservative by design: constraints are
+only written for bindings that call `ValidateDataAnnotations()` (so loose configuration is never
+over-constrained), the generator never emits a constraint that could reject a value the runtime binder
+accepts, and loose bindings stay open (`additionalProperties` is not set) so flexible configuration
+remains valid. For that reason a few attributes are intentionally left unconstrained: `[RegularExpression]`
+(.NET regex differs from JSON Schema's ECMA-262 `pattern`), `[EmailAddress]`/`[Url]` (the strict `format`
+grammars are stricter than the attributes' lenient checks), and `[MinLength]` (JSON Schema counts Unicode
+code points while DataAnnotations counts UTF-16 units) — each could otherwise flag configuration the runtime
+accepts.
 
 Keep the committed schema honest in CI with `--check`, which regenerates in memory and exits non-zero
 when the schema is out of date:
