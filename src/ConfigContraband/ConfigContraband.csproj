@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.0</Version>
+    <Version>0.5.1</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Generated appsettings.schema.json now mirrors DataAnnotations validation as JSON Schema constraints ([Range] to minimum/maximum honoring exclusive bounds, [MaxLength]/[StringLength] to maxLength) and emits a description for each option from XML doc comments or [Description]/[DisplayName], so editors enforce bounds and show docs while you edit appsettings.json. Constraints are only emitted for validated bindings and never reject a value the runtime binder accepts, so loose configuration is never over-constrained. Diagnostics CFG001-CFG007 are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Hardened CFG002 so [Required] properties whose compile-time default already satisfies RequiredAttribute no longer warn when the key is missing: non-empty string initializers (honoring AllowEmptyStrings), non-null literals on nullable value types, object-creation initializers, and constructor-bound parameter defaults cannot fail validation. Empty/whitespace string defaults, null!/default initializers, explicit parameterless new int?(), constructor defaults that never reach the property, and non-literal initializers keep warning. The generated appsettings.schema.json required array follows the same boundary.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

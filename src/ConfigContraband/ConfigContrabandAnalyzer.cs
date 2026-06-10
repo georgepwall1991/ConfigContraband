@@ -405,9 +405,12 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     }
                 }
             }
-            else if (property.IsRecursiveValidationEnabled)
+            else if (property.IsRecursiveValidationEnabled &&
+                     metadata.HasProvableNonNullRecursiveDefault(property))
             {
-                // Recurse into initialized objects even if the section is missing from config
+                // Recurse into provably initialized objects even if the section is missing from
+                // config; null members are skipped by runtime validation and unprovable defaults
+                // would make declared-type findings speculative.
                 var subPath = sectionPath + ":" + property.Symbol.Name;
                 if (metadata.TryCreateNestedMetadata(property, out var nestedMetadata))
                 {

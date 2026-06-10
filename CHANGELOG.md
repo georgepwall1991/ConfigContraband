@@ -2,6 +2,30 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.5.1 - 2026-06-10
+
+- Hardened `CFG002` so `[Required]` properties whose compile-time default already satisfies
+  `RequiredAttribute` — and whose only validation constraint is that `[Required]` (other validators
+  on the property, type-level validation, or `IValidatableObject` still validate the default and
+  keep the key required) — no longer warn when the key is missing: compile-time constants resolved by
+  value (non-empty strings, signed numerics such as `= -1`, `const` fields, `nameof`),
+  object-creation initializers (including target-typed `new()` on nullable value types, which
+  constructs the underlying value), and constructor-bound parameter defaults that provably reach the
+  property cannot fail validation, so the missing key is not a startup failure. Initializer-based
+  suppression also requires that no declared constructor in the type chain could overwrite the
+  property, because constructors run after property initializers. Empty or whitespace-only string defaults still warn (honoring
+  `AllowEmptyStrings = true`), `null!`/`default` initializers still warn, parameterless `Nullable<T>`
+  construction still warns regardless of the declared property type or syntax (including type
+  aliases) because it produces an empty `Nullable<T>`, constructed strings still warn because the
+  result can be empty or whitespace, constructor defaults still warn when the parameter is never
+  assigned to the property, is reassigned before reaching it, or the constructor body does anything
+  beyond simple assignments to fields or auto-implemented properties (a custom setter could mutate
+  the required value), recursive-validation parents still warn when their default instance fails on
+  nested required members, and non-literal initializers such as method calls stay on the conservative
+  reporting path. The generated `appsettings.schema.json` `required` array
+  follows the same boundary, so editors no longer demand keys the runtime binder and validator
+  accept as absent.
+
 ## 0.5.0 - 2026-06-02
 
 - Generated `appsettings.schema.json` now carries **DataAnnotations validation constraints**, so editors
