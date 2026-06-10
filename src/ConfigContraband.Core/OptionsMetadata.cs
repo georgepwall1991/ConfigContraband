@@ -45,6 +45,11 @@ internal sealed class OptionsTypeMetadata
     {
         var properties = ImmutableArray.CreateBuilder<BindableProperty>();
 
+        // Type-level validation attributes (including inherited ones) and IValidatableObject run
+        // against the whole options instance and can inspect any defaulted property, so they keep
+        // every required key reported regardless of satisfying defaults.
+        var typeHasUnprovableValidation = HasTypeLevelValidationInChain(type);
+
         foreach (var member in GetBindableProperties(type, bindsNonPublicProperties, compilation))
         {
             properties.Add(new BindableProperty(
@@ -53,7 +58,11 @@ internal sealed class OptionsTypeMetadata
                 member.IsConstructorBound,
                 member.ConstructorParameterCanUseDefault,
                 HasValidationAttribute(member.Property),
-                IsRequired(member.Property),
+                IsRequired(member.Property) &&
+                (typeHasUnprovableValidation ||
+                 HasNonRequiredValidationAttribute(member.Property) ||
+                 !HasRequiredSatisfyingDefault(member, type, compilation) ||
+                 RecursiveDefaultStillFailsValidation(member.Property, type, bindsNonPublicProperties, compilation)),
                 IsRecursiveValidationEnabled(member.Property),
                 HasPotentialPolymorphicInitializer(member.Property, type, compilation),
                 GetPotentialPolymorphicDictionaryValueInitializerKeys(member.Property, type, compilation)));
@@ -112,6 +121,15 @@ internal sealed class OptionsTypeMetadata
 
         bindableProperty = null!;
         return false;
+    }
+
+    public bool HasProvableNonNullRecursiveDefault(BindableProperty property)
+    {
+        // The missing-section recursion may only descend when the member's runtime default is
+        // provably a non-null, unmutated instance of the declared type: validation skips null
+        // members, and unprovable defaults would make declared-type findings speculative.
+        return ClassifyEffectiveRecursiveDefault(TypeSymbol, property.Symbol, _compilation) == RecursiveDefaultKind.Modelled &&
+               !TryGetCollectionElementType(property.Symbol.Type, out _);
     }
 
     public bool TryCreateNestedMetadata(BindableProperty property, out OptionsTypeMetadata metadata)
@@ -611,6 +629,959 @@ internal sealed class OptionsTypeMetadata
         }
 
         return false;
+    }
+
+    private static bool HasRequiredSatisfyingDefault(
+        BindablePropertyCandidate member,
+        INamedTypeSymbol rootType,
+        Compilation? compilation)
+    {
+        var property = member.Property;
+
+        // RequiredAttribute reads the getter, and a custom getter (including C# field-backed
+        // semi-auto getters) can return something other than the initializer or the
+        // constructor-assigned value.
+        if (!IsAutoImplementedAccessor(property.GetMethod))
+        {
+            return false;
+        }
+
+        var allowEmptyStrings = RequiredAllowsEmptyStrings(property);
+
+        if (member.IsConstructorBound &&
+            HasSatisfyingConstructorParameterDefault(property, rootType, allowEmptyStrings))
+        {
+            return true;
+        }
+
+        // A constructor-bound property can also keep a satisfying initializer when no declared
+        // constructor overwrites it, so the initializer proof below applies to both shapes.
+        var hasSatisfyingInitializer = property.DeclaringSyntaxReferences
+            .Select(reference => reference.GetSyntax())
+            .OfType<PropertyDeclarationSyntax>()
+            .Any(declaration => declaration.Initializer?.Value is { } value &&
+                                InitializerDefinitelySatisfiesRequired(value, property.Type, allowEmptyStrings, compilation));
+
+        // Constructors run after property initializers, so a declared constructor that writes the
+        // property (or does anything unprovable) can erase the satisfying default before validation.
+        return hasSatisfyingInitializer && NoDeclaredConstructorCanOverwriteProperty(rootType, property);
+    }
+
+    private static bool RecursiveDefaultStillFailsValidation(
+        IPropertySymbol property,
+        INamedTypeSymbol rootType,
+        bool bindsNonPublicProperties,
+        Compilation? compilation)
+    {
+        // Recursive validation walks the default instance, so a nested required member without
+        // its own satisfying default keeps the parent key required.
+        if (!IsRecursiveValidationEnabled(property))
+        {
+            return false;
+        }
+
+        switch (ClassifyEffectiveRecursiveDefault(rootType, property, compilation))
+        {
+            case RecursiveDefaultKind.None:
+                // Runtime validation skips null members, and empty collection defaults have no
+                // items to validate.
+                return false;
+            case RecursiveDefaultKind.Unprovable:
+                return true;
+        }
+
+        if (TryGetCollectionElementType(property.Type, out _))
+        {
+            // A modelled collection default is a clean empty creation, so nothing is validated.
+            return false;
+        }
+
+        return NestedGraphHasUnsatisfiedRequired(
+            property.Type,
+            bindsNonPublicProperties,
+            compilation,
+            new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default));
+    }
+
+    private static bool NestedGraphHasUnsatisfiedRequired(
+        ITypeSymbol type,
+        bool bindsNonPublicProperties,
+        Compilation? compilation,
+        HashSet<ITypeSymbol> visited)
+    {
+        if (!visited.Add(type) ||
+            type is not INamedTypeSymbol namedType ||
+            !IsPotentialNestedObject(namedType))
+        {
+            return false;
+        }
+
+        // Runtime recursive validation evaluates every DataAnnotations rule on the default
+        // instance, not just [Required]; other attributes and IValidatableObject cannot be
+        // proven statically, so they keep the ancestor required.
+        if (HasTypeLevelValidationInChain(namedType))
+        {
+            return true;
+        }
+
+        var bindableCandidates = new Dictionary<IPropertySymbol, BindablePropertyCandidate>(SymbolEqualityComparer.Default);
+        foreach (var candidate in GetBindableProperties(namedType, bindsNonPublicProperties, compilation))
+        {
+            bindableCandidates[candidate.Property] = candidate;
+        }
+
+        // Validator.TryValidateObject(validateAllProperties: true) evaluates every public-getter
+        // property, including non-bindable get-only or private-set members.
+        foreach (var property in GetValidationVisibleProperties(namedType))
+        {
+            if (HasNonRequiredValidationAttribute(property))
+            {
+                return true;
+            }
+
+            if (!bindableCandidates.TryGetValue(property, out var candidate))
+            {
+                candidate = new BindablePropertyCandidate(property, isConstructorBound: false, constructorParameterCanUseDefault: false);
+            }
+
+            if (IsRequired(property) &&
+                !HasRequiredSatisfyingDefault(candidate, namedType, compilation))
+            {
+                return true;
+            }
+
+            if (IsRecursiveValidationEnabled(property))
+            {
+                // Runtime recursive validation walks the actual default instance even when the
+                // child is not itself required: an unprovable default fails the whole proof,
+                // while null members and empty collection defaults are skipped by validation.
+                var defaultKind = ClassifyEffectiveRecursiveDefault(namedType, property, compilation);
+                if (defaultKind == RecursiveDefaultKind.Unprovable)
+                {
+                    return true;
+                }
+
+                if (defaultKind == RecursiveDefaultKind.Modelled &&
+                    !TryGetCollectionElementType(property.Type, out _) &&
+                    NestedGraphHasUnsatisfiedRequired(property.Type, bindsNonPublicProperties, compilation, visited))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasTypeLevelValidationInChain(INamedTypeSymbol type)
+    {
+        if (ImplementsInterface(type, "System.ComponentModel.DataAnnotations.IValidatableObject"))
+        {
+            return true;
+        }
+
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            if (HasValidationAttribute(current))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<IPropertySymbol> GetValidationVisibleProperties(INamedTypeSymbol type)
+    {
+        foreach (var property in GetProperties(type))
+        {
+            if (!property.IsStatic &&
+                property.Parameters.Length == 0 &&
+                property.DeclaredAccessibility == Accessibility.Public &&
+                property.GetMethod is { DeclaredAccessibility: Accessibility.Public })
+            {
+                yield return property;
+            }
+        }
+    }
+
+    private enum RecursiveDefaultKind
+    {
+        // The runtime default is null or an empty collection, which validation skips.
+        None,
+        // The runtime default is a clean, unmutated instance of the declared type.
+        Modelled,
+        // The runtime default cannot be predicted from the declaration.
+        Unprovable
+    }
+
+    private static RecursiveDefaultKind ClassifyRecursiveDefault(IPropertySymbol property, Compilation? compilation)
+    {
+        // Validation reads the getter; a custom getter hides the real default.
+        if (!IsAutoImplementedAccessor(property.GetMethod))
+        {
+            return RecursiveDefaultKind.Unprovable;
+        }
+
+        foreach (var reference in property.DeclaringSyntaxReferences)
+        {
+            if (reference.GetSyntax() is not PropertyDeclarationSyntax declaration ||
+                declaration.Initializer?.Value is not { } initializerValue)
+            {
+                continue;
+            }
+
+            var stripped = StripInitializerWrappers(initializerValue);
+            if (IsInitializerDefinitelyNullOrDefault(stripped))
+            {
+                return RecursiveDefaultKind.None;
+            }
+
+            if (stripped is CollectionExpressionSyntax collectionExpression)
+            {
+                return collectionExpression.Elements.Count == 0
+                    ? RecursiveDefaultKind.None
+                    : RecursiveDefaultKind.Unprovable;
+            }
+
+            return IsCleanDeclaredTypeCreation(stripped, property.Type, compilation)
+                ? RecursiveDefaultKind.Modelled
+                : RecursiveDefaultKind.Unprovable;
+        }
+
+        // No initializer (and the caller has proven no constructor writes the member), so the
+        // runtime value stays null and validation skips it.
+        return RecursiveDefaultKind.None;
+    }
+
+    private static bool IsCleanDeclaredTypeCreation(
+        ExpressionSyntax expression,
+        ITypeSymbol declaredType,
+        Compilation? compilation)
+    {
+        return expression switch
+        {
+            // A polymorphic default is validated as the created type, not the declared one.
+            ObjectCreationExpressionSyntax creation =>
+                (creation.Initializer is null || creation.Initializer.Expressions.Count == 0) &&
+                (creation.ArgumentList is null || creation.ArgumentList.Arguments.Count == 0) &&
+                IsInitializerDefinitelyDeclaredType(expression, declaredType, compilation),
+            ImplicitObjectCreationExpressionSyntax implicitCreation =>
+                (implicitCreation.Initializer is null || implicitCreation.Initializer.Expressions.Count == 0) &&
+                implicitCreation.ArgumentList.Arguments.Count == 0,
+            _ => false
+        };
+    }
+
+    private static bool HasNonRequiredValidationAttribute(ISymbol symbol)
+    {
+        return symbol.GetAttributes().Any(attribute =>
+            InheritsFrom(attribute.AttributeClass, "System.ComponentModel.DataAnnotations.ValidationAttribute") &&
+            !string.Equals(attribute.AttributeClass?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal));
+    }
+
+    private static bool NoDeclaredConstructorCanOverwriteProperty(INamedTypeSymbol rootType, IPropertySymbol property)
+    {
+        return TryResolveRuntimeConstructorEffect(rootType, property, compilation: null, out var assignedKind) &&
+               assignedKind is null;
+    }
+
+    private static RecursiveDefaultKind ClassifyEffectiveRecursiveDefault(
+        INamedTypeSymbol owningType,
+        IPropertySymbol property,
+        Compilation? compilation)
+    {
+        if (!TryResolveRuntimeConstructorEffect(owningType, property, compilation, out var assignedKind))
+        {
+            return RecursiveDefaultKind.Unprovable;
+        }
+
+        if (assignedKind is not null)
+        {
+            // The most-derived definite constructor write is the runtime default — provided the
+            // getter actually returns the stored value.
+            return IsAutoImplementedAccessor(property.GetMethod)
+                ? assignedKind.Value
+                : RecursiveDefaultKind.Unprovable;
+        }
+
+        return ClassifyRecursiveDefault(property, compilation);
+    }
+
+    private static bool TryResolveRuntimeConstructorEffect(
+        INamedTypeSymbol rootType,
+        IPropertySymbol property,
+        Compilation? compilation,
+        out RecursiveDefaultKind? assignedKind)
+    {
+        assignedKind = null;
+
+        // Only the constructor chain the binder actually executes matters: the runtime-selected
+        // constructor on the root type, then each implicitly chained accessible parameterless
+        // base constructor. Unused public overloads and private factory constructors never run.
+        var constructor = SelectRuntimeBindingConstructor(rootType);
+        while (true)
+        {
+            if (constructor is null)
+            {
+                return false;
+            }
+
+            ConstructorDeclarationSyntax? declaration = null;
+            var hasNonConstructorDeclaration = false;
+            foreach (var reference in constructor.DeclaringSyntaxReferences)
+            {
+                if (reference.GetSyntax() is ConstructorDeclarationSyntax constructorSyntax)
+                {
+                    declaration = constructorSyntax;
+                }
+                else
+                {
+                    hasNonConstructorDeclaration = true;
+                }
+            }
+
+            if (declaration is null)
+            {
+                // Implicit default constructors and class/record primary constructors cannot
+                // write an existing property, but a primary constructor with explicit base
+                // arguments selects a base overload this walk cannot resolve, and a syntaxless
+                // constructor from a referenced assembly cannot be proven harmless.
+                if (hasNonConstructorDeclaration)
+                {
+                    if (PrimaryConstructorHasExplicitBaseArguments(constructor))
+                    {
+                        return false;
+                    }
+                }
+                else if (!constructor.IsImplicitlyDeclared)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                // Explicit chains with arguments can target overloads this walk cannot resolve;
+                // a zero-argument `: base()` resolves to the same constructor the implicit chain
+                // selects, and a zero-argument `: this()` is followed below.
+                if (declaration.Initializer is { } chainInitializer &&
+                    chainInitializer.ArgumentList.Arguments.Count > 0)
+                {
+                    return false;
+                }
+
+                if (!TryClassifyConstructorPropertyWrite(declaration, constructor, property, compilation, out var writeKind))
+                {
+                    return false;
+                }
+
+                if (writeKind is not null)
+                {
+                    // Base constructors run before this write, so the chain above is irrelevant,
+                    // and every more-derived constructor was already proven non-writing.
+                    assignedKind = writeKind;
+                    return true;
+                }
+
+                if (declaration.Initializer?.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ThisConstructorInitializer) == true)
+                {
+                    constructor = SelectParameterlessConstructor(constructor.ContainingType);
+                    continue;
+                }
+            }
+
+            var baseType = constructor.ContainingType.BaseType;
+            if (baseType is null || baseType.SpecialType == SpecialType.System_Object)
+            {
+                return true;
+            }
+
+            constructor = SelectImplicitlyChainedConstructor(baseType);
+        }
+    }
+
+    private static IMethodSymbol? SelectParameterlessConstructor(INamedTypeSymbol type)
+    {
+        foreach (var constructor in type.InstanceConstructors)
+        {
+            if (constructor.Parameters.Length == 0)
+            {
+                return constructor;
+            }
+        }
+
+        return null;
+    }
+
+    private static IMethodSymbol? SelectRuntimeBindingConstructor(INamedTypeSymbol type)
+    {
+        IMethodSymbol? parameterless = null;
+        IMethodSymbol? singleParameterized = null;
+        var parameterizedCount = 0;
+        foreach (var constructor in type.InstanceConstructors)
+        {
+            if (constructor.DeclaredAccessibility != Accessibility.Public)
+            {
+                continue;
+            }
+
+            if (constructor.Parameters.Length == 0)
+            {
+                parameterless = constructor;
+            }
+            else
+            {
+                parameterizedCount++;
+                singleParameterized = constructor;
+            }
+        }
+
+        if (parameterless is not null)
+        {
+            return parameterless;
+        }
+
+        return parameterizedCount == 1 ? singleParameterized : null;
+    }
+
+    private static IMethodSymbol? SelectImplicitlyChainedConstructor(INamedTypeSymbol baseType)
+    {
+        foreach (var constructor in baseType.InstanceConstructors)
+        {
+            if (constructor.Parameters.Length == 0 &&
+                constructor.DeclaredAccessibility != Accessibility.Private)
+            {
+                return constructor;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool PrimaryConstructorHasExplicitBaseArguments(IMethodSymbol constructor)
+    {
+        foreach (var reference in constructor.DeclaringSyntaxReferences)
+        {
+            if (reference.GetSyntax() is TypeDeclarationSyntax typeDeclaration &&
+                typeDeclaration.BaseList?.Types.OfType<PrimaryConstructorBaseTypeSyntax>().Any() == true)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryClassifyConstructorPropertyWrite(
+        ConstructorDeclarationSyntax declaration,
+        IMethodSymbol constructor,
+        IPropertySymbol property,
+        Compilation? compilation,
+        out RecursiveDefaultKind? writeKind)
+    {
+        writeKind = null;
+
+        // Name hiding or shadowing makes the syntax match unreliable.
+        if (PropertyNameIsHidden(constructor.ContainingType, property) ||
+            ConstructorShadowsPropertyName(declaration, property))
+        {
+            return false;
+        }
+
+        if (declaration.ExpressionBody is { } expressionBody)
+        {
+            if (!IsSimpleParameterOrLiteralAssignment(expressionBody.Expression, constructor))
+            {
+                return false;
+            }
+
+            if (expressionBody.Expression is AssignmentExpressionSyntax expressionAssignment &&
+                IsPropertyAssignmentTarget(expressionAssignment.Left, property))
+            {
+                writeKind = ClassifyAssignedDefaultValue(expressionAssignment.Right, property.Type, compilation);
+            }
+
+            return true;
+        }
+
+        if (declaration.Body is null)
+        {
+            return false;
+        }
+
+        foreach (var statement in declaration.Body.Statements)
+        {
+            if (statement is not ExpressionStatementSyntax expressionStatement ||
+                !IsSimpleParameterOrLiteralAssignment(expressionStatement.Expression, constructor))
+            {
+                return false;
+            }
+
+            if (expressionStatement.Expression is AssignmentExpressionSyntax assignment &&
+                IsPropertyAssignmentTarget(assignment.Left, property))
+            {
+                // Statements are sequential and side-effect-free, so the last write wins.
+                writeKind = ClassifyAssignedDefaultValue(assignment.Right, property.Type, compilation);
+            }
+        }
+
+        return true;
+    }
+
+    private static RecursiveDefaultKind ClassifyAssignedDefaultValue(
+        ExpressionSyntax value,
+        ITypeSymbol declaredType,
+        Compilation? compilation)
+    {
+        var stripped = StripInitializerWrappers(value);
+        if (IsInitializerDefinitelyNullOrDefault(stripped))
+        {
+            return RecursiveDefaultKind.None;
+        }
+
+        if (stripped is CollectionExpressionSyntax collectionExpression)
+        {
+            return collectionExpression.Elements.Count == 0
+                ? RecursiveDefaultKind.None
+                : RecursiveDefaultKind.Unprovable;
+        }
+
+        return IsCleanDeclaredTypeCreation(stripped, declaredType, compilation)
+            ? RecursiveDefaultKind.Modelled
+            : RecursiveDefaultKind.Unprovable;
+    }
+
+    private static bool RequiredAllowsEmptyStrings(ISymbol symbol)
+    {
+        foreach (var attribute in symbol.GetAttributes())
+        {
+            if (!string.Equals(attribute.AttributeClass?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (var argument in attribute.NamedArguments)
+            {
+                if (string.Equals(argument.Key, "AllowEmptyStrings", StringComparison.Ordinal) &&
+                    argument.Value.Value is bool allowEmptyStrings)
+                {
+                    return allowEmptyStrings;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasSatisfyingConstructorParameterDefault(
+        IPropertySymbol property,
+        INamedTypeSymbol rootType,
+        bool allowEmptyStrings)
+    {
+        var bindableConstructors = rootType.InstanceConstructors
+            .Where(static constructor =>
+                constructor.DeclaredAccessibility == Accessibility.Public &&
+                constructor.Parameters.Length > 0)
+            .ToArray();
+        if (bindableConstructors.Length != 1)
+        {
+            return false;
+        }
+
+        foreach (var parameter in bindableConstructors[0].Parameters)
+        {
+            if (IsConstructorParameterForProperty(parameter, property))
+            {
+                return parameter.HasExplicitDefaultValue &&
+                       DefaultValueSatisfiesRequired(parameter.ExplicitDefaultValue, allowEmptyStrings) &&
+                       ConstructorParameterDefinitelyReachesProperty(bindableConstructors[0], parameter, property);
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ConstructorParameterDefinitelyReachesProperty(
+        IMethodSymbol constructor,
+        IParameterSymbol parameter,
+        IPropertySymbol property)
+    {
+        // Positional record parameters initialize their synthesized property directly.
+        foreach (var propertyReference in property.DeclaringSyntaxReferences)
+        {
+            if (propertyReference.GetSyntax() is ParameterSyntax parameterSyntax &&
+                parameter.DeclaringSyntaxReferences.Any(reference => reference.GetSyntax() == parameterSyntax))
+            {
+                return true;
+            }
+        }
+
+        // Name hiding makes the syntax match unreliable: an assignment to a hiding member never
+        // reaches the hidden required property.
+        if (PropertyNameIsHidden(constructor.ContainingType, property))
+        {
+            return false;
+        }
+
+        foreach (var reference in constructor.DeclaringSyntaxReferences)
+        {
+            // Constructor initializers run before the body, so a `: base(...)` or `: this(...)`
+            // chain cannot clear a value the body assigns afterwards.
+            if (reference.GetSyntax() is not ConstructorDeclarationSyntax declaration ||
+                ConstructorShadowsPropertyName(declaration, property))
+            {
+                continue;
+            }
+
+            if (declaration.ExpressionBody?.Expression is { } expressionBody)
+            {
+                // The same side-effect-free target rule as block bodies applies: a custom setter
+                // could mutate the value instead of storing the parameter.
+                if (IsSimpleParameterOrLiteralAssignment(expressionBody, constructor) &&
+                    IsDirectParameterToPropertyAssignment(expressionBody, parameter, property))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (declaration.Body is null)
+            {
+                continue;
+            }
+
+            // The proof only holds when the body contains nothing but simple parameter-or-literal
+            // assignments: helper calls, compound expressions, or control flow could mutate the
+            // property after the parameter assignment runs.
+            var assignsParameter = false;
+            var bodyIsOnlySimpleAssignments = true;
+            foreach (var statement in declaration.Body.Statements)
+            {
+                if (statement is not ExpressionStatementSyntax expressionStatement ||
+                    !IsSimpleParameterOrLiteralAssignment(expressionStatement.Expression, constructor))
+                {
+                    bodyIsOnlySimpleAssignments = false;
+                    break;
+                }
+
+                if (IsDirectParameterToPropertyAssignment(expressionStatement.Expression, parameter, property))
+                {
+                    assignsParameter = true;
+                }
+            }
+
+            if (!bodyIsOnlySimpleAssignments || !assignsParameter)
+            {
+                continue;
+            }
+
+            // Any other write to the property could overwrite the parameter value, so every
+            // property write must be the direct parameter assignment.
+            var allPropertyWritesUseParameter = declaration.Body
+                .DescendantNodes()
+                .OfType<AssignmentExpressionSyntax>()
+                .Where(assignment => IsPropertyAssignmentTarget(assignment.Left, property))
+                .All(assignment => IsDirectParameterToPropertyAssignment(assignment, parameter, property));
+
+            if (allPropertyWritesUseParameter)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool PropertyNameIsHidden(INamedTypeSymbol type, IPropertySymbol property)
+    {
+        var membersWithName = 0;
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            membersWithName += current.GetMembers(property.Name).Length;
+        }
+
+        return membersWithName > 1;
+    }
+
+    private static bool ConstructorShadowsPropertyName(ConstructorDeclarationSyntax declaration, IPropertySymbol property)
+    {
+        // A parameter or local named exactly like the property would capture the assignment,
+        // leaving the property untouched.
+        if (declaration.ParameterList.Parameters.Any(parameter =>
+                string.Equals(parameter.Identifier.ValueText, property.Name, StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        return declaration.Body is not null &&
+               declaration.Body
+                   .DescendantNodes()
+                   .OfType<VariableDeclaratorSyntax>()
+                   .Any(declarator => string.Equals(declarator.Identifier.ValueText, property.Name, StringComparison.Ordinal));
+    }
+
+    private static bool IsSimpleParameterOrLiteralAssignment(ExpressionSyntax expression, IMethodSymbol constructor)
+    {
+        if (expression is not AssignmentExpressionSyntax assignment ||
+            !assignment.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SimpleAssignmentExpression))
+        {
+            return false;
+        }
+
+        var left = StripInitializerWrappers(assignment.Left);
+        var targetName = left switch
+        {
+            IdentifierNameSyntax identifierTarget => identifierTarget.Identifier.ValueText,
+            MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax } memberAccess =>
+                memberAccess.Name.Identifier.ValueText,
+            _ => null
+        };
+
+        // An unqualified identifier that matches a constructor parameter writes the parameter,
+        // not a member, even when a same-named field or property exists.
+        if (targetName is null ||
+            (left is IdentifierNameSyntax &&
+             constructor.Parameters.Any(parameter =>
+                 string.Equals(parameter.Name, targetName, StringComparison.Ordinal))))
+        {
+            return false;
+        }
+
+        // A custom setter on the assigned member could mutate other properties, so the target
+        // must be a field or an auto-implemented property.
+        if (!IsSideEffectFreeAssignmentTarget(constructor.ContainingType, targetName))
+        {
+            return false;
+        }
+
+        var right = StripInitializerWrappers(assignment.Right);
+        return right is LiteralExpressionSyntax ||
+               IsArgumentFreeCreation(right) ||
+               (right is IdentifierNameSyntax identifier &&
+                constructor.Parameters.Any(parameter =>
+                    string.Equals(parameter.Name, identifier.Identifier.ValueText, StringComparison.Ordinal)));
+    }
+
+    private static bool IsArgumentFreeCreation(ExpressionSyntax expression)
+    {
+        // A creation with no arguments and no initializer cannot reference the enclosing
+        // instance, so it cannot mutate other properties.
+        return expression switch
+        {
+            ObjectCreationExpressionSyntax creation =>
+                (creation.Initializer is null || creation.Initializer.Expressions.Count == 0) &&
+                (creation.ArgumentList is null || creation.ArgumentList.Arguments.Count == 0),
+            ImplicitObjectCreationExpressionSyntax implicitCreation =>
+                (implicitCreation.Initializer is null || implicitCreation.Initializer.Expressions.Count == 0) &&
+                implicitCreation.ArgumentList.Arguments.Count == 0,
+            CollectionExpressionSyntax collectionExpression => collectionExpression.Elements.Count == 0,
+            _ => false
+        };
+    }
+
+    private static bool IsSideEffectFreeAssignmentTarget(INamedTypeSymbol type, string memberName)
+    {
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var member in current.GetMembers(memberName))
+            {
+                return member switch
+                {
+                    IFieldSymbol => true,
+                    // A get-only auto-property assigned in a constructor writes the backing field
+                    // directly; a settable property needs an auto-implemented setter. Overridable
+                    // members can dispatch to a derived accessor with side effects.
+                    IPropertySymbol property =>
+                        !property.IsVirtual && !property.IsAbstract && !property.IsOverride &&
+                        (property.SetMethod is null
+                            ? IsAutoImplementedAccessor(property.GetMethod)
+                            : IsAutoImplementedAccessor(property.SetMethod)),
+                    _ => false
+                };
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsAutoImplementedAccessor(IMethodSymbol? accessorMethod)
+    {
+        if (accessorMethod is null)
+        {
+            return false;
+        }
+
+        if (accessorMethod.IsImplicitlyDeclared)
+        {
+            return true;
+        }
+
+        foreach (var reference in accessorMethod.DeclaringSyntaxReferences)
+        {
+            if (reference.GetSyntax() is not AccessorDeclarationSyntax accessor ||
+                accessor.Body is not null ||
+                accessor.ExpressionBody is not null)
+            {
+                return false;
+            }
+        }
+
+        return accessorMethod.DeclaringSyntaxReferences.Length > 0;
+    }
+
+    private static bool IsDirectParameterToPropertyAssignment(
+        ExpressionSyntax expression,
+        IParameterSymbol parameter,
+        IPropertySymbol property)
+    {
+        return expression is AssignmentExpressionSyntax assignment &&
+               assignment.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SimpleAssignmentExpression) &&
+               IsPropertyAssignmentTarget(assignment.Left, property) &&
+               StripInitializerWrappers(assignment.Right) is IdentifierNameSyntax identifier &&
+               string.Equals(identifier.Identifier.ValueText, parameter.Name, StringComparison.Ordinal);
+    }
+
+    private static bool IsPropertyAssignmentTarget(ExpressionSyntax expression, IPropertySymbol property)
+    {
+        return StripInitializerWrappers(expression) switch
+        {
+            IdentifierNameSyntax identifier =>
+                string.Equals(identifier.Identifier.ValueText, property.Name, StringComparison.Ordinal),
+            MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax } memberAccess =>
+                string.Equals(memberAccess.Name.Identifier.ValueText, property.Name, StringComparison.Ordinal),
+            _ => false
+        };
+    }
+
+    private static bool DefaultValueSatisfiesRequired(object? value, bool allowEmptyStrings)
+    {
+        if (value is null)
+        {
+            return false;
+        }
+
+        if (value is string text)
+        {
+            return allowEmptyStrings || text.Trim().Length > 0;
+        }
+
+        return true;
+    }
+
+    private static bool InitializerDefinitelySatisfiesRequired(
+        ExpressionSyntax initializer,
+        ITypeSymbol propertyType,
+        bool allowEmptyStrings,
+        Compilation? compilation)
+    {
+        initializer = StripInitializerWrappers(initializer);
+
+        // Compile-time constants (literals, const fields, nameof, constant folding) keep their
+        // value when the key is missing, so judge them by the constant itself — unless a
+        // user-defined conversion decides the stored value instead of the source constant.
+        if (compilation is not null)
+        {
+            var semanticModel = compilation.GetSemanticModel(initializer.SyntaxTree);
+            var constantValue = semanticModel.GetConstantValue(initializer);
+            if (constantValue.HasValue)
+            {
+                if (Microsoft.CodeAnalysis.CSharp.CSharpExtensions.ClassifyConversion(semanticModel, initializer, propertyType).IsUserDefined)
+                {
+                    return false;
+                }
+
+                return DefaultValueSatisfiesRequired(constantValue.Value, allowEmptyStrings);
+            }
+        }
+
+        if (initializer is CastExpressionSyntax cast)
+        {
+            return InitializerDefinitelySatisfiesRequired(cast.Expression, propertyType, allowEmptyStrings, compilation);
+        }
+
+        // Signed numeric defaults like -1 parse as a unary expression over a numeric literal.
+        if (initializer is PrefixUnaryExpressionSyntax prefixUnary &&
+            (prefixUnary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.UnaryMinusExpression) ||
+             prefixUnary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.UnaryPlusExpression)) &&
+            StripInitializerWrappers(prefixUnary.Operand) is LiteralExpressionSyntax numericOperand &&
+            numericOperand.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.NumericLiteralExpression))
+        {
+            return true;
+        }
+
+        if (initializer is LiteralExpressionSyntax literal)
+        {
+            if (literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.NullLiteralExpression) ||
+                literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.DefaultLiteralExpression))
+            {
+                return false;
+            }
+
+            if (literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression))
+            {
+                return DefaultValueSatisfiesRequired(literal.Token.ValueText, allowEmptyStrings);
+            }
+
+            // Numeric, boolean, and character literals are non-null, non-string runtime values,
+            // which RequiredAttribute always accepts.
+            return true;
+        }
+
+        if (initializer is not (ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax))
+        {
+            return false;
+        }
+
+        // A constructed string is non-null but can be empty or whitespace, which only
+        // AllowEmptyStrings accepts.
+        if (propertyType.SpecialType == SpecialType.System_String)
+        {
+            return allowEmptyStrings;
+        }
+
+        // Target-typed new() constructs the property type itself — the underlying value type for
+        // nullable value properties per the C# spec — so it always produces a non-null, non-string
+        // value here (string properties are excluded above and string has no parameterless constructor).
+        if (initializer is ImplicitObjectCreationExpressionSyntax)
+        {
+            return true;
+        }
+
+        // Explicit creations need the semantic constructed type: a type alias can hide Nullable<T>,
+        // whose parameterless construction boxes to null, and a constructed string assigned to an
+        // object-typed property can still be empty or whitespace.
+        if (compilation is null)
+        {
+            return false;
+        }
+
+        var creationSemanticModel = compilation.GetSemanticModel(initializer.SyntaxTree);
+
+        // A user-defined conversion decides the stored value, not the constructed source object.
+        if (Microsoft.CodeAnalysis.CSharp.CSharpExtensions.ClassifyConversion(creationSemanticModel, initializer, propertyType).IsUserDefined)
+        {
+            return false;
+        }
+
+        var constructedType = creationSemanticModel.GetTypeInfo(initializer).Type;
+        if (constructedType is null)
+        {
+            return false;
+        }
+
+        if (constructedType.SpecialType == SpecialType.System_String)
+        {
+            return allowEmptyStrings;
+        }
+
+        if (IsNullableValueType(constructedType))
+        {
+            // Only Nullable<T> construction with a value carries HasValue == true.
+            return ((ObjectCreationExpressionSyntax)initializer).ArgumentList?.Arguments.Count > 0;
+        }
+
+        return true;
     }
 
     private static bool ContainsValidationAttributes(

@@ -82,6 +82,94 @@ public sealed class JsonSchemaBuilderTests
     }
 
     [Fact]
+    public void Required_properties_with_satisfying_defaults_are_not_marked_required()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class DbOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+
+                [Required]
+                public string Host { get; set; } = "localhost";
+            }
+            """,
+            "DbOptions");
+
+        Assert.Equal(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "ConnectionString": {
+                  "type": "string"
+                },
+                "Host": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ConnectionString"
+              ]
+            }
+            """,
+            schema,
+            ignoreLineEndingDifferences: true);
+    }
+
+    [Fact]
+    public void Required_recursive_object_with_default_keeps_parent_required_when_nested_required_is_unsatisfied()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.Options;
+
+            public sealed class AppOptions
+            {
+                [Required]
+                [ValidateObjectMembers]
+                public DatabaseOptions Database { get; set; } = new();
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+            """,
+            "AppOptions");
+
+        Assert.Equal(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "Database": {
+                  "type": "object",
+                  "properties": {
+                    "ConnectionString": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ConnectionString"
+                  ]
+                }
+              },
+              "required": [
+                "Database"
+              ]
+            }
+            """,
+            schema,
+            ignoreLineEndingDifferences: true);
+    }
+
+    [Fact]
     public void Nested_object_properties_recurse()
     {
         var schema = BuildSchema(
