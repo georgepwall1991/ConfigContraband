@@ -2,9 +2,9 @@
 
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
-Last refreshed: 2026-06-09
-Package version: `0.5.0`
-Base audited commit: `93b587b`
+Last refreshed: 2026-06-28
+Package version: `0.5.1`
+Base audited commit: `b6367f9`
 
 ## Scoring Rubric
 
@@ -118,6 +118,7 @@ that refactor; schema generation is a new consumer of the same model, not a new 
 | 2026-06-10 | 70 | `CFG002` | Codex review found a constructor-created recursive child (`AppOptions() { Database = new(); }`) lost its nested required diagnostics because the gate treated any constructor write as unprovable, and a zero-argument `: base()` initializer — equivalent to the implicit chain — voided the initializer-survival proof. | Resolve the property's effective runtime default through the constructor chain (the most-derived definite simple write wins; argument-free creations cannot capture the instance), follow zero-argument `: this()`/`: base()` chains, and classify constructor-assigned defaults with the same none/modelled/unprovable rules as initializers. Added constructor-created-child and empty-base-initializer regressions. | `CFG002` stays `4.75`, with the effective-default resolution covering constructor-assigned defaults instead of bailing on them. |
 | 2026-06-10 | 71 | `CFG002` | Codex review found a constant initializer flowing through a user-defined implicit conversion (`[Required] ConvertedValue Endpoint = "x"` with an operator returning null) was judged by the source constant instead of the converted value the property actually stores. | Reject constant defaults whose conversion to the property type is user-defined. Added a converted-constant regression. | `CFG002` stays `4.75`, with constant defaults judged only when the conversion preserves the value. |
 | 2026-06-10 | 72 | `CFG002` | Codex review found the same user-defined-conversion gap on the object-creation path: `= new SourceValue()` flowing through an implicit operator that returns null was treated as a non-null stored value. | Apply the user-defined-conversion guard to explicit object-creation defaults as well. Added a converted-creation regression. | `CFG002` stays `4.75`, with both constant and creation defaults rejected when a user-defined conversion decides the stored value. |
+| 2026-06-28 | 73 | Monitor | No actionable precision debt surfaced this sweep; refreshed audit metadata only. | Bumped `Last refreshed` to 2026-06-28, `Package version` to `0.5.1`, and `Base audited commit` to `b6367f9` to reflect the v0.5.1 release as the audited baseline; the Current Shortlist remains intact because all monitor-mode guidance is still current. | No score changes. Every rule remains P3 / monitor and the Current Shortlist holds. |
 
 ## Health Baseline
 
