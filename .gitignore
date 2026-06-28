@@ -6,3 +6,5 @@ artifacts/
 TestResults/
 *.user
 *.suo
+.DS_Store
+.complexity-log.md
