@@ -4,7 +4,7 @@ This file tracks the current ConfigContraband analyzer surface and the next hard
 
 Last refreshed: 2026-06-30
 Package version: `0.5.2`
-Base audited commit: `c76724e`
+Base audited commit: `6634eee`
 
 ## Scoring Rubric
 
@@ -126,6 +126,7 @@ Follow-up audit evidence on 2026-06-30 first reproduced the stale release-readin
 | 2026-06-30 | 76 | Release verification | Full release verification initially reproduced the analyzer/code-fix verifier blocker, then a clean rerun at HEAD `0d0a773` passed `dotnet test ConfigContraband.slnx --configuration Release`, `dotnet format ConfigContraband.slnx --verify-no-changes --no-restore --verbosity minimal`, and `git diff --check`. No analyzer source, code-fix source, or rule documentation changed. | Recorded the passing release-grade evidence and restored Release Readiness from `1` to `5` across all rules. | Overall scores return to their pre-blocker values (`CFG001` `4.85`, `CFG002` `4.75`, `CFG003`/`CFG004` `4.60`, `CFG005` `4.75`, `CFG006` `4.50`, `CFG007` `5.00`), and every rule returns to P3 / monitor mode. |
 | 2026-06-30 | 77 | `CFG006` | The analyzer already recognized `GetRequiredSection(...)` through the same static section-path helper as `GetSection(...)`, but CFG006 did not have focused binding-shape regressions for the required-section overload. | Added analyzer coverage proving unknown-key Info diagnostics for `OptionsBuilder<T>.Bind(configuration.GetRequiredSection("Section"))` and direct `Configure<T>(configuration.GetRequiredSection("Section"))`, added matching schema-registration extractor coverage for `OptionsBuilder<T>.Bind(GetRequiredSection(...))`, updated package/changelog metadata for `0.5.2`, and updated scope docs to list the direct `Configure<T>` required-section shape. No severity, inference, or production diagnostic broadening changed. | `CFG006` stays Info and remains `4.50`; Test Depth was already `5`, so the new coverage strengthens evidence without changing score math. |
 | 2026-06-30 | 78 | Analyzer health workflow | PR self-review found two iteration-harness risks: markdown backticks in `gh pr create --body "..."` can be executed by the shell, and validating `Base audited commit` by requiring equality with `HEAD` is impossible for commits that edit `analyzer-health.md` because a commit cannot contain its own hash. | Hardened the project-local analyzer-health pi extension to recommend `gh pr checks --watch`, body files or single-quoted heredocs for GitHub CLI markdown bodies, and audited-base validation as ancestor-of-HEAD rather than exact HEAD equality. | Workflow safety improves; no rule scores change. |
+| 2026-06-30 | 79 | Monitor | `Base audited commit` still pointed at `c76724e`, two already-merged iterations (CFG006 `GetRequiredSection` coverage, iteration-harness safety hardening) behind `HEAD`, even though `Last refreshed` and `Package version` were already current. | Verified `c76724e` is an ancestor of `HEAD` and reran full release verification clean (`dotnet test ConfigContraband.slnx --configuration Release`, formatter check, `git diff --check`), then advanced `Base audited commit` to `6634eee`. | No score changes. Every rule remains P3 / monitor and the Current Shortlist holds. |
 
 ## Health Baseline
 
