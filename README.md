@@ -506,7 +506,7 @@ ConfigContraband currently focuses on:
 - `appsettings.json` and `appsettings.*.json` files.
 - `AddOptions<T>().BindConfiguration("Section")` registrations.
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
-- Direct `Configure<T>(configuration.GetSection("Section"))` registrations for section and JSON-key drift.
+- Direct `Configure<T>(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations for section and JSON-key drift.
 - Strict `ErrorOnUnknownConfiguration` binder options for unknown-key failures.
 - String-literal section names.
 - Public bindable properties on options types, including inherited and constructor-bound bindable properties.

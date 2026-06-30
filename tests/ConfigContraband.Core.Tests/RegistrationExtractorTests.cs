@@ -72,6 +72,30 @@ public sealed class RegistrationExtractorTests
     }
 
     [Fact]
+    public void Discovers_bind_with_get_required_section()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .Bind(configuration.GetRequiredSection("Stripe"));
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.Equal("Stripe", section.SectionPath);
+        Assert.Equal("StripeOptions", section.Type.Name);
+    }
+
+    [Fact]
     public void Discovers_direct_configure_with_get_section()
     {
         var sections = Extract(

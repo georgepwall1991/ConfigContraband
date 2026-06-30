@@ -9990,6 +9990,34 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_reports_unknown_key_from_bind_get_required_section()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.AddOptions<StripeOptions>()
+                .Bind(configuration.GetRequiredSection("Stripe"))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_reports_unknown_key_from_commented_appsettings_file()
     {
         var source = OptionsSource("""
@@ -10113,6 +10141,31 @@ public sealed class ConfigContrabandAnalyzerTests
         var source = OptionsSource("""
             IConfiguration configuration = null!;
             services.Configure<StripeOptions>(configuration.GetSection("Stripe"));
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Configure_reports_unknown_key_from_get_required_section_without_validation_diagnostics()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<StripeOptions>(configuration.GetRequiredSection("Stripe"));
             """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
