@@ -72,6 +72,22 @@ interface AuditReport {
 	scoreRecommendations: Array<{ category: string; from?: number; to?: number; reason: string }>;
 }
 
+interface HealthWorkItem {
+	rank: number;
+	title: string;
+	source: "current-shortlist" | "health-baseline";
+	rules: string[];
+}
+
+interface IterationArgs {
+	dryRun: boolean;
+	baseBranch: string;
+	verification: VerificationMode;
+	autoMerge: boolean;
+	tagRelease: boolean;
+	pushPr: boolean;
+}
+
 export default function analyzerHealthExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "collect_analyzer_health_evidence",
@@ -146,6 +162,176 @@ export default function analyzerHealthExtension(pi: ExtensionAPI) {
 			ctx.ui.setEditorText(`Fix analyzer-health.md validation issues:\n\n${issues.map((i) => `- ${i}`).join("\n")}`);
 		},
 	});
+
+	pi.registerCommand("analyzer-health-iterate", {
+		description: "Start a guarded branch→PR→review→merge→release iteration from analyzer-health.md highest priority",
+		handler: async (args, ctx) => {
+			if (!ctx.isIdle()) {
+				ctx.ui.notify("Wait for the current agent turn to finish before starting an analyzer-health iteration.", "warning");
+				return;
+			}
+
+			const options = parseIterationArgs(args);
+			const workItem = await selectHighestPriorityWork(ctx.cwd);
+			const branchName = createBranchName(workItem);
+			const prompt = buildIterationPrompt(workItem, branchName, options);
+
+			if (options.dryRun) {
+				ctx.ui.setEditorText(prompt);
+				ctx.ui.notify(`Prepared dry-run iteration prompt for ${workItem.title}.`, "info");
+				return;
+			}
+
+			const preflight = await prepareIterationBranch(pi, ctx.cwd, options.baseBranch, branchName);
+			if (preflight) {
+				ctx.ui.notify(preflight, "warning");
+				ctx.ui.setEditorText(`Cannot start analyzer-health iteration yet:\n\n${preflight}\n\nPlanned work:\n- ${workItem.title}`);
+				return;
+			}
+
+			ctx.ui.setStatus("analyzer-health", `iteration: ${branchName}`);
+			ctx.ui.setWidget("analyzer-health", [
+				`Analyzer health iteration`,
+				`Target: ${workItem.title}`,
+				`Branch: ${branchName}`,
+				`Verification: ${options.verification}`,
+			]);
+			pi.appendEntry("analyzer-health-iteration", { branchName, workItem, options, startedAt: new Date().toISOString() });
+			pi.sendUserMessage(prompt);
+		},
+	});
+}
+
+async function selectHighestPriorityWork(cwd: string): Promise<HealthWorkItem> {
+	const text = await readFile(join(cwd, "analyzer-health.md"), "utf8");
+	const shortlist = extractSection(text, "Current Shortlist");
+	const first = shortlist.split(/\r?\n/).map((line) => /^\s*(\d+)\.\s+(.+)$/.exec(line)).find(Boolean);
+	if (first) {
+		return {
+			rank: Number(first[1]),
+			title: first[2].trim(),
+			source: "current-shortlist",
+			rules: extractRules(first[2]),
+		};
+	}
+
+	const health = await parseHealth(cwd, "analyzer-health.md");
+	const priorityOrder: Record<string, number> = { P1: 1, P2: 2, P3: 3 };
+	const sorted = [...health.rules].sort((a, b) => {
+		const priority = (priorityOrder[a.priority] ?? 99) - (priorityOrder[b.priority] ?? 99);
+		if (priority !== 0) return priority;
+		return a.score - b.score;
+	});
+	const top = sorted[0];
+	if (!top) throw new Error("No Current Shortlist item or Health Baseline rows found in analyzer-health.md.");
+	return { rank: 1, title: `${top.rule} (${top.priority}, score ${top.score.toFixed(2)})`, source: "health-baseline", rules: [top.rule.split(" ")[0]] };
+}
+
+async function prepareIterationBranch(pi: ExtensionAPI, cwd: string, baseBranch: string, branchName: string): Promise<string | undefined> {
+	const gitDir = await pi.exec("git", ["rev-parse", "--git-dir"], { cwd, timeout: 5_000 });
+	if (gitDir.code !== 0) return "Current directory is not a git repository.";
+
+	const status = await pi.exec("git", ["status", "--porcelain"], { cwd, timeout: 5_000 });
+	if (status.code !== 0) return `git status failed: ${status.stderr.trim() || status.stdout.trim()}`;
+	if (status.stdout.trim()) return "Working tree is not clean. Commit, stash, or discard local changes before starting the automated iteration.";
+
+	const gh = await pi.exec("gh", ["auth", "status"], { cwd, timeout: 10_000 });
+	if (gh.code !== 0) return "GitHub CLI is not authenticated. Run `gh auth login` before using analyzer-health-iterate.";
+
+	const fetch = await pi.exec("git", ["fetch", "origin"], { cwd, timeout: 60_000 });
+	if (fetch.code !== 0) return `git fetch origin failed: ${fetch.stderr.trim() || fetch.stdout.trim()}`;
+	const checkout = await pi.exec("git", ["checkout", baseBranch], { cwd, timeout: 30_000 });
+	if (checkout.code !== 0) return `git checkout ${baseBranch} failed: ${checkout.stderr.trim() || checkout.stdout.trim()}`;
+	const pull = await pi.exec("git", ["pull", "--ff-only", "origin", baseBranch], { cwd, timeout: 60_000 });
+	if (pull.code !== 0) return `git pull --ff-only origin ${baseBranch} failed: ${pull.stderr.trim() || pull.stdout.trim()}`;
+	const branch = await pi.exec("git", ["checkout", "-b", branchName], { cwd, timeout: 30_000 });
+	if (branch.code !== 0) return `git checkout -b ${branchName} failed: ${branch.stderr.trim() || branch.stdout.trim()}`;
+	return undefined;
+}
+
+function parseIterationArgs(args: string): IterationArgs {
+	const options: IterationArgs = {
+		dryRun: false,
+		baseBranch: "main",
+		verification: "full",
+		autoMerge: false,
+		tagRelease: true,
+		pushPr: true,
+	};
+	for (const part of args.trim().split(/\s+/).filter(Boolean)) {
+		if (part === "--dry-run") options.dryRun = true;
+		else if (part === "--auto-merge") options.autoMerge = true;
+		else if (part === "--no-release") options.tagRelease = false;
+		else if (part === "--no-pr") options.pushPr = false;
+		else if (part.startsWith("--base=")) options.baseBranch = part.slice("--base=".length) || options.baseBranch;
+		else if (part.startsWith("--verification=")) {
+			const verification = part.slice("--verification=".length);
+			if (["none", "core", "analyzer", "codefix", "full"].includes(verification)) options.verification = verification as VerificationMode;
+		}
+	}
+	return options;
+}
+
+function buildIterationPrompt(workItem: HealthWorkItem, branchName: string, options: IterationArgs): string {
+	const releaseStep = options.tagRelease
+		? "After merge, tag a new GitHub release using the next semantic version inferred from project metadata/CHANGELOG. Do not tag if verification or PR checks fail."
+		: "Do not create a release tag for this run because --no-release was supplied.";
+	const mergePolicy = options.autoMerge
+		? "If review and checks pass, merge the PR using gh without asking another confirmation."
+		: "Before merging the PR or creating any release tag, pause and ask the user for explicit confirmation with the PR URL, checks status, release version, and verification evidence.";
+	const prPolicy = options.pushPr
+		? "Push the branch and open a GitHub PR with gh; include the health item, implementation summary, tests run, and release-note impact."
+		: "Do not push or open a PR because --no-pr was supplied; stop after a local commit and verification summary.";
+
+	return `Run one complete analyzer-health iteration from \`analyzer-health.md\`.
+
+Target selected from ${workItem.source}:
+${workItem.rank}. ${workItem.title}
+
+Branch already created: \`${branchName}\`.
+
+Workflow requirements:
+1. Re-read \`analyzer-health.md\`, especially Current Shortlist, Selection Policy, Health Baseline, and Verification Baseline. Keep scope to this single highest-priority item unless a shared helper makes a second rule inseparable.
+2. Collect deterministic audit evidence before changing health scores: use \`collect_analyzer_health_evidence\` with verification \`${options.verification}\` when appropriate.
+3. Implement the smallest production-quality change that resolves the target. Prefer tests first or alongside code. Do not broaden diagnostics, change severity, rename IDs, or expand inference beyond the documented policy.
+4. Run targeted verification first, then the requested release-grade verification path when feasible: \`${options.verification}\`. Also run formatting/diff checks before PR/merge.
+5. Update \`analyzer-health.md\` only with evidence-backed changelog, baseline, score, and shortlist changes. Do not raise Test Depth, Fix Safety, or Release Readiness without passing verifier evidence.
+6. Commit with a focused message. ${prPolicy}
+7. Perform a self-review before merge: inspect \`git diff\`, check for missing tests/docs, scan failure modes, and ensure analyzer-health score math validates.
+8. ${mergePolicy}
+9. ${releaseStep}
+10. Finish with a concise handoff: PR URL, merge commit, tag/release URL if created, commands run, and any follow-up items.
+
+Use safe GitHub CLI commands (\`gh pr create\`, \`gh pr checks\`, \`gh pr review --comment\` or a self-review comment, \`gh pr merge\`, \`gh release create\`) and stop on any failed command or dirty unexpected state.`;
+}
+
+function extractSection(text: string, heading: string): string {
+	const pattern = new RegExp(`^## ${escapeRegex(heading)}\\s*$`, "m");
+	const match = pattern.exec(text);
+	if (!match) return "";
+	const start = match.index + match[0].length;
+	const rest = text.slice(start);
+	const next = /^##\s+/m.exec(rest);
+	return next ? rest.slice(0, next.index) : rest;
+}
+
+function extractRules(text: string): string[] {
+	return [...text.matchAll(/\bCFG\d{3}\b/g)].map((match) => match[0]);
+}
+
+function createBranchName(workItem: HealthWorkItem): string {
+	const slug = workItem.title
+		.toLowerCase()
+		.replace(/`/g, "")
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 56) || "health-work";
+	const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
+	return `analyzer-health/${stamp}-${slug}`;
+}
+
+function escapeRegex(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function collectAudit(cwd: string, params: AuditParams, signal?: AbortSignal): Promise<AuditReport> {
