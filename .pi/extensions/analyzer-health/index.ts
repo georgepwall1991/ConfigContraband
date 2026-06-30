@@ -277,8 +277,11 @@ function parseIterationArgs(args: string): IterationArgs {
 
 function buildIterationPrompt(workItem: HealthWorkItem, branchName: string, options: IterationArgs): string {
 	const releaseStep = options.tagRelease
-		? "After merge, tag a new GitHub release using the next semantic version inferred from project metadata/CHANGELOG. Do not tag if verification or PR checks fail."
+		? "After merge, tag the GitHub release version prepared in the PR. Do not tag if verification, release metadata, or PR checks fail."
 		: "Do not create a release tag for this run because --no-release was supplied.";
+	const releasePrepPolicy = options.tagRelease
+		? "Before opening the PR, prepare release metadata for the next semantic version inferred from project metadata/CHANGELOG: update package versions, CHANGELOG.md, package release notes, and analyzer-health.md package/version notes when those files exist. Then rerun full verification."
+		: "Do not change package versions, changelog, package release notes, or release-specific analyzer-health metadata because --no-release was supplied.";
 	const mergePolicy = options.autoMerge
 		? "If review and checks pass, merge the PR using gh without asking another confirmation."
 		: "Before merging the PR or creating any release tag, pause and ask the user for explicit confirmation with the PR URL, checks status, release version, and verification evidence.";
@@ -299,11 +302,12 @@ Workflow requirements:
 3. Implement the smallest production-quality change that resolves the target. Prefer tests first or alongside code. Do not broaden diagnostics, change severity, rename IDs, or expand inference beyond the documented policy.
 4. Run targeted verification first, then the requested release-grade verification path when feasible: \`${options.verification}\`. Also run formatting/diff checks before PR/merge.
 5. Update \`analyzer-health.md\` only with evidence-backed changelog, baseline, score, and shortlist changes. Do not raise Test Depth, Fix Safety, or Release Readiness without passing verifier evidence.
-6. Commit with a focused message. ${prPolicy}
-7. Perform a self-review before merge: inspect \`git diff\`, check for missing tests/docs, scan failure modes, and ensure analyzer-health score math validates. Treat \`Base audited commit\` as the audited starting point for the current delta (it must be an ancestor of HEAD; do not try to embed the current commit's self-hash in the file).
-8. ${mergePolicy}
-9. ${releaseStep}
-10. Finish with a concise handoff: PR URL, merge commit, tag/release URL if created, commands run, and any follow-up items.
+6. Release metadata: ${releasePrepPolicy}
+7. Commit with a focused message. ${prPolicy}
+8. Perform a self-review before merge: inspect \`git diff\`, check for missing tests/docs, scan failure modes, and ensure analyzer-health score math validates. Treat \`Base audited commit\` as the audited starting point for the current delta (it must be an ancestor of HEAD; do not try to embed the current commit's self-hash in the file).
+9. ${mergePolicy}
+10. ${releaseStep}
+11. Finish with a concise handoff: PR URL, merge commit, tag/release URL if created, commands run, and any follow-up items.
 
 Use safe GitHub CLI commands (\`gh pr create\`, \`gh pr checks --watch\`, \`gh pr review --comment\` or a self-review comment, \`gh pr merge\`, \`gh release create\`) and stop on any failed command, dirty unexpected state, or failed PR check. Write PR/review/release bodies through a temporary markdown file or single-quoted heredoc so markdown backticks and shell metacharacters are not executed by the shell.`;
 }

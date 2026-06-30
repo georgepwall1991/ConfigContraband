@@ -13,7 +13,8 @@ Project-local pi extension for making `analyzer-health.md` refreshes repeatable 
 - `/analyzer-health-iterate [--dry-run] [--base=main] [--verification=full|analyzer|codefix|core|none] [--no-pr] [--no-release] [--auto-merge]`
   - Selects the highest-priority work from `Current Shortlist` (falling back to the lowest-score highest-priority Health Baseline row).
   - Requires a clean git tree and authenticated `gh`, updates the base branch, creates an `analyzer-health/...` branch, then sends pi a guarded implementation workflow.
-  - The workflow requires evidence collection, targeted/full verification, analyzer-health updates, commit, PR, self-review, merge, and release tagging.
+  - The workflow requires evidence collection, targeted/full verification, analyzer-health updates, release metadata preparation when releases are enabled, commit, PR, self-review, merge, and release tagging.
+  - When release tagging is enabled, the generated prompt tells the agent to infer the next semantic version before PR creation, update package versions, `CHANGELOG.md`, package release notes, and analyzer-health package/version notes where present, then rerun full verification.
   - The generated prompt tells the agent to use body files or single-quoted heredocs for GitHub CLI markdown bodies so backticks are not executed by the shell.
   - By default it pauses for explicit user confirmation before merge/tag; use `--auto-merge` only when you want unattended merge/release after checks pass.
 
