@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.1</Version>
+    <Version>0.5.2</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Hardened CFG002 so [Required] properties whose compile-time default already satisfies RequiredAttribute no longer warn when the key is missing: non-empty string initializers (honoring AllowEmptyStrings), non-null literals on nullable value types, object-creation initializers, and constructor-bound parameter defaults cannot fail validation. Empty/whitespace string defaults, null!/default initializers, explicit parameterless new int?(), constructor defaults that never reach the property, and non-literal initializers keep warning. The generated appsettings.schema.json required array follows the same boundary.</PackageReleaseNotes>
+    <PackageReleaseNotes>Added regression coverage and documentation for the already-supported GetRequiredSection binding shape: CFG006 unknown-key Info diagnostics and schema registration extraction now explicitly cover OptionsBuilder.Bind(configuration.GetRequiredSection(...)) and direct Configure&lt;T&gt;(configuration.GetRequiredSection(...)). Diagnostic IDs, severities, and inference boundaries are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

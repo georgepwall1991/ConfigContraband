@@ -14,7 +14,8 @@ namespace ConfigContraband;
 /// <remarks>
 /// This is a focused scanner for the common, statically provable shapes the schema generator needs:
 /// <c>AddOptions&lt;T&gt;().BindConfiguration("Section")</c>, <c>OptionsBuilder&lt;T&gt;.Bind(config.GetSection("Section"))</c>,
-/// and <c>services.Configure&lt;T&gt;(config.GetSection("Section"))</c>, including fluent chains. It deliberately
+/// <c>OptionsBuilder&lt;T&gt;.Bind(config.GetRequiredSection("Section"))</c>, and the matching direct
+/// <c>services.Configure&lt;T&gt;(...)</c> section-binding overloads, including fluent chains. It deliberately
 /// does not reproduce the analyzer's full strict-binding proof; for schema generation, being conservative about
 /// <c>additionalProperties</c> degrades gracefully (a missed strict flag just leaves a section open). The options
 /// type model itself is shared with the analyzer via <see cref="OptionsTypeMetadata"/>.

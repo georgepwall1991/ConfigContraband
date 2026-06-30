@@ -149,12 +149,15 @@ export default function analyzerHealthExtension(pi: ExtensionAPI) {
 			const health = await parseHealth(ctx.cwd, "analyzer-health.md");
 			const head = await git(ctx.cwd, ["rev-parse", "--short", "HEAD"]);
 			const issues = [...health.scoreIssues];
-			if (health.baseCommit && head.exitCode === 0 && health.baseCommit !== head.stdout.trim()) {
-				issues.push(`Base audited commit ${health.baseCommit} does not match HEAD ${head.stdout.trim()}.`);
+			if (health.baseCommit && head.exitCode === 0) {
+				const ancestor = await git(ctx.cwd, ["merge-base", "--is-ancestor", health.baseCommit, "HEAD"]);
+				if (ancestor.exitCode !== 0) {
+					issues.push(`Base audited commit ${health.baseCommit} is not an ancestor of HEAD ${head.stdout.trim()}.`);
+				}
 			}
 
 			if (issues.length === 0) {
-				ctx.ui.notify("analyzer-health.md score math and HEAD metadata look current.", "info");
+				ctx.ui.notify("analyzer-health.md score math and audited-base metadata look valid.", "info");
 				return;
 			}
 
@@ -297,12 +300,12 @@ Workflow requirements:
 4. Run targeted verification first, then the requested release-grade verification path when feasible: \`${options.verification}\`. Also run formatting/diff checks before PR/merge.
 5. Update \`analyzer-health.md\` only with evidence-backed changelog, baseline, score, and shortlist changes. Do not raise Test Depth, Fix Safety, or Release Readiness without passing verifier evidence.
 6. Commit with a focused message. ${prPolicy}
-7. Perform a self-review before merge: inspect \`git diff\`, check for missing tests/docs, scan failure modes, and ensure analyzer-health score math validates.
+7. Perform a self-review before merge: inspect \`git diff\`, check for missing tests/docs, scan failure modes, and ensure analyzer-health score math validates. Treat \`Base audited commit\` as the audited starting point for the current delta (it must be an ancestor of HEAD; do not try to embed the current commit's self-hash in the file).
 8. ${mergePolicy}
 9. ${releaseStep}
 10. Finish with a concise handoff: PR URL, merge commit, tag/release URL if created, commands run, and any follow-up items.
 
-Use safe GitHub CLI commands (\`gh pr create\`, \`gh pr checks\`, \`gh pr review --comment\` or a self-review comment, \`gh pr merge\`, \`gh release create\`) and stop on any failed command or dirty unexpected state.`;
+Use safe GitHub CLI commands (\`gh pr create\`, \`gh pr checks --watch\`, \`gh pr review --comment\` or a self-review comment, \`gh pr merge\`, \`gh release create\`) and stop on any failed command, dirty unexpected state, or failed PR check. Write PR/review/release bodies through a temporary markdown file or single-quoted heredoc so markdown backticks and shell metacharacters are not executed by the shell.`;
 }
 
 function extractSection(text: string, heading: string): string {
@@ -529,7 +532,9 @@ function recommendActions(
 ): string[] {
 	const actions: string[] = [];
 	if (health.baseCommit && head && health.baseCommit !== head) {
-		actions.push(`Update Base audited commit from ${health.baseCommit} to ${head} if this audit becomes the new baseline.`);
+		actions.push(
+			`Base audited commit ${health.baseCommit} differs from HEAD ${head}; keep it only if it is the audited starting point for the current delta, or update it before committing a metadata-only baseline refresh. Do not try to amend a commit solely to embed its own hash.`,
+		);
 	}
 	if (health.scoreIssues.length > 0) actions.push("Fix weighted score math before committing analyzer-health.md.");
 	if (changedFiles.length > 0) actions.push("Add an Improvement Changelog row summarizing the audited delta since the prior base.");

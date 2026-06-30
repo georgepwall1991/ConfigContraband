@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.5.2 - 2026-06-30
+
+- Added focused regression coverage and documentation for the already-supported `GetRequiredSection(...)` binding shape: `CFG006` unknown-key Info diagnostics now explicitly cover `OptionsBuilder<T>.Bind(configuration.GetRequiredSection("Section"))` and direct `Configure<T>(configuration.GetRequiredSection("Section"))`, and schema registration extraction now explicitly covers `OptionsBuilder<T>.Bind(GetRequiredSection(...))`. Diagnostic IDs, severities, and static inference boundaries are unchanged.
+
 ## 0.5.1 - 2026-06-10
 
 - Hardened `CFG002` so `[Required]` properties whose compile-time default already satisfies
