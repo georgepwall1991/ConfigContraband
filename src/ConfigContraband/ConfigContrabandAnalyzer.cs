@@ -2454,6 +2454,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         sectionExpression = null!;
         sectionExpressionContainsFullPath = false;
 
+        expression = UnwrapForSectionChainResolution(expression);
+
         if (expression is not InvocationExpressionSyntax invocation ||
             invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
             invocation.ArgumentList.Arguments.Count == 0 ||
@@ -2481,7 +2483,21 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return true;
         }
 
-        if (!IsConfigurationType(semanticModel.GetTypeInfo(memberAccess.Expression).Type))
+        var receiverType = semanticModel.GetTypeInfo(memberAccess.Expression).Type;
+        if (IsConfigurationSectionType(receiverType))
+        {
+            // The receiver is itself a stored/received IConfigurationSection (a local,
+            // parameter, or other expression typed as a section rather than the
+            // configuration root). Its own section path isn't a constant we can see
+            // here, so treating the chained literal as a root-anchored path would
+            // both false-positive (the key may exist under the real nested path) and
+            // false-negative (a typo could be checked against the wrong namespace).
+            // Stay quiet, matching the existing "ignore a directly-passed stored
+            // IConfigurationSection" behavior.
+            return false;
+        }
+
+        if (!IsConfigurationType(receiverType))
         {
             return false;
         }
@@ -2492,10 +2508,56 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         return true;
     }
 
+    private static ExpressionSyntax UnwrapForSectionChainResolution(ExpressionSyntax expression)
+    {
+        while (true)
+        {
+            if (expression is ParenthesizedExpressionSyntax parenthesized)
+            {
+                expression = parenthesized.Expression;
+                continue;
+            }
+
+            if (expression is PostfixUnaryExpressionSyntax { RawKind: (int)SyntaxKind.SuppressNullableWarningExpression } suppressed)
+            {
+                expression = suppressed.Operand;
+                continue;
+            }
+
+            return expression;
+        }
+    }
+
     private static bool IsConfigurationSectionMethodName(string methodName)
     {
         return string.Equals(methodName, "GetSection", StringComparison.Ordinal) ||
                string.Equals(methodName, "GetRequiredSection", StringComparison.Ordinal);
+    }
+
+    private static bool IsConfigurationSectionType(ITypeSymbol? type)
+    {
+        if (type is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(GetNonNullableDisplayString(type), "Microsoft.Extensions.Configuration.IConfigurationSection", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (type is INamedTypeSymbol namedType)
+        {
+            foreach (var iface in namedType.AllInterfaces)
+            {
+                if (string.Equals(GetNonNullableDisplayString(iface), "Microsoft.Extensions.Configuration.IConfigurationSection", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool IsConfigurationType(ITypeSymbol? type)
@@ -2505,7 +2567,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        if (string.Equals(type.ToDisplayString(), "Microsoft.Extensions.Configuration.IConfiguration", StringComparison.Ordinal))
+        if (string.Equals(GetNonNullableDisplayString(type), "Microsoft.Extensions.Configuration.IConfiguration", StringComparison.Ordinal))
         {
             return true;
         }
@@ -2514,7 +2576,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             foreach (var iface in namedType.AllInterfaces)
             {
-                if (string.Equals(iface.ToDisplayString(), "Microsoft.Extensions.Configuration.IConfiguration", StringComparison.Ordinal))
+                if (string.Equals(GetNonNullableDisplayString(iface), "Microsoft.Extensions.Configuration.IConfiguration", StringComparison.Ordinal))
                 {
                     return true;
                 }
@@ -2522,6 +2584,17 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         }
 
         return false;
+    }
+
+    private static string GetNonNullableDisplayString(ITypeSymbol type)
+    {
+        // ToDisplayString() appends a "?" for a nullable-annotated reference type
+        // (e.g. "IConfigurationSection?"), which would otherwise break an exact
+        // fully-qualified-name comparison for a nullable-annotated receiver.
+        var normalized = type.NullableAnnotation == NullableAnnotation.None
+            ? type
+            : type.WithNullableAnnotation(NullableAnnotation.NotAnnotated);
+        return normalized.ToDisplayString();
     }
 
     private static bool IsOptionsConfigurationConfigureMethod(IMethodSymbol method)
