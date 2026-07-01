@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.5.5 - 2026-07-01
+
+- Fixed a shared `CFG004`/`CFG005` precision gap: a type-level (class) `ValidationAttribute` declared only on a base options class (or, for `CFG005`, on a nested type's base class) is now detected, because both rules' shared `ContainsValidationAttributes` helper now reuses the same inheritance-aware `HasTypeLevelValidationInChain` helper `CFG002`'s required-key proof already relies on for this shape. Previously only attributes declared directly on the exact registered/nested type were seen, missing a real validation constraint the runtime validator evaluates by default (`AttributeUsageAttribute.Inherited` defaults to `true`). Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.
+
 ## 0.5.4 - 2026-07-01
 
 - Added regression coverage proving `CFG002` already stays quiet for `[Required]` non-array collection/dictionary properties default-initialized via explicit or target-typed object-creation (`= new List<T>()`, `= new()`). This was shipped, correct behavior that had no test pinning it. No analyzer, code-fix, or diagnostic behavior changed.
