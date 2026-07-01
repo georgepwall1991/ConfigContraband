@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.4</Version>
+    <Version>0.5.5</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Added regression coverage proving CFG002 already stays quiet for [Required] non-array collection/dictionary properties default-initialized via explicit or target-typed object-creation (= new List&lt;T&gt;(), = new()). No analyzer, code-fix, or diagnostic behavior changed.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed a shared CFG004/CFG005 precision gap: a type-level (class) ValidationAttribute declared only on a base options class (or a nested type's base class for CFG005) is now detected, since both rules reuse the same inheritance-aware helper CFG002 already relies on for this shape. Previously only attributes declared directly on the exact type were seen. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
