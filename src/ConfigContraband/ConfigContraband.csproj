@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.3</Version>
+    <Version>0.5.4</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed a CFG001 precision gap: chaining a further GetSection(...) call off a stored/received IConfigurationSection (a local variable, parameter, or other section-typed expression, including a nullable-annotated IConfigurationSection?) is now ignored instead of being checked against the root configuration namespace, which previously could both false-positive and false-negative. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Added regression coverage proving CFG002 already stays quiet for [Required] non-array collection/dictionary properties default-initialized via explicit or target-typed object-creation (= new List&lt;T&gt;(), = new()). No analyzer, code-fix, or diagnostic behavior changed.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
