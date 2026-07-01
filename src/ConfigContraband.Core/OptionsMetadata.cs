@@ -1600,12 +1600,11 @@ internal sealed class OptionsTypeMetadata
             return false;
         }
 
-        if (ImplementsInterface(namedType, "System.ComponentModel.DataAnnotations.IValidatableObject"))
-        {
-            return true;
-        }
-
-        if (HasValidationAttribute(namedType))
+        // Reuse the inheritance-aware chain walk CFG002 relies on for the same shape: a
+        // type-level ValidationAttribute declared only on a base class is still evaluated by
+        // Validator.TryValidateObject (AttributeUsageAttribute.Inherited defaults to true),
+        // so checking only the exact type's own attributes would miss it.
+        if (HasTypeLevelValidationInChain(namedType))
         {
             return true;
         }

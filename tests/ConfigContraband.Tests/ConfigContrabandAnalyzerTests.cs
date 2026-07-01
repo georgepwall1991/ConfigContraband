@@ -4372,6 +4372,44 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_reports_type_level_validation_attribute_declared_on_base_type_without_validate_data_annotations()
+    {
+        // Validator.TryValidateObject evaluates inherited class-level attributes by default
+        // (AttributeUsageAttribute.Inherited defaults to true), so a type-level attribute
+        // declared only on a base class still needs ValidateDataAnnotations() enabled.
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateOnStart()|};
+            """, extraUsings: "using System;\n", optionsTypes: """
+            [AttributeUsage(AttributeTargets.Class)]
+            public sealed class ValidStripeOptionsAttribute : ValidationAttribute
+            {
+                protected override ValidationResult IsValid(object value, ValidationContext validationContext)
+                {
+                    return ValidationResult.Success!;
+                }
+            }
+
+            [ValidStripeOptions]
+            public class StripeOptionsBase
+            {
+            }
+
+            public sealed class StripeOptions : StripeOptionsBase
+            {
+                public string ApiKey { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg004_reports_nested_data_annotations_without_validate_data_annotations()
     {
         var source = OptionsSource("""
@@ -5181,6 +5219,51 @@ public sealed class ConfigContrabandAnalyzerTests
 
             [ValidDatabaseOptions]
             public sealed class DatabaseOptions
+            {
+                public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_reports_nested_type_level_validation_attribute_declared_on_base_type_without_recursive_validation()
+    {
+        // Same inheritance boundary as CFG004: a type-level attribute declared only on a
+        // nested object's base class is still evaluated by Validator.TryValidateObject and
+        // must be reachable through recursive validation.
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, extraUsings: "using System;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions {|#1:Database|} { get; set; } = new();
+            }
+
+            [AttributeUsage(AttributeTargets.Class)]
+            public sealed class ValidDatabaseOptionsAttribute : ValidationAttribute
+            {
+                protected override ValidationResult IsValid(object value, ValidationContext validationContext)
+                {
+                    return ValidationResult.Success!;
+                }
+            }
+
+            [ValidDatabaseOptions]
+            public class DatabaseOptionsBase
+            {
+            }
+
+            public sealed class DatabaseOptions : DatabaseOptionsBase
             {
                 public string ConnectionString { get; set; } = "";
             }
