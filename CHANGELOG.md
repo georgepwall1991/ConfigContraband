@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.5.4 - 2026-07-01
+
+- Added regression coverage proving `CFG002` already stays quiet for `[Required]` non-array collection/dictionary properties default-initialized via explicit or target-typed object-creation (`= new List<T>()`, `= new()`). This was shipped, correct behavior that had no test pinning it. No analyzer, code-fix, or diagnostic behavior changed.
+
 ## 0.5.3 - 2026-07-01
 
 - Fixed a `CFG001` precision gap found by evidence-based audit: chaining a further `GetSection(...)` call off a stored/received `IConfigurationSection` (for example `var section = configuration.GetSection("Features"); ...Bind(section.GetSection("Stripe"))`), including through a nullable-annotated `IConfigurationSection?` parameter or return value, is now ignored instead of being checked against the root configuration namespace. Previously the analyzer treated the chained literal as a brand-new top-level path, which could both false-positive (warn on a key that exists under the real nested path) and false-negative (miss a typo checked against the wrong namespace). Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.

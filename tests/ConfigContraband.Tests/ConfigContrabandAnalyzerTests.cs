@@ -2318,6 +2318,68 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg002_stays_quiet_for_required_collection_property_with_explicit_object_creation_default()
+    {
+        // A non-array collection default-initialized via explicit object-creation syntax is a
+        // non-null value RequiredAttribute accepts, same as any other object-creation default.
+        var source = OptionsSource(
+            registration: """
+                services.AddOptions<RequiredDefaultOptions>()
+                    .BindConfiguration("Required")
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+                """,
+            extraUsings: "using System.Collections.Generic;\n",
+            optionsTypes: """
+                public sealed class RequiredDefaultOptions
+                {
+                    [Required]
+                    public List<string> Items { get; set; } = new List<string>();
+                }
+                """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Required": {
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg002_stays_quiet_for_required_dictionary_property_with_target_typed_new_default()
+    {
+        // Target-typed new() constructs the declared dictionary type itself, which is a
+        // non-null value RequiredAttribute accepts, same as any other object-creation default.
+        var source = OptionsSource(
+            registration: """
+                services.AddOptions<RequiredDefaultOptions>()
+                    .BindConfiguration("Required")
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+                """,
+            extraUsings: "using System.Collections.Generic;\n",
+            optionsTypes: """
+                public sealed class RequiredDefaultOptions
+                {
+                    [Required]
+                    public Dictionary<string, string> Items { get; set; } = new();
+                }
+                """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Required": {
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg002_reports_constructor_bound_required_when_constructor_calls_helper_after_assignment()
     {
         // The helper can mutate the property after the parameter assignment, so the
