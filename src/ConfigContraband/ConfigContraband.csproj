@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.9</Version>
+    <Version>0.5.10</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed a shared CFG003/CFG004 precision gap found by evidence-based audit: the forward same-block split-statement local-chain scanner stopped at the first unrelated statement, so a genuine ValidateOnStart() (CFG003) or ValidateDataAnnotations() (CFG004) called on a local OptionsBuilder&lt;T&gt; after an intervening unrelated statement was never collected, producing a false positive even though the validation is genuinely registered at runtime. The scan now skips inert intervening statements (an unrelated call/assignment or a local declaration) while still stopping at a reassignment of the tracked builder local and at control flow (if/return/throw/loops) that could keep the later validation call from running. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed a CFG001 unsafe code fix found by evidence-based audit: when the reported section literal was a chained non-root GetSection(...) argument that itself contained a colon (e.g. .GetSection("Features").GetSection("Sub:Strpie")), the fix substituted only the corrected leaf for the whole multi-segment literal, silently dropping the "Sub:" segment and producing a still-broken binding that contradicted the fix's own label. The fix now rewrites only the anchored literal's leaf and preserves any leading colon segments, and is suppressed (diagnostic and suggestion message still shown) when the anchored expression is not a plain string literal whose segments can be reproduced safely. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

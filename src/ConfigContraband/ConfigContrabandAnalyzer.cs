@@ -242,12 +242,22 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         var properties = ImmutableDictionary<string, string?>.Empty;
         if (suggestedSectionPath is not null)
         {
+            // The offered fix overwrites the whole anchored section-expression literal, so
+            // the replacement text must reproduce that literal's own value with only its
+            // leaf corrected. When the section literal is the full path we can substitute
+            // the full corrected path; when it is a chained non-root literal we must
+            // preserve any leading segments the literal itself carries (for example the
+            // "Sub:" in `.GetSection("Features").GetSection("Sub:Strpie")`), otherwise the
+            // fix would silently drop them and produce a still-broken binding.
             var suggestedReplacement = registration.SectionExpressionContainsFullPath
                 ? suggestedSectionPath
-                : suggestion;
-            properties = properties
-                .Add(SuggestedSectionPropertyName, suggestedSectionPath)
-                .Add(SuggestedSectionReplacementPropertyName, suggestedReplacement);
+                : TryBuildChainedLeafReplacement(registration.SectionExpression, suggestion);
+            if (suggestedReplacement is not null)
+            {
+                properties = properties
+                    .Add(SuggestedSectionPropertyName, suggestedSectionPath)
+                    .Add(SuggestedSectionReplacementPropertyName, suggestedReplacement);
+            }
         }
 
         reportDiagnostic(Diagnostic.Create(
@@ -264,6 +274,24 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         return separatorIndex < 0
             ? replacement
             : sectionPath.Substring(0, separatorIndex + 1) + replacement;
+    }
+
+    /// <summary>
+    /// Builds the replacement text for a chained non-root section literal, preserving any
+    /// leading colon-delimited segments the literal itself carries and correcting only its
+    /// leaf. Returns <c>null</c> when the anchored expression is not a plain string literal
+    /// whose leading segments can be reproduced safely, so the caller suppresses the fix
+    /// rather than risk dropping a segment.
+    /// </summary>
+    private static string? TryBuildChainedLeafReplacement(ExpressionSyntax sectionExpression, string suggestion)
+    {
+        if (sectionExpression is LiteralExpressionSyntax literal &&
+            literal.IsKind(SyntaxKind.StringLiteralExpression))
+        {
+            return ReplaceSectionLeaf(literal.Token.ValueText, suggestion);
+        }
+
+        return null;
     }
 
     private static void AnalyzeUnknownKeys(
