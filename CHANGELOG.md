@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.5.7 - 2026-07-06
+
+- Fixed a `CFG007` precision gap found by evidence-based audit: a tuple-deconstruction assignment to `ErrorOnUnknownConfiguration` (for example `(options.ErrorOnUnknownConfiguration, options.BindNonPublicProperties) = (true, false);`) was invisible to the strict-binding escape-analysis proof, so strict binding that was genuinely enabled at runtime silently fell back to the softer `CFG006` Info diagnostic instead of the `CFG007` Warning. Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.
+
 ## 0.5.6 - 2026-07-06
 
 - Fixed a `CFG001` precision gap found by evidence-based audit: conditional access (`?.`) anywhere in a `GetSection(...)`/`GetRequiredSection(...)` chain — a non-chained call such as `configuration?.GetSection("Strpie")`, `?.` immediately after the root, or `?.` before a further chained call off a genuine root configuration chain — was not unwrapped by the section-path resolver, so the analyzer silently skipped the section-existence check for that registration entirely instead of checking it. Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.
