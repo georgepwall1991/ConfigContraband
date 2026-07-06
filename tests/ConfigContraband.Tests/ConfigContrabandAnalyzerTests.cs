@@ -2212,6 +2212,67 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg002_stays_quiet_for_primary_constructor_bound_required_with_satisfying_default()
+    {
+        var source = OptionsSource(
+            registration: """
+                services.AddOptions<RequiredDefaultOptions>()
+                    .BindConfiguration("Required")
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+                """,
+            optionsTypes: """
+                public sealed class RequiredDefaultOptions(string apiKey = "sk_default")
+                {
+                    [Required]
+                    public string ApiKey { get; set; } = apiKey;
+                }
+                """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Required": {
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg002_reports_primary_constructor_bound_required_with_non_satisfying_default()
+    {
+        var source = OptionsSource(
+            registration: """
+                services.AddOptions<RequiredDefaultOptions>()
+                    .BindConfiguration({|#0:"Required"|})
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+                """,
+            optionsTypes: """
+                public sealed class RequiredDefaultOptions(string? apiKey = null)
+                {
+                    [Required]
+                    public string? ApiKey { get; set; } = apiKey;
+                }
+                """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithLocation(0)
+            .WithArguments("ApiKey", "Required");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Required": {
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg002_stays_quiet_for_required_nullable_value_with_populated_new_initializer()
     {
         var source = OptionsSource(

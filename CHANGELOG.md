@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.5.8 - 2026-07-06
+
+- Fixed a `CFG002` precision gap found by evidence-based audit: a primary-constructor (C# 12) parameter default flowing into a property initializer (e.g. `public sealed class Options(string apiKey = "sk_default") { [Required] public string ApiKey { get; set; } = apiKey; }`) was not recognized as a satisfying default, producing a false positive even though the runtime default provably satisfies `RequiredAttribute`. Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.
+
 ## 0.5.7 - 2026-07-06
 
 - Fixed a `CFG007` precision gap found by evidence-based audit: a tuple-deconstruction assignment to `ErrorOnUnknownConfiguration` (for example `(options.ErrorOnUnknownConfiguration, options.BindNonPublicProperties) = (true, false);`) was invisible to the strict-binding escape-analysis proof, so strict binding that was genuinely enabled at runtime silently fell back to the softer `CFG006` Info diagnostic instead of the `CFG007` Warning. Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.
