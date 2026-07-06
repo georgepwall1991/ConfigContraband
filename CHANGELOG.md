@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.5.9 - 2026-07-06
+
+- Fixed a shared `CFG003`/`CFG004` precision gap found by evidence-based audit: the forward same-block split-statement local-chain scanner stopped at the first unrelated statement, so a genuine `ValidateOnStart()` (`CFG003`) or `ValidateDataAnnotations()` (`CFG004`) called on a local `OptionsBuilder<T>` *after* an intervening unrelated statement (for example `var b = services.AddOptions<T>().BindConfiguration("Section"); services.AddSingleton<X>(); b.ValidateOnStart();`) was never collected, producing a false positive even though the validation is genuinely registered and effective at runtime. The scan now skips *inert* intervening statements (an unrelated call/assignment or a local declaration) while still stopping at a reassignment of the tracked builder local — so a later call on a different builder bound to the same variable is not mis-attributed — and at control flow (`if`/`return`/`throw`/loops) that could keep the later validation call from running on every path. The rarer backward mirror (a validation call placed *before* the bind, separated by an unrelated statement) remains a documented, deliberately-deferred gap. Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.
+
 ## 0.5.8 - 2026-07-06
 
 - Fixed a `CFG002` precision gap found by evidence-based audit: a primary-constructor (C# 12) parameter default flowing into a property initializer (e.g. `public sealed class Options(string apiKey = "sk_default") { [Required] public string ApiKey { get; set; } = apiKey; }`) was not recognized as a satisfying default, producing a false positive even though the runtime default provably satisfies `RequiredAttribute`. Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.

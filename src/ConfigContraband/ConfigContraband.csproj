@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.8</Version>
+    <Version>0.5.9</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed a CFG002 precision gap found by evidence-based audit: a primary-constructor (C# 12) parameter default flowing into a property initializer (e.g. public sealed class Options(string apiKey = "sk_default") { [Required] public string ApiKey { get; set; } = apiKey; }) was not recognized as a satisfying default, producing a false positive even though the runtime default provably satisfies RequiredAttribute. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed a shared CFG003/CFG004 precision gap found by evidence-based audit: the forward same-block split-statement local-chain scanner stopped at the first unrelated statement, so a genuine ValidateOnStart() (CFG003) or ValidateDataAnnotations() (CFG004) called on a local OptionsBuilder&lt;T&gt; after an intervening unrelated statement was never collected, producing a false positive even though the validation is genuinely registered at runtime. The scan now skips inert intervening statements (an unrelated call/assignment or a local declaration) while still stopping at a reassignment of the tracked builder local and at control flow (if/return/throw/loops) that could keep the later validation call from running. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

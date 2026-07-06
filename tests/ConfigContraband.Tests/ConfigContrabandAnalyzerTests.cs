@@ -4940,6 +4940,125 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_does_not_report_when_validate_on_start_follows_unrelated_statement()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe");
+            optionsBuilder.ValidateDataAnnotations();
+            services.AddSingleton<Startup>();
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_when_builder_local_reassigned_before_validate_on_start()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            optionsBuilder.ValidateDataAnnotations();
+            optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_when_builder_local_retargeted_by_deconstruction_before_validate_on_start()
+    {
+        // The builder is retargeted through a tuple-deconstruction assignment before
+        // ValidateOnStart(), so the later call applies to a different builder. The scan
+        // must recognize the local as a deconstruction target and stop, not treat the
+        // statement as inert.
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            optionsBuilder.ValidateDataAnnotations();
+            (optionsBuilder, _) = (services.AddOptions<StripeOptions>(), 0);
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_does_not_report_when_deferred_lambda_reassigns_builder_after_validate_on_start()
+    {
+        // The only reassignment of the builder lives inside a deferred lambda that is
+        // not invoked until after ValidateOnStart(), so the builder is not retargeted at
+        // the validation point. The retarget scan must not descend into the lambda body,
+        // otherwise it would treat the deferred assignment as immediate and false-fire.
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe");
+            optionsBuilder.ValidateDataAnnotations();
+            System.Action reset = () => optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.ValidateOnStart();
+            reset();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_when_builder_local_passed_by_ref_before_validate_on_start()
+    {
+        // Passing the builder local by ref lets the callee repoint it, so a later
+        // ValidateOnStart() may apply to a different builder. The forward scan must stop
+        // at the ref call rather than treat it as an inert intervening statement.
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            optionsBuilder.ValidateDataAnnotations();
+            Reset(ref optionsBuilder);
+            optionsBuilder.ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", extraMembers: """
+            private static void Reset(ref OptionsBuilder<StripeOptions> optionsBuilder)
+            {
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_when_validate_on_start_is_behind_conditional_return()
+    {
+        // ValidateOnStart() sits behind a conditional early return, so it does not run
+        // on every path. The forward split-local scan must stop at control flow rather
+        // than skip it, otherwise a genuine missing-startup-validation case is hidden.
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            optionsBuilder.ValidateDataAnnotations();
+            if (services is null) return;
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_and_cfg004_honor_split_local_registration_chain()
     {
         var source = OptionsSource("""
@@ -4998,11 +5117,16 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
-    public async Task Cfg004_stops_later_local_bind_statement_scan_at_unrelated_statement()
+    public async Task Cfg004_honors_later_local_bind_statement_validation_after_unrelated_statement()
     {
+        // ValidateDataAnnotations() is genuinely called on the same builder after an
+        // unrelated statement, so DataAnnotations validation is enabled at runtime and
+        // CFG004 must stay quiet. The forward split-local scan (shared with CFG003) now
+        // skips the intervening statement instead of stopping and reporting a false
+        // positive.
         var source = OptionsSource("""
             var optionsBuilder = services.AddOptions<StripeOptions>();
-            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            optionsBuilder.BindConfiguration("Stripe");
             Validate(optionsBuilder);
             optionsBuilder.ValidateDataAnnotations();
             optionsBuilder.ValidateOnStart();
@@ -5012,11 +5136,7 @@ public sealed class ConfigContrabandAnalyzerTests
             }
             """);
 
-        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
-            .WithLocation(0)
-            .WithArguments("StripeOptions");
-
-        await Verifier.VerifyAnalyzerAsync(source, expected);
+        await Verifier.VerifyAnalyzerAsync(source);
     }
 
     [Fact]

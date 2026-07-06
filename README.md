@@ -102,7 +102,7 @@ optionsBuilder.ValidateDataAnnotations();
 optionsBuilder.ValidateOnStart();
 ```
 
-Adjacent validation calls on that same local builder may appear in the builder initializer, before the bind statement, or after it. The scan stops at unrelated statements instead of guessing across wider control flow.
+Validation calls on that same local builder may appear in the builder initializer, before the bind statement, or after it. Looking forward from the bind, the scan skips *inert* intervening statements — an unrelated call or assignment (for example an interleaved `services.AddSingleton<T>()`) or a local declaration — so a later `ValidateOnStart()` is still recognized. It stops at anything that could keep the later call from running on every path (control flow such as `if`/`return`/`throw`/loops) or that reassigns the builder variable. It does not guess across wider control flow, aliases, or non-local storage.
 
 When the analyzer cannot prove a configuration shape statically, it stays quiet. The goal is high-signal feedback, not noisy guesses.
 
