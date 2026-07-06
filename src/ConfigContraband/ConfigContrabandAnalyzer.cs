@@ -2260,32 +2260,18 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         HashSet<ILocalSymbol> binderOptionsAliases,
         bool parameterStillTargetsRuntimeOptions)
     {
-        switch (expression)
+        // An inline lambda or anonymous method (all derive from
+        // AnonymousFunctionExpressionSyntax, which exposes both the expression body and the
+        // statement block) whose body references the runtime binder options.
+        if (expression is AnonymousFunctionExpressionSyntax anonymousFunction)
         {
-            case SimpleLambdaExpressionSyntax simpleLambda:
-                return AnonymousFunctionReferencesRuntimeBinderOptions(
-                    simpleLambda.ExpressionBody,
-                    simpleLambda.Block,
-                    semanticModel,
-                    binderOptionsParameter,
-                    binderOptionsAliases,
-                    parameterStillTargetsRuntimeOptions);
-            case ParenthesizedLambdaExpressionSyntax parenthesizedLambda:
-                return AnonymousFunctionReferencesRuntimeBinderOptions(
-                    parenthesizedLambda.ExpressionBody,
-                    parenthesizedLambda.Block,
-                    semanticModel,
-                    binderOptionsParameter,
-                    binderOptionsAliases,
-                    parameterStillTargetsRuntimeOptions);
-            case AnonymousMethodExpressionSyntax anonymousMethod:
-                return anonymousMethod.Block is not null &&
-                    ContainsRuntimeBinderOptionsReference(
-                        anonymousMethod.Block,
-                        semanticModel,
-                        binderOptionsParameter,
-                        binderOptionsAliases,
-                        parameterStillTargetsRuntimeOptions);
+            return AnonymousFunctionReferencesRuntimeBinderOptions(
+                anonymousFunction.ExpressionBody,
+                anonymousFunction.Block,
+                semanticModel,
+                binderOptionsParameter,
+                binderOptionsAliases,
+                parameterStillTargetsRuntimeOptions);
         }
 
         return semanticModel.GetSymbolInfo(expression).Symbol is ILocalSymbol { Type.TypeKind: TypeKind.Delegate } local &&
