@@ -1791,8 +1791,12 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
     {
         value = null;
         if (expression is not AssignmentExpressionSyntax assignment ||
-            !assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) ||
-            !IsBinderOptionsBooleanAssignmentTarget(
+            !assignment.IsKind(SyntaxKind.SimpleAssignmentExpression))
+        {
+            return false;
+        }
+
+        if (IsBinderOptionsBooleanAssignmentTarget(
                 assignment.Left,
                 semanticModel,
                 binderOptionsParameter,
@@ -1800,17 +1804,177 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 parameterStillTargetsRuntimeOptions,
                 propertyName))
         {
+            var constant = semanticModel.GetConstantValue(assignment.Right);
+            if (constant.HasValue &&
+                constant.Value is bool enabled)
+            {
+                value = enabled;
+            }
+
+            return true;
+        }
+
+        return TryGetTupleBinderOptionsBooleanAssignment(
+            assignment.Left,
+            assignment.Right,
+            semanticModel,
+            binderOptionsParameter,
+            binderOptionsAliases,
+            parameterStillTargetsRuntimeOptions,
+            propertyName,
+            out value);
+    }
+
+    /// <summary>
+    /// Handles a tuple-deconstruction assignment such as
+    /// <c>(options.ErrorOnUnknownConfiguration, options.BindNonPublicProperties) = (true, false);</c>,
+    /// whose top-level <see cref="AssignmentExpressionSyntax"/> has a <see cref="TupleExpressionSyntax"/>
+    /// on both sides rather than a direct member-access target. Matches each left-side element against
+    /// <paramref name="propertyName"/> and, when found, reads the correspondingly-positioned right-side
+    /// element's constant value.
+    /// </summary>
+    private static bool TryGetTupleBinderOptionsBooleanAssignment(
+        ExpressionSyntax left,
+        ExpressionSyntax right,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol>? binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions,
+        string propertyName,
+        out bool? value)
+    {
+        value = null;
+        if (left is not TupleExpressionSyntax leftTuple ||
+            right is not TupleExpressionSyntax rightTuple ||
+            leftTuple.Arguments.Count != rightTuple.Arguments.Count)
+        {
             return false;
         }
 
-        var constant = semanticModel.GetConstantValue(assignment.Right);
-        if (constant.HasValue &&
-            constant.Value is bool enabled)
+        var found = false;
+        for (var i = 0; i < leftTuple.Arguments.Count; i++)
         {
-            value = enabled;
+            var leftElement = leftTuple.Arguments[i].Expression;
+            var rightElement = rightTuple.Arguments[i].Expression;
+
+            if (IsBinderOptionsBooleanAssignmentTarget(
+                    leftElement,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions,
+                    propertyName))
+            {
+                found = true;
+                var constant = semanticModel.GetConstantValue(rightElement);
+                value = constant.HasValue && constant.Value is bool enabled ? enabled : null;
+                continue;
+            }
+
+            // A tuple element can itself be a nested tuple deconstruction
+            // (e.g. `((options.ErrorOnUnknownConfiguration, _), y) = ((true, 0), 0);`).
+            if (TryGetTupleBinderOptionsBooleanAssignment(
+                    leftElement,
+                    rightElement,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions,
+                    propertyName,
+                    out var nestedValue))
+            {
+                found = true;
+                value = nestedValue;
+            }
         }
 
-        return true;
+        // A sibling tuple element can alias the runtime BinderOptions object itself
+        // (e.g. `(options.ErrorOnUnknownConfiguration, alias) = (true, options);`). The
+        // caller treats this whole statement as handled once the target property is
+        // found, so a would-be alias created this way is never added to
+        // binderOptionsAliases and a later reset through it would go unseen. Stay
+        // conservative rather than trust the constant when that risk is present.
+        if (found &&
+            TupleCreatesUntrackedBinderOptionsAlias(
+                leftTuple,
+                rightTuple,
+                semanticModel,
+                binderOptionsParameter,
+                binderOptionsAliases,
+                parameterStillTargetsRuntimeOptions))
+        {
+            value = null;
+        }
+
+        return found;
+    }
+
+    private static bool TupleCreatesUntrackedBinderOptionsAlias(
+        TupleExpressionSyntax leftTuple,
+        TupleExpressionSyntax rightTuple,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol>? binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions)
+    {
+        // Beyond a bare sibling reference (checked per-element below), a sibling element's
+        // right-hand side can pass the runtime BinderOptions into a helper call, or assign
+        // it to a non-local (field/property), the same broader escape shapes
+        // ContainsRuntimeBinderOptionsEscape already recognizes for a plain assignment.
+        if (ContainsRuntimeBinderOptionsEscape(
+                rightTuple,
+                semanticModel,
+                binderOptionsParameter,
+                binderOptionsAliases ?? new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default),
+                parameterStillTargetsRuntimeOptions))
+        {
+            return true;
+        }
+
+        for (var i = 0; i < rightTuple.Arguments.Count; i++)
+        {
+            var leftElement = leftTuple.Arguments[i].Expression;
+            var rightElement = rightTuple.Arguments[i].Expression;
+
+            if (leftElement is TupleExpressionSyntax nestedLeft &&
+                rightElement is TupleExpressionSyntax nestedRight)
+            {
+                if (TupleCreatesUntrackedBinderOptionsAlias(
+                        nestedLeft,
+                        nestedRight,
+                        semanticModel,
+                        binderOptionsParameter,
+                        binderOptionsAliases,
+                        parameterStillTargetsRuntimeOptions))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            // Reassigning the binder-options parameter itself through a tuple element
+            // (e.g. `(options.ErrorOnUnknownConfiguration, options) = (true, new BinderOptions());`)
+            // means later writes through `options` in this statement no longer target the
+            // runtime BinderOptions, the same shape ContainsBinderOptionsParameterAssignment
+            // already tracks for a plain (non-tuple) assignment.
+            if (IsBinderOptionsParameterAssignmentTarget(leftElement, semanticModel, binderOptionsParameter))
+            {
+                return true;
+            }
+
+            if (IsRuntimeBinderOptionsReference(
+                    rightElement,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool ContainsBinderOptionsBooleanAssignment(
@@ -1827,6 +1991,55 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             if (IsBinderOptionsBooleanAssignmentTarget(
                     assignment.Left,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions,
+                    propertyName))
+            {
+                return true;
+            }
+
+            if (assignment.Left is TupleExpressionSyntax tuple &&
+                TupleContainsBinderOptionsBooleanAssignmentTarget(
+                    tuple,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions,
+                    propertyName))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TupleContainsBinderOptionsBooleanAssignmentTarget(
+        TupleExpressionSyntax tuple,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol> binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions,
+        string propertyName)
+    {
+        foreach (var argument in tuple.Arguments)
+        {
+            if (IsBinderOptionsBooleanAssignmentTarget(
+                    argument.Expression,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions,
+                    propertyName))
+            {
+                return true;
+            }
+
+            if (argument.Expression is TupleExpressionSyntax nested &&
+                TupleContainsBinderOptionsBooleanAssignmentTarget(
+                    nested,
                     semanticModel,
                     binderOptionsParameter,
                     binderOptionsAliases,
@@ -2314,7 +2527,36 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         IParameterSymbol binderOptionsParameter)
     {
         return statement is ExpressionStatementSyntax { Expression: AssignmentExpressionSyntax assignment } &&
-               IsBinderOptionsParameterAssignmentTarget(assignment.Left, semanticModel, binderOptionsParameter);
+               AssignmentTargetsBinderOptionsParameter(assignment.Left, semanticModel, binderOptionsParameter);
+    }
+
+    /// <summary>
+    /// True when <paramref name="left"/> reassigns the binder-options parameter itself, either
+    /// directly or as one element of a (possibly nested) tuple-deconstruction assignment (e.g.
+    /// <c>(options.ErrorOnUnknownConfiguration, options) = (true, new BinderOptions());</c>).
+    /// </summary>
+    private static bool AssignmentTargetsBinderOptionsParameter(
+        ExpressionSyntax left,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter)
+    {
+        if (IsBinderOptionsParameterAssignmentTarget(left, semanticModel, binderOptionsParameter))
+        {
+            return true;
+        }
+
+        if (left is TupleExpressionSyntax tuple)
+        {
+            foreach (var argument in tuple.Arguments)
+            {
+                if (AssignmentTargetsBinderOptionsParameter(argument.Expression, semanticModel, binderOptionsParameter))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool ContainsBinderOptionsParameterAssignment(
@@ -2326,7 +2568,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                      .DescendantNodes(ShouldDescendIntoBinderOptionsNode)
                      .OfType<AssignmentExpressionSyntax>())
         {
-            if (IsBinderOptionsParameterAssignmentTarget(assignment.Left, semanticModel, binderOptionsParameter))
+            if (AssignmentTargetsBinderOptionsParameter(assignment.Left, semanticModel, binderOptionsParameter))
             {
                 return true;
             }
