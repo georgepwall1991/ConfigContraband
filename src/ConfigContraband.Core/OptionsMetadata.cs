@@ -1493,6 +1493,21 @@ internal sealed class OptionsTypeMetadata
 
                 return DefaultValueSatisfiesRequired(constantValue.Value, allowEmptyStrings);
             }
+
+            // A property initializer can reference a primary-constructor parameter directly
+            // (e.g. `public string ApiKey { get; set; } = apiKey;` on a primary-constructor
+            // class). The parameter itself isn't a compile-time constant at the reference site,
+            // but its own explicit default value is, so judge that instead.
+            if (initializer is IdentifierNameSyntax identifier &&
+                semanticModel.GetSymbolInfo(identifier).Symbol is IParameterSymbol { HasExplicitDefaultValue: true } parameter)
+            {
+                if (Microsoft.CodeAnalysis.CSharp.CSharpExtensions.ClassifyConversion(semanticModel, initializer, propertyType).IsUserDefined)
+                {
+                    return false;
+                }
+
+                return DefaultValueSatisfiesRequired(parameter.ExplicitDefaultValue, allowEmptyStrings);
+            }
         }
 
         if (initializer is CastExpressionSyntax cast)
