@@ -127,7 +127,10 @@ internal sealed class OptionsTypeMetadata
     {
         // The missing-section recursion may only descend when the member's runtime default is
         // provably a non-null, unmutated instance of the declared type: validation skips null
-        // members, and unprovable defaults would make declared-type findings speculative.
+        // members, and unprovable defaults would make declared-type findings speculative. A
+        // non-nullable struct's implicit default(T) is treated as such an instance inside
+        // ClassifyRecursiveDefault, while a struct whose initializer/constructor sets members
+        // (e.g. new() { X = "ok" }) is classified Unprovable there and does not descend.
         return ClassifyEffectiveRecursiveDefault(TypeSymbol, property.Symbol, _compilation) == RecursiveDefaultKind.Modelled &&
                !TryGetCollectionElementType(property.Symbol.Type, out _);
     }
@@ -415,7 +418,13 @@ internal sealed class OptionsTypeMetadata
 
         if ((HasNonNullPropertyInitializer(property) ||
              HasNonNullConstructorAssignment(property, rootType, compilation)) &&
-            (IsPotentialNestedObject(property.Type) || IsMutableCollectionType(property.Type)))
+            // A get-only nested member is only bindable when the binder can mutate the
+            // existing instance in place. That holds for reference types (a class nested
+            // object, or a mutable collection), but not for a value-type struct: the binder
+            // binds a copy it cannot write back through the read-only property, so a get-only
+            // struct keeps its default and must not be treated as a bindable nested object.
+            ((IsPotentialNestedObject(property.Type) && property.Type.IsReferenceType) ||
+             IsMutableCollectionType(property.Type)))
         {
             return true;
         }
@@ -849,9 +858,14 @@ internal sealed class OptionsTypeMetadata
                 : RecursiveDefaultKind.Unprovable;
         }
 
-        // No initializer (and the caller has proven no constructor writes the member), so the
-        // runtime value stays null and validation skips it.
-        return RecursiveDefaultKind.None;
+        // No initializer (and the caller has proven no constructor writes the member). A
+        // non-nullable value type still has a non-null default(T) instance that DataAnnotations
+        // recursively validates — structs are sealed, so it is a clean, unmutated instance of
+        // the declared type — so classify it as Modelled. A reference type or Nullable<T> stays
+        // null by default, which validation skips.
+        return property.Type.IsValueType && !IsNullableValueType(property.Type)
+            ? RecursiveDefaultKind.Modelled
+            : RecursiveDefaultKind.None;
     }
 
     private static bool IsCleanDeclaredTypeCreation(
@@ -1691,7 +1705,11 @@ internal sealed class OptionsTypeMetadata
 
     internal static bool IsPotentialNestedObject(ITypeSymbol type)
     {
-        return type.TypeKind == TypeKind.Class &&
+        // The real ConfigurationBinder binds and recurses into struct- and record-struct-typed
+        // properties as well as classes. Primitive/BCL value types (int, DateTime, Guid,
+        // Nullable<T>, tuples, ...) live in System/System.* and enums are TypeKind.Enum, so
+        // both stay excluded by the guards below.
+        return (type.TypeKind == TypeKind.Class || type.TypeKind == TypeKind.Struct) &&
                type.SpecialType != SpecialType.System_String &&
                !IsSystemNamespace(type.ContainingNamespace);
     }

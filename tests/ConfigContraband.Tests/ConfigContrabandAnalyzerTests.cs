@@ -1762,6 +1762,102 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg002_reports_missing_key_in_default_struct_nested_object_even_if_section_missing()
+    {
+        // A struct nested property has a non-null default(T) at runtime even with no
+        // initializer, and [ValidateObjectMembers] recursively validates it, so a missing
+        // [Required] member throws at runtime. CFG002 must report it even when the nested
+        // section is absent — the missing-section recursion must treat a non-nullable struct
+        // default as a provably non-null instance.
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, """
+            using Microsoft.Extensions.Options;
+            public class AppOptions { [ValidateObjectMembers] public DatabaseOptions Database { get; set; } }
+            public struct DatabaseOptions { [Required] public string ConnectionString { get; set; } }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithSpan(12, 24, 12, 29)
+            .WithArguments("ConnectionString", "App:Database");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg002_stays_quiet_for_default_struct_nested_object_when_initializer_satisfies_required()
+    {
+        // The settable struct property's initializer sets the [Required] member, and the binder
+        // leaves that initializer intact when the section is absent, so runtime validation
+        // passes. CFG002 must not recurse as if the value were default(T): a member-setting
+        // initializer is classified unprovable, so the missing-section recursion is skipped.
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, """
+            using Microsoft.Extensions.Options;
+            public class AppOptions { [ValidateObjectMembers] public DatabaseOptions Database { get; set; } = new() { ConnectionString = "ok" }; }
+            public struct DatabaseOptions { [Required] public string ConnectionString { get; set; } }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg002_uses_configuration_key_name_for_missing_struct_nested_object_path()
+    {
+        // The nested struct property is renamed with [ConfigurationKeyName], and its section is
+        // absent. The reported missing-key path must use the configured key ("App:db"), not the
+        // CLR property name ("App:Database"), since the runtime binder keys the child by its
+        // configured name.
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, """
+            using Microsoft.Extensions.Options;
+            using Microsoft.Extensions.Configuration;
+            public class AppOptions { [ConfigurationKeyName("db")] [ValidateObjectMembers] public DatabaseOptions Database { get; set; } }
+            public struct DatabaseOptions { [Required] public string ConnectionString { get; set; } }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithSpan(13, 24, 13, 29)
+            .WithArguments("ConnectionString", "App:db");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg002_stays_quiet_for_required_string_with_satisfying_initializer()
     {
         var source = OptionsSource(
@@ -5308,6 +5404,38 @@ public sealed class ConfigContrabandAnalyzerTests
             {
                 [Required]
                 public string ConnectionString { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg005_reports_nested_struct_without_recursive_validation()
+    {
+        // The nested options property is a struct carrying a validation attribute. The
+        // runtime binder populates struct properties and the validator would validate them,
+        // so a missing recursive-validation attribute must be reported just as for a class.
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart()|};
+            """, optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions {|#1:Database|} { get; set; }
+            }
+
+            public struct DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; }
             }
             """);
 
@@ -12014,6 +12142,92 @@ public sealed class ConfigContrabandAnalyzerTests
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
             .WithSpan("appsettings.json", 4, 7, 4, 24)
             .WithArguments("App:Database:ConnetionString", "DatabaseOptions", ". Did you mean \"ConnectionString\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Database": {
+                  "ConnetionString": "Server=.;"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_reports_unknown_key_under_nested_struct_options_object()
+    {
+        // The nested options property is a struct. The real ConfigurationBinder binds and
+        // recurses into struct-typed properties, so an unknown key under it must be flagged
+        // just as it is under a class-typed nested object.
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions Database { get; set; }
+            }
+
+            public struct DatabaseOptions
+            {
+                public string ConnectionString { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 7, 4, 24)
+            .WithArguments("App:Database:ConnetionString", "DatabaseOptions", ". Did you mean \"ConnectionString\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Database": {
+                  "ConnetionString": "Server=.;"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_treats_get_only_struct_nested_object_as_non_bindable()
+    {
+        // A get-only struct property cannot be bound in place — the binder mutates a copy it
+        // cannot write back through the read-only property — so it is treated as non-bindable
+        // (the same as before struct nested objects were recognized at all). The analyzer must
+        // NOT recurse into it (no deep `App:Database:ConnetionString` typo report); the whole
+        // `App:Database` section is instead the unmatched key, since nothing binds it. This is
+        // the conservative outcome that avoids claiming a required member is satisfied when the
+        // runtime binder never populates the struct.
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, optionsTypes: """
+            public sealed class AppOptions
+            {
+                public DatabaseOptions Database { get; } = new();
+            }
+
+            public struct DatabaseOptions
+            {
+                public string ConnectionString { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 3, 5, 3, 15)
+            .WithArguments("App:Database", "AppOptions", ".");
 
         await Verifier.VerifyAnalyzerAsync(
             source,

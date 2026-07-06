@@ -438,8 +438,14 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             {
                 // Recurse into provably initialized objects even if the section is missing from
                 // config; null members are skipped by runtime validation and unprovable defaults
-                // would make declared-type findings speculative.
-                var subPath = sectionPath + ":" + property.Symbol.Name;
+                // would make declared-type findings speculative. Use the configured
+                // ([ConfigurationKeyName]) name for the reported child path, since the section is
+                // absent so there is no matched key to fall back on and the runtime binder keys
+                // the child by its configured name, not the CLR property name.
+                var childName = property.ConfigurationNames.Length > 0
+                    ? property.ConfigurationNames[0]
+                    : property.Symbol.Name;
+                var subPath = sectionPath + ":" + childName;
                 if (metadata.TryCreateNestedMetadata(property, out var nestedMetadata))
                 {
                     AnalyzeRequiredKeysAcrossSections(
