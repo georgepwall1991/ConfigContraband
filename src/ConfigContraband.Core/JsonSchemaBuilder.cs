@@ -145,7 +145,10 @@ internal static class JsonSchemaBuilder
                 .Add("items", BuildValueSchema(elementType, context, strict, validates, visited));
         }
 
-        if (OptionsTypeMetadata.IsPotentialNestedObject(type) && type is INamedTypeSymbol namedType)
+        // The analyzer recurses into struct-typed nested options (CFG005/CFG006), but the
+        // schema deliberately stays permissive for value types (an unknown struct may be
+        // TypeConverter-bound from a scalar), so only classes emit a nested object schema.
+        if (OptionsTypeMetadata.IsPotentialNestedObject(type) && type is INamedTypeSymbol { TypeKind: TypeKind.Class } namedType)
         {
             return BuildObjectSchema(namedType, context, strict, validates, visited);
         }
