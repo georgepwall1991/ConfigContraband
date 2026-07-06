@@ -2166,6 +2166,12 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         semanticModel,
                         binderOptionsParameter,
                         binderOptionsAliases,
+                        parameterStillTargetsRuntimeOptions) ||
+                    ArgumentMayCaptureRuntimeBinderOptions(
+                        argument.Expression,
+                        semanticModel,
+                        binderOptionsParameter,
+                        binderOptionsAliases,
                         parameterStillTargetsRuntimeOptions))
                 {
                     return true;
@@ -2236,6 +2242,59 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Detects an argument that hands a captured reset delegate/lambda to a call which may
+    /// invoke it — an inline lambda (<c>RunNow(() =&gt; options.ErrorOnUnknownConfiguration =
+    /// false)</c>) or a local delegate variable (<c>RunNow(disableStrict)</c>) whose body
+    /// references the runtime binder options. A directly-invoked reset delegate is already
+    /// handled by <see cref="InvocationMayRunLocalBinderOptionsHelper"/>; this closes the
+    /// passed-as-argument shape so the runtime binder options are treated as escaped and
+    /// CFG007 stays conservative instead of firing a false Warning.
+    /// </summary>
+    private static bool ArgumentMayCaptureRuntimeBinderOptions(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        IParameterSymbol binderOptionsParameter,
+        HashSet<ILocalSymbol> binderOptionsAliases,
+        bool parameterStillTargetsRuntimeOptions)
+    {
+        switch (expression)
+        {
+            case SimpleLambdaExpressionSyntax simpleLambda:
+                return AnonymousFunctionReferencesRuntimeBinderOptions(
+                    simpleLambda.ExpressionBody,
+                    simpleLambda.Block,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions);
+            case ParenthesizedLambdaExpressionSyntax parenthesizedLambda:
+                return AnonymousFunctionReferencesRuntimeBinderOptions(
+                    parenthesizedLambda.ExpressionBody,
+                    parenthesizedLambda.Block,
+                    semanticModel,
+                    binderOptionsParameter,
+                    binderOptionsAliases,
+                    parameterStillTargetsRuntimeOptions);
+            case AnonymousMethodExpressionSyntax anonymousMethod:
+                return anonymousMethod.Block is not null &&
+                    ContainsRuntimeBinderOptionsReference(
+                        anonymousMethod.Block,
+                        semanticModel,
+                        binderOptionsParameter,
+                        binderOptionsAliases,
+                        parameterStillTargetsRuntimeOptions);
+        }
+
+        return semanticModel.GetSymbolInfo(expression).Symbol is ILocalSymbol { Type.TypeKind: TypeKind.Delegate } local &&
+               LocalDelegateMayReferenceRuntimeBinderOptions(
+                   local,
+                   semanticModel,
+                   binderOptionsParameter,
+                   binderOptionsAliases,
+                   parameterStillTargetsRuntimeOptions);
     }
 
     private static bool TryGetInvokedLocalDelegate(

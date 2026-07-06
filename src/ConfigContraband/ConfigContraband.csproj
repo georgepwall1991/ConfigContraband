@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.10</Version>
+    <Version>0.5.11</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed a CFG001 unsafe code fix found by evidence-based audit: when the reported section literal was a chained non-root GetSection(...) argument that itself contained a colon (e.g. .GetSection("Features").GetSection("Sub:Strpie")), the fix substituted only the corrected leaf for the whole multi-segment literal, silently dropping the "Sub:" segment and producing a still-broken binding that contradicted the fix's own label. The fix now rewrites only the anchored literal's leaf and preserves any leading colon segments, and is suppressed (diagnostic and suggestion message still shown) when the anchored expression is not a plain string literal whose segments can be reproduced safely. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed a CFG007 false positive found by evidence-based audit: a reset delegate/lambda that sets ErrorOnUnknownConfiguration = false and is passed as a call argument to a helper that invokes it (RunNow(disableStrict) or RunNow(() =&gt; options.ErrorOnUnknownConfiguration = false)) escaped the strict-binding escape analysis, so CFG007 reported a false Warning even though the helper turns strict mode off before binding. The escape analysis now treats a lambda/anonymous-method or local-delegate argument whose body references the runtime binder options as an escape, so the analyzer stays conservative and reports the softer CFG006 informational diagnostic instead. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

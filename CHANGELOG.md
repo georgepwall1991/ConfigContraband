@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.5.11 - 2026-07-06
+
+- Fixed a `CFG007` **false positive** found by evidence-based audit: a reset delegate/lambda that sets `ErrorOnUnknownConfiguration = false` and is passed as a call *argument* to a helper that invokes it — `RunNow(disableStrict)` or the inline `RunNow(() => options.ErrorOnUnknownConfiguration = false)` — escaped the strict-binding escape analysis, so strict mode was treated as still enabled and CFG007 reported a false Warning even though the helper turns strict mode off before binding and the runtime binder would not throw. The escape analysis now also treats a lambda/anonymous-method or local-delegate argument whose body references the runtime binder options as an escape (the same way a directly-invoked reset delegate already is), so the analyzer stays conservative and reports the softer `CFG006` informational diagnostic instead. Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.
+
 ## 0.5.10 - 2026-07-06
 
 - Fixed a `CFG001` **unsafe code fix** found by evidence-based audit: when the reported section literal was a chained non-root `GetSection(...)` argument that itself contained a colon (for example `.GetSection("Features").GetSection("Sub:Strpie")`), the "Use \"…\"" fix substituted only the corrected leaf for the whole multi-segment literal, silently dropping the `Sub:` segment and producing a still-broken binding (`.GetSection("Stripe")`, path `Features:Stripe`) that contradicted the fix's own "Did you mean `Features:Sub:Stripe`?" label. The fix now rewrites only the anchored literal's leaf and preserves any leading colon segments (`.GetSection("Sub:Stripe")`), and is suppressed — the diagnostic and suggestion message still appear, but no auto-fix is offered — when the anchored section expression is not a plain string literal whose segments can be reproduced safely. Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.
