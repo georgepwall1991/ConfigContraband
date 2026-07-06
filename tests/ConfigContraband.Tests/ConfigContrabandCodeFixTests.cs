@@ -355,6 +355,87 @@ public sealed class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg001_fix_preserves_colon_segments_in_chained_get_section_leaf_literal()
+    {
+        // The chained literal itself spans multiple segments ("Sub:Strpie"). The fix must
+        // rewrite only the typo'd leaf and preserve the "Sub:" segment, not overwrite the
+        // whole literal with the corrected leaf (which would silently drop "Sub:").
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.AddOptions<StripeOptions>()
+                .Bind(configuration.GetSection("Features").GetSection({|#0:"Sub:Strpie"|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var fixedSource = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.AddOptions<StripeOptions>()
+                .Bind(configuration.GetSection("Features").GetSection("Sub:Stripe"))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Sub:Strpie", ". Did you mean \"Features:Sub:Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Sub": {
+                  "Stripe": {
+                    "ApiKey": "secret"
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_suppresses_fix_for_non_literal_chained_colon_section()
+    {
+        // The chained section literal is supplied through a const whose value spans
+        // multiple segments, so the leading "Sub:" segment cannot be reproduced safely
+        // from the anchored expression. The fix is suppressed — the diagnostic and the
+        // "Did you mean" message still appear, but the source is left unchanged rather
+        // than risk a segment-dropping edit.
+        var source = OptionsSource("""
+            const string sub = "Sub:Strpie";
+            IConfiguration configuration = null!;
+            services.AddOptions<StripeOptions>()
+                .Bind(configuration.GetSection("Features").GetSection({|#0:sub|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Sub:Strpie", ". Did you mean \"Features:Sub:Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Sub": {
+                  "Stripe": {
+                    "ApiKey": "secret"
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg003_fix_appends_validate_on_start()
     {
         var source = OptionsSource("""
