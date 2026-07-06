@@ -10385,6 +10385,78 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_stays_info_when_error_on_unknown_configuration_is_reset_through_delegate_passed_as_argument()
+    {
+        // The reset delegate is passed as an argument to a helper that invokes it, so the
+        // runtime binder options escape the strict-binding proof just as a directly-invoked
+        // reset delegate does. CFG007 must stay conservative (CFG006 Info) rather than fire.
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options =>
+                {
+                    options.ErrorOnUnknownConfiguration = true;
+                    System.Action disableStrict = () => options.ErrorOnUnknownConfiguration = false;
+                    RunNow(disableStrict);
+                })
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraMembers: """
+            private static void RunNow(System.Action action) => action();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "value",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg006_stays_info_when_error_on_unknown_configuration_is_reset_through_inline_lambda_argument()
+    {
+        // The reset lambda is passed inline as an argument to a helper that invokes it.
+        // Same escape as the named-delegate case; CFG007 must stay conservative.
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options =>
+                {
+                    options.ErrorOnUnknownConfiguration = true;
+                    RunNow(() => options.ErrorOnUnknownConfiguration = false);
+                })
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraMembers: """
+            private static void RunNow(System.Action action) => action();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "value",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_stays_info_when_error_on_unknown_configuration_is_reset_through_invoked_delegate_invoke_method()
     {
         var source = OptionsSource("""
