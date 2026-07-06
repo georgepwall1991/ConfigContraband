@@ -3272,13 +3272,98 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             for (var i = startIndex; i < block.Statements.Count; i++)
             {
-                if (block.Statements[i] is not ExpressionStatementSyntax expressionStatement ||
-                    expressionStatement.Expression is not InvocationExpressionSyntax invocation ||
-                    !TryCollectLocalInvocationChain(invocation, localSymbol, semanticModel, methods))
+                var statement = block.Statements[i];
+                if (statement is ExpressionStatementSyntax expressionStatement &&
+                    expressionStatement.Expression is InvocationExpressionSyntax invocation &&
+                    TryCollectLocalInvocationChain(invocation, localSymbol, semanticModel, methods))
+                {
+                    continue;
+                }
+
+                // Retargeting the tracked builder local — a direct reassignment or
+                // passing it by ref/out to a call that may reassign it — repoints it at
+                // a different OptionsBuilder instance, so later calls on it (e.g. a
+                // genuine ValidateOnStart()) no longer belong to this registration. Stop
+                // the scan conservatively rather than attribute them to the wrong builder.
+                if (StatementRetargetsLocal(statement, localSymbol, semanticModel))
                 {
                     break;
                 }
+
+                // Only skip statements that cannot change reachability or retarget the
+                // builder: an interleaved expression statement (an unrelated service
+                // registration, or a call/assignment on another variable) or a local
+                // declaration. Any other statement — control flow such as
+                // if/return/throw/loops/switch, a nested block, using/lock, etc. — can
+                // prevent a later validation call from executing on every path, so stop
+                // the scan instead of assuming the later call always runs.
+                if (statement is not ExpressionStatementSyntax &&
+                    statement is not LocalDeclarationStatementSyntax)
+                {
+                    break;
+                }
+
+                // Otherwise the statement is inert with respect to this registration;
+                // keep scanning so a validation call split across it still applies to
+                // this same builder local.
             }
+        }
+
+        private static bool StatementRetargetsLocal(
+            StatementSyntax statement,
+            ILocalSymbol localSymbol,
+            SemanticModel semanticModel)
+        {
+            // Do not descend into lambda or local-function bodies: an assignment there
+            // is deferred until the delegate is invoked, so it does not retarget the
+            // local at this point in the straight-line flow.
+            foreach (var node in statement.DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode))
+            {
+                switch (node)
+                {
+                    // Direct assignment or a tuple-deconstruction assignment whose left
+                    // side (possibly nested) targets the local.
+                    case AssignmentExpressionSyntax assignment
+                        when AssignmentTargetsLocal(assignment.Left, localSymbol, semanticModel):
+                        return true;
+
+                    // A ref/out argument lets the callee reassign the local; `in` is
+                    // read-only and cannot, so it is intentionally not treated as a retarget.
+                    case ArgumentSyntax argument
+                        when (argument.RefKindKeyword.IsKind(SyntaxKind.RefKeyword) ||
+                              argument.RefKindKeyword.IsKind(SyntaxKind.OutKeyword)) &&
+                             IsLocalReference(argument.Expression, localSymbol, semanticModel):
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool AssignmentTargetsLocal(
+            ExpressionSyntax left,
+            ILocalSymbol localSymbol,
+            SemanticModel semanticModel)
+        {
+            if (IsLocalReference(left, localSymbol, semanticModel))
+            {
+                return true;
+            }
+
+            // Deconstruction assignment: the left is a tuple whose element expressions
+            // are themselves assignment targets (and may be further nested tuples).
+            if (left is TupleExpressionSyntax tuple)
+            {
+                foreach (var argument in tuple.Arguments)
+                {
+                    if (AssignmentTargetsLocal(argument.Expression, localSymbol, semanticModel))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private static bool TryCollectLocalInvocationChain(
