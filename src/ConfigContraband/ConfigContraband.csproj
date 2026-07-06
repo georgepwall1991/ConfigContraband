@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.6</Version>
+    <Version>0.5.7</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed a CFG001 precision gap found by evidence-based audit: conditional access (?.) anywhere in a GetSection(...)/GetRequiredSection(...) chain -- a non-chained call, ?. immediately after the root, or ?. before a further chained call off a genuine root configuration chain -- was not unwrapped by the section-path resolver, so the analyzer silently skipped the section-existence check for that registration instead of checking it. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed a CFG007 precision gap found by evidence-based audit: a tuple-deconstruction assignment to ErrorOnUnknownConfiguration (e.g. (options.ErrorOnUnknownConfiguration, options.BindNonPublicProperties) = (true, false);) was invisible to the strict-binding escape-analysis proof, so strict binding that was genuinely enabled at runtime silently fell back to the softer CFG006 Info diagnostic instead of the CFG007 Warning. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
