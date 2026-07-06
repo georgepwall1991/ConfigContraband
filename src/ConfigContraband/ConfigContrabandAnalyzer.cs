@@ -240,7 +240,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         var suggestedSectionPath = suggestion is null ? null : ReplaceSectionLeaf(registration.SectionPath, suggestion);
         var suffix = suggestedSectionPath is null ? "." : $". Did you mean \"{suggestedSectionPath}\"?";
         var properties = ImmutableDictionary<string, string?>.Empty;
-        if (suggestedSectionPath is not null)
+        if (suggestion is not null && suggestedSectionPath is not null)
         {
             // The offered fix overwrites the whole anchored section-expression literal, so
             // the replacement text must reproduce that literal's own value with only its
