@@ -10561,6 +10561,46 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_stays_info_when_tuple_deconstruction_reset_is_nested_in_control_flow()
+    {
+        var source = OptionsSource("""
+            var disableStrict = GetStrict();
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", options =>
+                {
+                    options.ErrorOnUnknownConfiguration = true;
+                    if (disableStrict)
+                    {
+                        (options.ErrorOnUnknownConfiguration, options.BindNonPublicProperties) = (false, false);
+                    }
+                })
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraMembers: """
+            private static bool GetStrict()
+            {
+                return false;
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 4, 5, 4, 19)
+            .WithArguments("Stripe:WebookSecret", "StripeOptions", ". Did you mean \"WebhookSecret\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret",
+                "WebookSecret": "typo"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_reports_unknown_key_from_named_options_builder()
     {
         var source = OptionsSource("""
