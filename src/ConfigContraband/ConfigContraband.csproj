@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.5</Version>
+    <Version>0.5.6</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed a shared CFG004/CFG005 precision gap: a type-level (class) ValidationAttribute declared only on a base options class (or a nested type's base class for CFG005) is now detected, since both rules reuse the same inheritance-aware helper CFG002 already relies on for this shape. Previously only attributes declared directly on the exact type were seen. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed a CFG001 precision gap found by evidence-based audit: conditional access (?.) anywhere in a GetSection(...)/GetRequiredSection(...) chain -- a non-chained call, ?. immediately after the root, or ?. before a further chained call off a genuine root configuration chain -- was not unwrapped by the section-path resolver, so the analyzer silently skipped the section-existence check for that registration instead of checking it. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

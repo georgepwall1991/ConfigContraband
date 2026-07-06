@@ -2456,6 +2456,17 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
         expression = UnwrapForSectionChainResolution(expression);
 
+        if (expression is ConditionalAccessExpressionSyntax conditionalAccess)
+        {
+            return TryGetConfigurationSectionPathFromWhenNotNull(
+                conditionalAccess.WhenNotNull,
+                conditionalAccess.Expression,
+                semanticModel,
+                out sectionPath,
+                out sectionExpression,
+                out sectionExpressionContainsFullPath);
+        }
+
         if (expression is not InvocationExpressionSyntax invocation ||
             invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
             invocation.ArgumentList.Arguments.Count == 0 ||
@@ -2526,6 +2537,117 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
             return expression;
         }
+    }
+
+    /// <summary>
+    /// Resolves a conditional-access `WhenNotNull` expression (the part after `?.`) the same way
+    /// <see cref="TryGetConfigurationSectionPath"/> resolves a normal invocation chain, without
+    /// constructing any new syntax nodes: a `?.`-bound <see cref="MemberBindingExpressionSyntax"/>
+    /// implicitly receives <paramref name="conditionalReceiver"/> (the expression before `?.`),
+    /// so it is resolved against that receiver directly instead of being treated as a detached
+    /// invocation with no receiver. All nodes touched remain part of the original syntax tree.
+    /// </summary>
+    private static bool TryGetConfigurationSectionPathFromWhenNotNull(
+        ExpressionSyntax whenNotNull,
+        ExpressionSyntax conditionalReceiver,
+        SemanticModel semanticModel,
+        out string sectionPath,
+        out ExpressionSyntax sectionExpression,
+        out bool sectionExpressionContainsFullPath)
+    {
+        sectionPath = null!;
+        sectionExpression = null!;
+        sectionExpressionContainsFullPath = false;
+
+        whenNotNull = UnwrapForSectionChainResolution(whenNotNull);
+
+        if (whenNotNull is not InvocationExpressionSyntax invocation ||
+            invocation.ArgumentList.Arguments.Count == 0)
+        {
+            return false;
+        }
+
+        string methodName;
+        var isBoundToConditionalReceiver = false;
+        ExpressionSyntax? innerWhenNotNull = null;
+
+        switch (invocation.Expression)
+        {
+            case MemberBindingExpressionSyntax memberBinding:
+                methodName = memberBinding.Name.Identifier.ValueText;
+                isBoundToConditionalReceiver = true;
+                break;
+            case MemberAccessExpressionSyntax memberAccess:
+                methodName = memberAccess.Name.Identifier.ValueText;
+                innerWhenNotNull = memberAccess.Expression;
+                break;
+            default:
+                return false;
+        }
+
+        if (!IsConfigurationSectionMethodName(methodName))
+        {
+            return false;
+        }
+
+        var argumentExpression = invocation.ArgumentList.Arguments[0].Expression;
+        if (!TryGetConstantSectionPath(argumentExpression, semanticModel, out var currentSectionPath))
+        {
+            return false;
+        }
+
+        if (isBoundToConditionalReceiver)
+        {
+            if (TryGetConfigurationSectionPath(
+                    conditionalReceiver,
+                    semanticModel,
+                    out var parentSectionPath,
+                    out _,
+                    out _))
+            {
+                sectionPath = parentSectionPath + ":" + currentSectionPath;
+                sectionExpression = argumentExpression;
+                sectionExpressionContainsFullPath = false;
+                return true;
+            }
+
+            var receiverType = semanticModel.GetTypeInfo(conditionalReceiver).Type;
+            if (IsConfigurationSectionType(receiverType))
+            {
+                // See the matching comment in TryGetConfigurationSectionPath: the receiver is
+                // itself a stored/received IConfigurationSection, so its own path isn't a
+                // constant we can see here. Stay quiet rather than checking against the wrong
+                // namespace.
+                return false;
+            }
+
+            if (!IsConfigurationType(receiverType))
+            {
+                return false;
+            }
+
+            sectionPath = currentSectionPath;
+            sectionExpression = argumentExpression;
+            sectionExpressionContainsFullPath = true;
+            return true;
+        }
+
+        if (innerWhenNotNull is not null &&
+            TryGetConfigurationSectionPathFromWhenNotNull(
+                innerWhenNotNull,
+                conditionalReceiver,
+                semanticModel,
+                out var innerParentSectionPath,
+                out _,
+                out _))
+        {
+            sectionPath = innerParentSectionPath + ":" + currentSectionPath;
+            sectionExpression = argumentExpression;
+            sectionExpressionContainsFullPath = false;
+            return true;
+        }
+
+        return false;
     }
 
     private static bool IsConfigurationSectionMethodName(string methodName)
