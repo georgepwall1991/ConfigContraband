@@ -5716,6 +5716,24 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_and_cfg004_honor_validation_before_bind_across_unrelated_statement()
+    {
+        // The backward mirror of the forward split-local fix: a validation call placed *before* the
+        // bind, separated from it by an unrelated statement. The prior-scan must skip the inert
+        // statement and still collect the earlier ValidateDataAnnotations(), so neither CFG003 nor
+        // CFG004 fires (all validation and startup registration are present).
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.ValidateDataAnnotations();
+            services.AddSingleton<Startup>();
+            optionsBuilder.BindConfiguration("Stripe");
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_parameter_typed_builder_split_validation_without_validate_on_start()
     {
         // The builder is a method parameter and its bind/validation calls are split across separate
@@ -5784,13 +5802,18 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
-    public async Task Cfg004_stops_later_local_bind_statement_prior_scan_at_unrelated_statement()
+    public async Task Cfg004_honors_prior_local_validation_across_unrelated_statement()
     {
+        // ValidateDataAnnotations() is genuinely called on the builder before the bind, separated
+        // by an unrelated statement (a call passing the builder by value, which cannot retarget it).
+        // The backward scan now skips the inert statement and collects the earlier validation, so
+        // CFG004 must stay quiet — it previously mis-fired (the backward mirror of the forward
+        // split-local false positive).
         var source = OptionsSource("""
             var optionsBuilder = services.AddOptions<StripeOptions>();
             optionsBuilder.ValidateDataAnnotations();
             Validate(optionsBuilder);
-            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            optionsBuilder.BindConfiguration("Stripe");
             optionsBuilder.ValidateOnStart();
             """, extraUsings: "using Microsoft.Extensions.Options;\n", extraMembers: """
             private static void Validate(OptionsBuilder<StripeOptions> optionsBuilder)
@@ -5798,11 +5821,7 @@ public sealed class ConfigContrabandAnalyzerTests
             }
             """);
 
-        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
-            .WithLocation(0)
-            .WithArguments("StripeOptions");
-
-        await Verifier.VerifyAnalyzerAsync(source, expected);
+        await Verifier.VerifyAnalyzerAsync(source);
     }
 
     [Fact]
@@ -5847,13 +5866,17 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
-    public async Task Cfg004_does_not_scan_local_builder_initializer_across_unrelated_statement()
+    public async Task Cfg004_honors_local_builder_initializer_validation_across_unrelated_statement()
     {
+        // ValidateDataAnnotations() is in the builder's declaration initializer, then an unrelated
+        // statement, then the bind. The backward scan now skips the inert statement, reaches the
+        // builder's declaration, and collects the initializer chain, so CFG004 stays quiet — it
+        // previously mis-fired (the backward mirror of the forward split-local false positive).
         var source = OptionsSource("""
             var optionsBuilder = services.AddOptions<StripeOptions>()
                 .ValidateDataAnnotations();
             Validate(optionsBuilder);
-            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            optionsBuilder.BindConfiguration("Stripe");
             optionsBuilder.ValidateOnStart();
             """, extraUsings: "using Microsoft.Extensions.Options;\n", extraMembers: """
             private static void Validate(OptionsBuilder<StripeOptions> optionsBuilder)
@@ -5861,11 +5884,7 @@ public sealed class ConfigContrabandAnalyzerTests
             }
             """);
 
-        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
-            .WithLocation(0)
-            .WithArguments("StripeOptions");
-
-        await Verifier.VerifyAnalyzerAsync(source, expected);
+        await Verifier.VerifyAnalyzerAsync(source);
     }
 
     [Fact]
