@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.15</Version>
+    <Version>0.5.16</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed a CFG003/CFG004 false positive found by evidence-based audit (the backward mirror of the 0.5.9 split-statement fix): when a validation call is placed on a local OptionsBuilder&lt;T&gt; before the BindConfiguration(...) call and separated from it by an unrelated statement, the backward tracker dropped the earlier validation, so CFG004 (or CFG003) wrongly reported even though the validation runs at runtime. The backward scan now skips inert intervening statements symmetrically with the forward scan, stopping only at a reassignment of the builder or at control flow. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed a CFG007/CFG006 false positive found by evidence-based audit: a Dictionary&lt;TKey, TValue&gt; whose key type the real ConfigurationBinder does not support (anything other than string, enum, or an integral type) is never bound at runtime, so CFG007/CFG006 should never report under its values - but the analyzer only ever checked the dictionary's value type, never its key type. A typo'd key under a Dictionary&lt;Guid, EndpointOptions&gt; value wrongly reported CFG007 even though the runtime binder silently skips the whole dictionary. String-, enum-, and integral-keyed dictionaries keep exactly today's behavior. The generated appsettings.schema.json output is unchanged. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
