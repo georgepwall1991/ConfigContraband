@@ -629,12 +629,40 @@ internal sealed class OptionsTypeMetadata
 
     private static bool IsRequired(ISymbol symbol)
     {
-        if (symbol.GetAttributes().Any(attribute =>
-                string.Equals(attribute.AttributeClass?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal)))
+        if (symbol.GetAttributes().Any(attribute => IsRequiredAttribute(attribute.AttributeClass)))
         {
             return symbol is not IPropertySymbol property ||
                    !property.Type.IsValueType ||
                    IsNullableValueType(property.Type);
+        }
+
+        return false;
+    }
+
+    private static bool IsRequiredAttribute(INamedTypeSymbol? attributeClass)
+    {
+        if (attributeClass is null)
+        {
+            return false;
+        }
+
+        // The runtime validator enforces RequiredAttribute and any subclass that inherits its
+        // check, so match by inheritance rather than an exact type name. A subclass that overrides
+        // IsValid may weaken the check (e.g. accept a missing value), so it can no longer be proven
+        // required — stay conservative and treat only RequiredAttribute itself or a subclass that
+        // does not override IsValid as required.
+        var overridesIsValid = false;
+        for (var current = attributeClass; current is not null; current = current.BaseType)
+        {
+            if (string.Equals(current.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal))
+            {
+                return !overridesIsValid;
+            }
+
+            if (current.GetMembers("IsValid").OfType<IMethodSymbol>().Any(method => method.IsOverride))
+            {
+                overridesIsValid = true;
+            }
         }
 
         return false;
@@ -889,9 +917,16 @@ internal sealed class OptionsTypeMetadata
 
     private static bool HasNonRequiredValidationAttribute(ISymbol symbol)
     {
+        // Exclude only the RequiredAttribute forms IsRequired actually proves (RequiredAttribute
+        // itself or a subclass that does not override IsValid): for those the required signal is
+        // already handled by IsRequired plus the satisfying-default proof, so counting them here
+        // too would keep the key required even when the compile-time default satisfies them. A
+        // subclass that overrides IsValid is NOT proven required (IsRequiredAttribute returns
+        // false), so it must still count as a validating attribute here — otherwise its property's
+        // validation is ignored entirely and a nested-default failure is missed.
         return symbol.GetAttributes().Any(attribute =>
             InheritsFrom(attribute.AttributeClass, "System.ComponentModel.DataAnnotations.ValidationAttribute") &&
-            !string.Equals(attribute.AttributeClass?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal));
+            !IsRequiredAttribute(attribute.AttributeClass));
     }
 
     private static bool NoDeclaredConstructorCanOverwriteProperty(INamedTypeSymbol rootType, IPropertySymbol property)
@@ -1169,11 +1204,16 @@ internal sealed class OptionsTypeMetadata
     {
         foreach (var attribute in symbol.GetAttributes())
         {
-            if (!string.Equals(attribute.AttributeClass?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal))
+            // Match the same attribute IsRequired proved required (RequiredAttribute or a subclass
+            // that does not override IsValid). AllowEmptyStrings is an inherited property, so a
+            // subclass instance such as [MyRequired(AllowEmptyStrings = true)] carries it too.
+            if (!IsRequiredAttribute(attribute.AttributeClass))
             {
                 continue;
             }
 
+            // A named argument on the usage (e.g. [MyRequired(AllowEmptyStrings = true)]) is the
+            // most specific setting — property-initializer setters run after the constructor.
             foreach (var argument in attribute.NamedArguments)
             {
                 if (string.Equals(argument.Key, "AllowEmptyStrings", StringComparison.Ordinal) &&
@@ -1182,6 +1222,168 @@ internal sealed class OptionsTypeMetadata
                     return allowEmptyStrings;
                 }
             }
+
+            // Otherwise a subclass may set the inherited AllowEmptyStrings itself (constructor body,
+            // constructor parameter, base chaining, ...). Only RequiredAttribute itself has a
+            // provable false default with no such possibility.
+            if (!string.Equals(attribute.AttributeClass?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal) &&
+                SubclassAllowsEmptyStrings(attribute))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Conservatively decides whether a <c>RequiredAttribute</c> subclass may permit empty strings
+    /// via its invoked constructor. Returns a precise value only for a simple, unconditional,
+    /// top-level constant assignment (last-wins). Any form the analyzer cannot reduce to a constant
+    /// — a non-literal right-hand side (e.g. a constructor parameter), an assignment nested in a
+    /// conditional/loop/lambda, or a <c>this</c>/non-RequiredAttribute-<c>base</c> constructor chain —
+    /// is treated as "possibly allowed" (returns <c>true</c>) so the analyzer never reports a
+    /// runtime-valid empty-string default; it accepts a false negative on those rare shapes instead.
+    /// A bare subclass whose (source) constructor provably never sets AllowEmptyStrings returns
+    /// <c>false</c>, so the common `[MyRequired] string X { get; set; } = ""` case is still reported.
+    /// Known safe-side false negative: a constructor parameter/local that shadows the inherited
+    /// AllowEmptyStrings property is matched by name and treated as possibly-allowed.
+    /// </summary>
+    private static bool SubclassAllowsEmptyStrings(AttributeData attribute)
+    {
+        // A subclass defined in a referenced assembly has no syntax to inspect, so its constructor
+        // could set AllowEmptyStrings out of view — treat it as possibly-allowed. (A source subclass
+        // with only an implicit default constructor still falls through to the provable-false result
+        // below, because the class itself is in source and its implicit constructor sets nothing.)
+        if (attribute.AttributeClass is null || attribute.AttributeClass.DeclaringSyntaxReferences.IsEmpty)
+        {
+            return true;
+        }
+
+        var constructor = attribute.AttributeConstructor;
+        if (constructor is null)
+        {
+            // A syntaxless/implicit constructor sets nothing; the RequiredAttribute default is false.
+            return false;
+        }
+
+        // The base chain — an explicit base(...) initializer or the implicit base() C# inserts when
+        // none is written (including for an implicit/compiler-generated constructor with no syntax) —
+        // reaches the direct base type. Only RequiredAttribute itself has a provable no-op base
+        // constructor; an intermediate custom subclass base could set AllowEmptyStrings out of view,
+        // so treat it as possibly-allowed. This is checked before inspecting the body so it also
+        // covers a leaf subclass whose own constructor is implicit.
+        if (!string.Equals(constructor.ContainingType.BaseType?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var sawConstant = false;
+        var constantValue = false;
+
+        foreach (var reference in constructor.DeclaringSyntaxReferences)
+        {
+            if (reference.GetSyntax() is not ConstructorDeclarationSyntax declaration)
+            {
+                // No accessible body to analyze — cannot prove it is not allowed.
+                return true;
+            }
+
+            // An explicit this(...) initializer runs another overload of the same class, which could
+            // set AllowEmptyStrings out of view, so treat it as possibly-allowed.
+            if (declaration.Initializer is { } initializer &&
+                initializer.ThisOrBaseKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ThisKeyword))
+            {
+                return true;
+            }
+
+            // An expression-bodied constructor (`public MyRequired() => AllowEmptyStrings = true;`)
+            // is a single top-level expression.
+            if (declaration.ExpressionBody is { } arrow)
+            {
+                if (!TryTrackConstructorStatement(arrow.Expression, ref sawConstant, ref constantValue))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (declaration.Body is not { } body)
+            {
+                // No accessible body/expression — cannot prove it is not allowed.
+                return true;
+            }
+
+            // The body is provable only if every top-level statement is a simple literal assignment
+            // the analyzer fully understands. Anything else — a helper call, a control-flow
+            // statement, a local declaration, or an assignment with a non-literal right-hand side —
+            // could enable empty strings out of view, so treat it as possibly-allowed.
+            foreach (var statement in body.Statements)
+            {
+                if (statement is not ExpressionStatementSyntax expressionStatement ||
+                    !TryTrackConstructorStatement(expressionStatement.Expression, ref sawConstant, ref constantValue))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return sawConstant && constantValue;
+    }
+
+    /// <summary>
+    /// Examines a single top-level constructor expression. Returns <c>false</c> when the expression
+    /// is anything the analyzer cannot prove leaves AllowEmptyStrings unset — a non-assignment
+    /// (e.g. a helper call), an assignment with a non-literal right-hand side, or an assignment to an
+    /// AllowEmptyStrings access it cannot resolve — signalling the caller to treat the subclass as
+    /// possibly allowing empty strings. A simple `X = &lt;literal&gt;` assignment is understood: it
+    /// updates the last-wins constant when X is the inherited AllowEmptyStrings, and is otherwise an
+    /// inert write to a different property (a literal has no side effects).
+    /// </summary>
+    private static bool TryTrackConstructorStatement(ExpressionSyntax? expression, ref bool sawConstant, ref bool constantValue)
+    {
+        if (expression is not AssignmentExpressionSyntax assignment)
+        {
+            // A helper call or any non-assignment statement is unprovable.
+            return false;
+        }
+
+        // A bare `AllowEmptyStrings` or a this./base.-qualified access definitely targets the
+        // inherited property.
+        var definitelyAllowEmptyStrings = assignment.Left switch
+        {
+            IdentifierNameSyntax { Identifier.ValueText: "AllowEmptyStrings" } => true,
+            MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax or BaseExpressionSyntax, Name.Identifier.ValueText: "AllowEmptyStrings" } => true,
+            _ => false
+        };
+
+        if (assignment.Right is not LiteralExpressionSyntax literal)
+        {
+            // A non-literal right-hand side may have side effects or an unprovable value.
+            return false;
+        }
+
+        if (!definitelyAllowEmptyStrings)
+        {
+            // Any other member access ending in `AllowEmptyStrings` might still be the inherited
+            // property via an alias we cannot resolve without a semantic model, so treat it as
+            // unprovable. A literal assignment to any other target is an inert write.
+            return assignment.Left is not MemberAccessExpressionSyntax { Name.Identifier.ValueText: "AllowEmptyStrings" };
+        }
+
+        if (literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.TrueLiteralExpression))
+        {
+            sawConstant = true;
+            constantValue = true;
+            return true;
+        }
+
+        if (literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.FalseLiteralExpression))
+        {
+            sawConstant = true;
+            constantValue = false;
+            return true;
         }
 
         return false;
