@@ -455,6 +455,8 @@ Visible `appsettings.json` and `appsettings.*.json` files are treated as a merge
 
 Dictionary entry names and scalar array items are treated as values rather than property names. Arbitrary keys under `Dictionary<string, string>` and values inside `string[]` are not reported as unknown options properties.
 
+Dictionary recursion only applies to key types the real `ConfigurationBinder` actually binds — `string`, an enum, or an integral type (`sbyte` through `ulong`). A dictionary keyed by anything else (`Guid`, `double`, `bool`, `TimeSpan`, a custom struct, ...) is never bound at runtime, so its values are treated as fully opaque: no recursion and no `CFG006`/`CFG007` reporting underneath it, even though the property name itself is still checked normally.
+
 ### `CFG007`: Strict Binding Turns Unknown Keys Into Failures
 
 `CFG006` is informational by default because .NET configuration binding is flexible. When a binding call explicitly enables `BinderOptions.ErrorOnUnknownConfiguration`, the same unknown-key shape becomes a binding exception instead of harmless drift.

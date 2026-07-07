@@ -8313,6 +8313,242 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg007_stays_quiet_for_guid_keyed_dictionary_nested_object_values_when_error_on_unknown_configuration_is_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<Guid, EndpointOptions> Endpoints { get; set; } = [];
+            }
+
+            public sealed class EndpointOptions
+            {
+                public string Url { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Endpoints": {
+                  "3fa85f64-5717-4562-b3fc-2c963f66afa6": {
+                    "Url": "https://example.test",
+                    "Timout": 5
+                  }
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg007_stays_quiet_for_guid_keyed_dictionary_object_shaped_scalar_value_when_error_on_unknown_configuration_is_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<Guid, string> Labels { get; set; } = [];
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Labels": {
+                  "3fa85f64-5717-4562-b3fc-2c963f66afa6": {
+                    "Foo": "x"
+                  }
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg006_stays_quiet_under_guid_keyed_dictionary_values()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<Guid, ServerOptions> Servers { get; set; } = [];
+            }
+
+            public sealed class ServerOptions
+            {
+                public string Host { get; set; } = "";
+
+                public int Port { get; set; }
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Servers": {
+                  "3fa85f64-5717-4562-b3fc-2c963f66afa6": {
+                    "Host": "example.test",
+                    "Prt": 443
+                  }
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg007_reports_unknown_key_under_enum_keyed_dictionary_when_error_on_unknown_configuration_is_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public enum Region
+            {
+                East,
+                West
+            }
+
+            public sealed class AppOptions
+            {
+                public Dictionary<Region, EndpointOptions> Endpoints { get; set; } = [];
+            }
+
+            public sealed class EndpointOptions
+            {
+                public string Url { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKeyWillThrow)
+            .WithSpan("appsettings.json", 6, 9, 6, 17)
+            .WithArguments("App:Endpoints:East:Timout", "EndpointOptions", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Endpoints": {
+                  "East": {
+                    "Url": "https://example.test",
+                    "Timout": 5
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg007_reports_unknown_key_under_int_keyed_dictionary_when_error_on_unknown_configuration_is_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<int, EndpointOptions> Endpoints { get; set; } = [];
+            }
+
+            public sealed class EndpointOptions
+            {
+                public string Url { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKeyWillThrow)
+            .WithSpan("appsettings.json", 6, 9, 6, 17)
+            .WithArguments("App:Endpoints:1:Timout", "EndpointOptions", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Endpoints": {
+                  "1": {
+                    "Url": "https://example.test",
+                    "Timout": 5
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg007_reports_property_name_typo_but_stays_quiet_inside_guid_keyed_dictionary_value_when_error_on_unknown_configuration_is_enabled()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App", options => options.ErrorOnUnknownConfiguration = true)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using System;\nusing System.Collections.Generic;\n", optionsTypes: """
+            public sealed class AppOptions
+            {
+                public Dictionary<Guid, EndpointOptions> Endpoints { get; set; } = [];
+            }
+
+            public sealed class EndpointOptions
+            {
+                public string Url { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKeyWillThrow)
+            .WithSpan("appsettings.json", 9, 5, 9, 15)
+            .WithArguments("App:Endpints", "AppOptions", ". Did you mean \"Endpoints\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+                "Endpoints": {
+                  "3fa85f64-5717-4562-b3fc-2c963f66afa6": {
+                    "Url": "https://example.test",
+                    "Timout": 5
+                  }
+                },
+                "Endpints": {
+                  "Foo": "bar"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_stays_info_for_prepopulated_polymorphic_dictionary_value_when_strict_binding_is_enabled()
     {
         var source = OptionsSource("""

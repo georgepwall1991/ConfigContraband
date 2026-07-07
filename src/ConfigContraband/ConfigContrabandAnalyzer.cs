@@ -624,7 +624,14 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 if (reportStrictUnknownKeys)
                 {
                     var reportKeyPrefix = metadata.TypeKey + "|" + bindableProperty.Symbol.Name;
-                    if (OptionsTypeMetadata.TryGetDictionaryValueType(bindableProperty.Symbol.Type, out var dictionaryValueType))
+
+                    // A dictionary's own IEnumerable<KeyValuePair<TKey, TValue>> shape must never
+                    // fall through to the generic collection/scalar branches below: an unsupported
+                    // dictionary key type (see TryGetSupportedDictionaryValueType) makes this
+                    // property opaque - the runtime binder never evaluates it either - rather than
+                    // reclassifying it as a collection of KeyValuePair or a plain scalar.
+                    var isDictionary = OptionsTypeMetadata.TryGetDictionaryValueType(bindableProperty.Symbol.Type, out _);
+                    if (OptionsTypeMetadata.TryGetSupportedDictionaryValueType(bindableProperty.Symbol.Type, out var dictionaryValueType))
                     {
                         if (OptionsTypeMetadata.TryGetDictionaryValueType(dictionaryValueType, out _))
                         {
@@ -666,7 +673,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                                 strictUnknownConfigurationKeySuppressed);
                         }
                     }
-                    else if (OptionsTypeMetadata.TryGetCollectionElementType(bindableProperty.Symbol.Type, out var collectionElementType))
+                    else if (!isDictionary &&
+                             OptionsTypeMetadata.TryGetCollectionElementType(bindableProperty.Symbol.Type, out var collectionElementType))
                     {
                         if (IsStrictScalarValueType(collectionElementType) &&
                             !IsOpenRuntimeShape(collectionElementType))
@@ -680,7 +688,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                                 strictUnknownConfigurationKeySuppressed);
                         }
                     }
-                    else if (!IsOpenRuntimeShape(bindableProperty.Symbol.Type))
+                    else if (!isDictionary &&
+                             !IsOpenRuntimeShape(bindableProperty.Symbol.Type))
                     {
                         ReportStrictScalarChildKeys(
                             reportDiagnostic,
@@ -857,7 +866,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         bool strictUnknownConfigurationKeySuppressed,
         Compilation compilation)
     {
-        if (!OptionsTypeMetadata.TryGetDictionaryValueType(dictionaryType, out var valueType))
+        if (!OptionsTypeMetadata.TryGetSupportedDictionaryValueType(dictionaryType, out var valueType))
         {
             return;
         }
