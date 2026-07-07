@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.5.14 - 2026-07-06
+
+- Fixed a `CFG003` **false negative** found by evidence-based audit: when an `OptionsBuilder<T>` is a **method parameter** and its `BindConfiguration(...)` and validation calls are split across separate statements (rather than a single fluent chain), the split-statement tracker ignored it because it only recognized a local-variable receiver — so a missing `ValidateOnStart()` went unreported (and `CFG004` could mis-fire as if `ValidateDataAnnotations()` were absent). The tracker now recognizes a method-parameter receiver the same way it already handled a local variable. A single fluent chain on a parameter-typed builder was already handled. Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.
+
 ## 0.5.13 - 2026-07-06
 
 - Fixed a `CFG002` **false negative** found by evidence-based audit: a property annotated with a user-defined `RequiredAttribute` subclass (e.g. `class MyRequiredAttribute : RequiredAttribute { }`) was never treated as required, because the required check matched the attribute type by exact name rather than by inheritance — even though `Validator.TryValidateObject` enforces the inherited attribute and throws at runtime when the key is absent. The check now matches `RequiredAttribute` or any subclass that does not override `IsValid`, while staying conservative for a subclass that overrides `IsValid` (which may weaken the check to accept a missing value). Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.

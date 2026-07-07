@@ -5716,6 +5716,45 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_reports_parameter_typed_builder_split_validation_without_validate_on_start()
+    {
+        // The builder is a method parameter and its bind/validation calls are split across separate
+        // statements (not a single fluent chain). Validation is present without ValidateOnStart, so
+        // CFG003 must fire — the split-statement scan must track a parameter receiver, not only a
+        // local variable.
+        var source = OptionsSource("", extraUsings: "using Microsoft.Extensions.Options;\n", extraMembers: """
+            private static void ConfigureBuilder(OptionsBuilder<StripeOptions> builder)
+            {
+                {|#0:builder.BindConfiguration("Stripe")|};
+                builder.ValidateDataAnnotations();
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_does_not_report_parameter_typed_builder_split_validation_with_validate_on_start()
+    {
+        // Same parameter-typed split shape but with ValidateOnStart present — the scan must collect
+        // the later ValidateOnStart() call on the parameter receiver and stay quiet.
+        var source = OptionsSource("", extraUsings: "using Microsoft.Extensions.Options;\n", extraMembers: """
+            private static void ConfigureBuilder(OptionsBuilder<StripeOptions> builder)
+            {
+                builder.BindConfiguration("Stripe");
+                builder.ValidateDataAnnotations();
+                builder.ValidateOnStart();
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg003_and_cfg004_honor_validation_before_later_local_bind_statement()
     {
         var source = OptionsSource("""

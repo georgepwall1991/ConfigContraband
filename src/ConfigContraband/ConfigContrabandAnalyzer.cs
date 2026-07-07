@@ -3238,8 +3238,12 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
+            // The split-statement receiver may be a local variable or a method parameter of the
+            // enclosing method — both name a single OptionsBuilder<T> instance whose bind and
+            // validation calls can be tracked across separate statements the same way.
             if (bindInvocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
-                semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol is not ILocalSymbol receiverLocalSymbol ||
+                semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol is not { } receiverLocalSymbol ||
+                receiverLocalSymbol is not (ILocalSymbol or IParameterSymbol) ||
                 bindInvocation.FirstAncestorOrSelf<ExpressionStatementSyntax>() is not ExpressionStatementSyntax expressionStatement ||
                 !expressionStatement.Expression.Span.Contains(bindInvocation.Span) ||
                 expressionStatement.Parent is not BlockSyntax expressionBlock)
@@ -3272,7 +3276,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         private static int AddPreviousLocalInvocations(
             BlockSyntax block,
             int startIndex,
-            ILocalSymbol localSymbol,
+            ISymbol localSymbol,
             SemanticModel semanticModel,
             ImmutableHashSet<string>.Builder methods)
         {
@@ -3292,7 +3296,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         private static void AddLocalInitializerInvocations(
             BlockSyntax block,
             int statementIndex,
-            ILocalSymbol localSymbol,
+            ISymbol localSymbol,
             SemanticModel semanticModel,
             ImmutableHashSet<string>.Builder methods)
         {
@@ -3345,7 +3349,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         private static void AddSubsequentLocalInvocations(
             BlockSyntax block,
             int startIndex,
-            ILocalSymbol localSymbol,
+            ISymbol localSymbol,
             SemanticModel semanticModel,
             ImmutableHashSet<string>.Builder methods)
         {
@@ -3390,7 +3394,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
         private static bool StatementRetargetsLocal(
             StatementSyntax statement,
-            ILocalSymbol localSymbol,
+            ISymbol localSymbol,
             SemanticModel semanticModel)
         {
             // Do not descend into lambda or local-function bodies: an assignment there
@@ -3421,7 +3425,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
         private static bool AssignmentTargetsLocal(
             ExpressionSyntax left,
-            ILocalSymbol localSymbol,
+            ISymbol localSymbol,
             SemanticModel semanticModel)
         {
             if (IsLocalReference(left, localSymbol, semanticModel))
@@ -3447,7 +3451,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
         private static bool TryCollectLocalInvocationChain(
             InvocationExpressionSyntax invocation,
-            ILocalSymbol localSymbol,
+            ISymbol localSymbol,
             SemanticModel semanticModel,
             ImmutableHashSet<string>.Builder methods)
         {
@@ -3523,7 +3527,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
         private static bool IsLocalReference(
             ExpressionSyntax expression,
-            ILocalSymbol localSymbol,
+            ISymbol localSymbol,
             SemanticModel semanticModel)
         {
             return expression is IdentifierNameSyntax identifier &&
