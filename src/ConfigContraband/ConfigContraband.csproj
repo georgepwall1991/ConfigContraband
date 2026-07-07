@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.14</Version>
+    <Version>0.5.15</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed a CFG003 false negative found by evidence-based audit: when an OptionsBuilder&lt;T&gt; is a method parameter and its BindConfiguration(...) and validation calls are split across separate statements (rather than a single fluent chain), the split-statement tracker ignored it because it only recognized a local-variable receiver, so a missing ValidateOnStart() went unreported (and CFG004 could mis-fire). The tracker now recognizes a method-parameter receiver the same way it already handled a local variable. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed a CFG003/CFG004 false positive found by evidence-based audit (the backward mirror of the 0.5.9 split-statement fix): when a validation call is placed on a local OptionsBuilder&lt;T&gt; before the BindConfiguration(...) call and separated from it by an unrelated statement, the backward tracker dropped the earlier validation, so CFG004 (or CFG003) wrongly reported even though the validation runs at runtime. The backward scan now skips inert intervening statements symmetrically with the forward scan, stopping only at a reassignment of the builder or at control flow. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

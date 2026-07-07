@@ -3252,15 +3252,9 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             }
 
             var expressionIndex = expressionBlock.Statements.IndexOf(expressionStatement);
-            var previousBoundaryIndex = AddPreviousLocalInvocations(
+            AddPreviousLocalInvocations(
                 expressionBlock,
                 expressionIndex - 1,
-                receiverLocalSymbol,
-                semanticModel,
-                methods);
-            AddLocalInitializerInvocations(
-                expressionBlock,
-                previousBoundaryIndex,
                 receiverLocalSymbol,
                 semanticModel,
                 methods);
@@ -3273,52 +3267,87 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 methods);
         }
 
-        private static int AddPreviousLocalInvocations(
+        private static void AddPreviousLocalInvocations(
             BlockSyntax block,
             int startIndex,
             ISymbol localSymbol,
             SemanticModel semanticModel,
             ImmutableHashSet<string>.Builder methods)
         {
+            // Walk backward from just before the bind, collecting validation/startup calls on the
+            // tracked builder and skipping intervening statements, so a validation call placed
+            // before the bind but separated from it by an unrelated statement is still recognized.
+            // Unlike the forward scan, control flow does NOT stop the backward scan: a top-level
+            // statement before the bind always executes before the bind is reached, so an earlier
+            // unconditional validation call still applies (a conditionally-executed validation call
+            // lives inside the control-flow statement, not as a top-level statement, and so is not
+            // collected). The scan stops only at the builder's own declaration (its origin) or at a
+            // statement that retargets the builder (earlier calls then belong to a different
+            // OptionsBuilder instance) — including a conditional reassignment nested inside a
+            // control-flow statement, which StatementRetargetsLocal detects.
             for (var i = startIndex; i >= 0; i--)
             {
-                if (block.Statements[i] is not ExpressionStatementSyntax expressionStatement ||
-                    expressionStatement.Expression is not InvocationExpressionSyntax invocation ||
-                    !TryCollectLocalInvocationChain(invocation, localSymbol, semanticModel, methods))
-                {
-                    return i;
-                }
-            }
+                var statement = block.Statements[i];
 
-            return -1;
-        }
-
-        private static void AddLocalInitializerInvocations(
-            BlockSyntax block,
-            int statementIndex,
-            ISymbol localSymbol,
-            SemanticModel semanticModel,
-            ImmutableHashSet<string>.Builder methods)
-        {
-            if (statementIndex < 0 ||
-                statementIndex >= block.Statements.Count ||
-                block.Statements[statementIndex] is not LocalDeclarationStatementSyntax declarationStatement)
-            {
-                return;
-            }
-
-            foreach (var declarator in declarationStatement.Declaration.Variables)
-            {
-                if (semanticModel.GetDeclaredSymbol(declarator) is not ILocalSymbol declaredLocal ||
-                    !SymbolEqualityComparer.Default.Equals(declaredLocal, localSymbol) ||
-                    declarator.Initializer?.Value is not InvocationExpressionSyntax initializerInvocation)
+                // A matching invocation chain on the tracked builder — collect and keep scanning.
+                if (statement is ExpressionStatementSyntax { Expression: InvocationExpressionSyntax invocation } &&
+                    TryCollectLocalInvocationChain(invocation, localSymbol, semanticModel, methods))
                 {
                     continue;
                 }
 
-                AddRecognizedInitializerInvocation(initializerInvocation, semanticModel, methods);
-                return;
+                // The builder's own local declaration (with a recognized initializer chain) — collect
+                // it and stop, since nothing before the declaration can belong to this builder.
+                if (statement is LocalDeclarationStatementSyntax declarationStatement &&
+                    TryAddMatchingLocalDeclarationInitializer(declarationStatement, localSymbol, semanticModel, methods))
+                {
+                    return;
+                }
+
+                // Retargeting the builder before this point means earlier calls belong to a
+                // different OptionsBuilder instance, so stop.
+                if (StatementRetargetsLocal(statement, localSymbol, semanticModel))
+                {
+                    return;
+                }
+
+                // A labelled statement is a jump target: control can reach the bind via a `goto`
+                // that skips the statements before the label, so source order no longer proves the
+                // earlier validation ran. Stop conservatively.
+                if (statement is LabeledStatementSyntax)
+                {
+                    return;
+                }
+
+                // Any other statement is inert with respect to this registration; keep scanning.
             }
+        }
+
+        private static bool TryAddMatchingLocalDeclarationInitializer(
+            LocalDeclarationStatementSyntax declarationStatement,
+            ISymbol localSymbol,
+            SemanticModel semanticModel,
+            ImmutableHashSet<string>.Builder methods)
+        {
+            foreach (var declarator in declarationStatement.Declaration.Variables)
+            {
+                if (semanticModel.GetDeclaredSymbol(declarator) is not ILocalSymbol declaredLocal ||
+                    !SymbolEqualityComparer.Default.Equals(declaredLocal, localSymbol))
+                {
+                    continue;
+                }
+
+                if (declarator.Initializer?.Value is InvocationExpressionSyntax initializerInvocation)
+                {
+                    AddRecognizedInitializerInvocation(initializerInvocation, semanticModel, methods);
+                }
+
+                // This declaration declares the tracked builder (whether or not its initializer is a
+                // recognized chain), so the backward scan has reached the builder's origin.
+                return true;
+            }
+
+            return false;
         }
 
         private static void AddRecognizedInitializerInvocation(

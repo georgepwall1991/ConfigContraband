@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.5.15 - 2026-07-07
+
+- Fixed a `CFG003`/`CFG004` **false positive** found by evidence-based audit — the backward mirror of the 0.5.9 split-statement fix: when a validation call (`ValidateDataAnnotations()`/`Validate(...)`) is placed on a local `OptionsBuilder<T>` *before* the `BindConfiguration(...)` call and separated from it by an unrelated statement, the backward tracker stopped at the unrelated statement and dropped the earlier validation — so `CFG004` (or `CFG003`) wrongly reported even though the validation runs at runtime. The backward scan now skips inert intervening statements symmetrically with the forward scan, stopping only at a reassignment of the builder or at control flow. Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.
+
 ## 0.5.14 - 2026-07-06
 
 - Fixed a `CFG003` **false negative** found by evidence-based audit: when an `OptionsBuilder<T>` is a **method parameter** and its `BindConfiguration(...)` and validation calls are split across separate statements (rather than a single fluent chain), the split-statement tracker ignored it because it only recognized a local-variable receiver — so a missing `ValidateOnStart()` went unreported (and `CFG004` could mis-fire as if `ValidateDataAnnotations()` were absent). The tracker now recognizes a method-parameter receiver the same way it already handled a local variable. A single fluent chain on a parameter-typed builder was already handled. Diagnostic IDs, severities, and unrelated inference boundaries are unchanged.
