@@ -3274,10 +3274,17 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             SemanticModel semanticModel,
             ImmutableHashSet<string>.Builder methods)
         {
-            // Mirror of the forward scan: walk backward from just before the bind, collecting
-            // validation/startup calls on the tracked builder and skipping inert intervening
-            // statements, so a validation call placed before the bind but separated from it by an
-            // unrelated statement is still recognized.
+            // Walk backward from just before the bind, collecting validation/startup calls on the
+            // tracked builder and skipping intervening statements, so a validation call placed
+            // before the bind but separated from it by an unrelated statement is still recognized.
+            // Unlike the forward scan, control flow does NOT stop the backward scan: a top-level
+            // statement before the bind always executes before the bind is reached, so an earlier
+            // unconditional validation call still applies (a conditionally-executed validation call
+            // lives inside the control-flow statement, not as a top-level statement, and so is not
+            // collected). The scan stops only at the builder's own declaration (its origin) or at a
+            // statement that retargets the builder (earlier calls then belong to a different
+            // OptionsBuilder instance) — including a conditional reassignment nested inside a
+            // control-flow statement, which StatementRetargetsLocal detects.
             for (var i = startIndex; i >= 0; i--)
             {
                 var statement = block.Statements[i];
@@ -3304,15 +3311,15 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     return;
                 }
 
-                // Only skip inert statements (an unrelated expression statement, or a local
-                // declaration that does not declare the tracked builder). Any other statement —
-                // control flow such as if/return/throw/loops/switch, a nested block, using/lock —
-                // stops the scan conservatively.
-                if (statement is not ExpressionStatementSyntax &&
-                    statement is not LocalDeclarationStatementSyntax)
+                // A labelled statement is a jump target: control can reach the bind via a `goto`
+                // that skips the statements before the label, so source order no longer proves the
+                // earlier validation ran. Stop conservatively.
+                if (statement is LabeledStatementSyntax)
                 {
                     return;
                 }
+
+                // Any other statement is inert with respect to this registration; keep scanning.
             }
         }
 

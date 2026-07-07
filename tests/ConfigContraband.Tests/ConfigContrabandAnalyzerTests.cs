@@ -5734,6 +5734,74 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_and_cfg004_honor_validation_before_bind_across_control_flow()
+    {
+        // The prior validation is a top-level unconditional statement, then a control-flow statement,
+        // then the bind. The earlier validation always runs before the bind is reached, so the
+        // backward scan must continue past the control-flow statement and collect it — control flow
+        // does not stop the backward scan (only a retarget or the builder's declaration does).
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.ValidateDataAnnotations();
+            if (services.Count > 0)
+            {
+                services.AddSingleton<Startup>();
+            }
+            optionsBuilder.BindConfiguration("Stripe");
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg004_reports_when_prior_validation_is_skippable_via_goto_label_before_bind()
+    {
+        // A `goto` can jump over the validation straight to a label before the bind, so reaching the
+        // bind does not prove the earlier ValidateDataAnnotations() ran. The backward scan must stop
+        // at the labelled statement rather than collect the pre-label validation, so CFG004 fires.
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            if (services.Count > 0)
+            {
+                goto Bind;
+            }
+            optionsBuilder.ValidateDataAnnotations();
+            Bind:
+            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_reports_when_builder_retargeted_before_bind_drops_prior_validation()
+    {
+        // ValidateDataAnnotations() is called on the first builder, then the local is reassigned to a
+        // new builder, then the bind. The prior validation belongs to the discarded first builder, so
+        // the backward scan must stop at the reassignment and not attribute it to the bound builder —
+        // CFG004 must fire because the bound builder has no DataAnnotations validation.
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.ValidateDataAnnotations();
+            optionsBuilder = services.AddOptions<StripeOptions>();
+            {|#0:optionsBuilder.BindConfiguration("Stripe")|};
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_parameter_typed_builder_split_validation_without_validate_on_start()
     {
         // The builder is a method parameter and its bind/validation calls are split across separate
