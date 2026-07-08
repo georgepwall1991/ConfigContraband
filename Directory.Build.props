@@ -1,0 +1,21 @@
+<Project>
+  <!-- Repo-wide build guardrails. Imported before every .csproj, so any project
+       can still override. Added 2026-07-08 as part of the .NET setup pass.
+       Warning policy left to each project (not forced here). -->
+  <PropertyGroup>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+    <!-- Fast local loop: skip running analyzers at CLI build time (the IDE / the
+         dotnet-lsp + roslyn MCP still run them live, so CFG feedback is never lost).
+         CI flips them back on by passing -p:ContinuousIntegrationBuild=true. -->
+    <RunAnalyzersDuringBuild Condition="'$(ContinuousIntegrationBuild)' != 'true'">false</RunAnalyzersDuringBuild>
+    <EnforceCodeStyleInBuild Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</EnforceCodeStyleInBuild>
+
+    <OptimizeImplicitlyTriggeredBuild>true</OptimizeImplicitlyTriggeredBuild>
+
+    <!-- To enforce warnings-as-errors in CI once warnings are triaged, uncomment:
+    <TreatWarningsAsErrors Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</TreatWarningsAsErrors>
+    -->
+  </PropertyGroup>
+</Project>
