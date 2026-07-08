@@ -188,6 +188,98 @@ public sealed class ConfigurationModelCoverageTests
             !property!.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig);
     }
 
+    [Fact]
+    public void Json_parser_captures_string_scalar_kind_value_and_location()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """));
+
+        Assert.NotNull(root);
+        Assert.True(root!.TryGetProperty("Stripe", out var stripe));
+        Assert.True(stripe.Value.TryGetProperty("ApiKey", out var apiKey));
+        Assert.Equal(ScalarKind.String, apiKey.ScalarKind);
+        Assert.Equal("secret", apiKey.ScalarValue);
+        Assert.NotNull(apiKey.ValueLocation);
+    }
+
+    [Fact]
+    public void Json_parser_captures_number_scalar_kind_and_raw_text()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              "Server": {
+                "Port": 8080
+              }
+            }
+            """));
+
+        Assert.NotNull(root);
+        Assert.True(root!.TryGetProperty("Server", out var server));
+        Assert.True(server.Value.TryGetProperty("Port", out var port));
+        Assert.Equal(ScalarKind.Number, port.ScalarKind);
+        Assert.Equal("8080", port.ScalarValue);
+        Assert.NotNull(port.ValueLocation);
+    }
+
+    [Fact]
+    public void Json_parser_captures_bool_scalar_kind_preserving_literal_casing()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              "Server": {
+                "Enabled": true
+              }
+            }
+            """));
+
+        Assert.NotNull(root);
+        Assert.True(root!.TryGetProperty("Server", out var server));
+        Assert.True(server.Value.TryGetProperty("Enabled", out var enabled));
+        Assert.Equal(ScalarKind.Bool, enabled.ScalarKind);
+        Assert.Equal("true", enabled.ScalarValue);
+    }
+
+    [Fact]
+    public void Json_parser_captures_null_scalar_kind()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              "Server": {
+                "Port": null
+              }
+            }
+            """));
+
+        Assert.NotNull(root);
+        Assert.True(root!.TryGetProperty("Server", out var server));
+        Assert.True(server.Value.TryGetProperty("Port", out var port));
+        Assert.Equal(ScalarKind.Null, port.ScalarKind);
+        Assert.Equal("null", port.ScalarValue);
+    }
+
+    [Fact]
+    public void Json_parser_marks_object_values_with_no_scalar_kind()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """));
+
+        Assert.NotNull(root);
+        Assert.True(root!.TryGetProperty("Stripe", out var stripe));
+        Assert.Equal(ScalarKind.None, stripe.ScalarKind);
+        Assert.Null(stripe.ScalarValue);
+        Assert.Null(stripe.ValueLocation);
+    }
+
     private sealed class TestAdditionalText : AdditionalText
     {
         private readonly SourceText _text;

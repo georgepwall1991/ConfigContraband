@@ -68,4 +68,13 @@ public static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "A key under a bound appsettings section will be rejected while BinderOptions.ErrorOnUnknownConfiguration is enabled.");
+
+    public static readonly DiagnosticDescriptor ConfigurationValueTypeMismatch = new(
+        id: DiagnosticIds.ConfigurationValueTypeMismatch,
+        title: "Configuration value cannot be bound to the target property type",
+        messageFormat: "Configuration value for \"{0}\" cannot be bound to {1}",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "A scalar value in an appsettings section cannot be converted to the bound property's CLR type, so the configuration binder will throw during binding.");
 }

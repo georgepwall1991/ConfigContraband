@@ -27,7 +27,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         DiagnosticDescriptors.DataAnnotationsNotEnabled,
         DiagnosticDescriptors.NestedValidationNotRecursive,
         DiagnosticDescriptors.UnknownConfigurationKey,
-        DiagnosticDescriptors.UnknownConfigurationKeyWillThrow);
+        DiagnosticDescriptors.UnknownConfigurationKeyWillThrow,
+        DiagnosticDescriptors.ConfigurationValueTypeMismatch);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -556,6 +557,12 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
             if (property.Value.Properties.IsDefaultOrEmpty)
             {
+                AnalyzeScalarValueConversion(
+                    reportDiagnostic,
+                    unknownKeysReported,
+                    metadata.TypeKey,
+                    bindableProperty,
+                    property);
                 continue;
             }
 
@@ -1088,6 +1095,36 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             fullPath,
             typeName,
             suffix));
+    }
+
+    private static void AnalyzeScalarValueConversion(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> unknownKeysReported,
+        string typeKey,
+        BindableProperty bindableProperty,
+        ConfigurationProperty property)
+    {
+        if (!ScalarConversion.IsProvablyNotConvertible(
+                bindableProperty.Symbol.Type,
+                property.ScalarKind,
+                property.ScalarValue))
+        {
+            return;
+        }
+
+        var location = property.ValueLocation ?? property.Location;
+        var reportKey =
+            typeKey + "|" + DiagnosticDescriptors.ConfigurationValueTypeMismatch.Id + "|" + location.GetLineSpan().Path + "|" + property.FullPath;
+        if (!unknownKeysReported.TryAdd(reportKey, 0))
+        {
+            return;
+        }
+
+        reportDiagnostic(Diagnostic.Create(
+            DiagnosticDescriptors.ConfigurationValueTypeMismatch,
+            location,
+            property.FullPath,
+            bindableProperty.Symbol.Type.ToDisplayString()));
     }
 
     private static bool TryCreateRegistration(

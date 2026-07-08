@@ -1,0 +1,5 @@
+# This repository is formatted by `dotnet format` (see .github/workflows/ci.yml),
+# NOT by CSharpier. A global editor/agent hook may still invoke `csharpier format`
+# on save; ignoring everything here makes that a no-op so CSharpier can never
+# reformat files into a style that diverges from `dotnet format` and churns diffs.
+*

@@ -117,6 +117,7 @@ When the analyzer cannot prove a configuration shape statically, it stays quiet.
 | `CFG005` | Nested options validation is not recursive | Warning | Nested objects or item types with annotations or `IValidatableObject`, but no recursive validation attribute. |
 | `CFG006` | Unknown configuration key under bound section | Info | JSON keys that do not match bindable options properties or aliases. |
 | `CFG007` | Unknown configuration key will throw during binding | Warning | JSON keys that do not match bindable options properties while `ErrorOnUnknownConfiguration` is enabled. |
+| `CFG008` | Configuration value cannot be bound to the target property type | Warning | Scalar values that provably cannot convert to the bound property's CLR type, e.g. `"Port": "eighty"` for an `int`. |
 
 ## appsettings IntelliSense (schema generation)
 
@@ -493,6 +494,18 @@ After:
 ```
 
 `CFG007` mostly follows the same property graph as `CFG006`, but only reports when the final value of `ErrorOnUnknownConfiguration` is provably constant `true` on the actual binder-options lambda parameter. It also catches strict-mode failures that loose binding allows, including `[ConfigurationKeyName]` alias keys rejected by the current strict binder, object-shaped data under scalar properties such as `"ApiKey": { "Foo": "x" }`, null/default-initialized settable nested objects, constructor-initialized get-only object values, rejected object-shaped entries inside scalar collections or dictionaries, and unknown object keys behind nested dictionaries, including object collections. CLR property names on scalar objects, null CLR-only nullable values, open interface/object declared or value shapes, property- or constructor-initialized polymorphic reference shapes, matching initializer- or constructor-prepopulated polymorphic dictionary entries including ignore-case dictionary comparers, and nested dictionary entries that the strict binder accepts, unrelated `BinderOptions` instances, escaped binder-options helper calls, non-constant assignments, compound writes, assignments reset to `false`, early-return/control-flow cases, and default binding behaviour stay quiet or on the existing `CFG006` informational path.
+
+### `CFG008`: Configuration Values That Cannot Bind To Their Property Type
+
+The runtime `ConfigurationBinder` stores every configuration value as a string and converts it through `TypeDescriptor.GetConverter(type).ConvertFromInvariantString(value)` under the invariant culture. When that conversion can't succeed — `"Port": "eighty"` for an `int`, `"Level": "Verbos"` for an enum, `"Enabled": "yes"` for a `bool` — the binder throws `InvalidOperationException` while binding, before your options ever validate. `CFG008` catches that at build time and points at the offending value in the `appsettings` file. What matters is the value's **string content, not its JSON kind**: `"Port": 8080` and `"Port": "8080"` both bind fine, while `"Port": true` (stored as the string `"True"`) does not.
+
+The rule fires only on a **provable** conversion failure and is deliberately conservative everywhere the invariant `TryParse` is stricter than the runtime converter:
+
+- **Covered target types:** the integral types (`sbyte`–`ulong`), `float`/`double`/`decimal`, `bool`, `char`, enums, `Guid`, `TimeSpan`, `DateTime`, and `DateTimeOffset` (each unwrapped from `Nullable<T>`).
+- **Left alone (never reported):** `string`/`object` targets, JSON `null` (that is `CFG002`'s concern), object/array values under a scalar-typed property (a shape mismatch, not a conversion one), and collection- or dictionary-*element* mismatches such as `List<int>` given `[1, "x"]`.
+- **Precision boundaries matched to the binder:** `#`/`0x`-prefixed hex integers, empty strings for `char`/`DateTime`/`DateTimeOffset` (the converters default them), enum comma-lists (`"Read, Write"`) and numeric enum values, and case-insensitive `bool` values are all accepted, because the runtime converter accepts them.
+
+There is no automatic code fix — like `CFG006`/`CFG007`, the diagnostic points at a JSON additional file rather than at C# the analyzer can rewrite.
 
 ## Design Principles
 
