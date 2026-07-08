@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.5.16</Version>
+    <Version>0.6.0</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed a CFG007/CFG006 false positive found by evidence-based audit: a Dictionary&lt;TKey, TValue&gt; whose key type the real ConfigurationBinder does not support (anything other than string, enum, or an integral type) is never bound at runtime, so CFG007/CFG006 should never report under its values - but the analyzer only ever checked the dictionary's value type, never its key type. A typo'd key under a Dictionary&lt;Guid, EndpointOptions&gt; value wrongly reported CFG007 even though the runtime binder silently skips the whole dictionary. String-, enum-, and integral-keyed dictionaries keep exactly today's behavior. The generated appsettings.schema.json output is unchanged. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Added CFG008 (Warning): a scalar value in an appsettings section that provably cannot convert to the bound property's CLR type - for example "Port": "eighty" for an int, or "Level": "Verbos" for an enum - now reports at the value's location, because the runtime ConfigurationBinder throws InvalidOperationException while binding it. The check mirrors the binder's TypeConverter semantics (invariant culture, string content rather than JSON kind) and only fires on a provable failure: hex integers, char/DateTime empty strings, enum comma-lists and numeric values, string/object targets, JSON null, and collection/dictionary element mismatches are all left alone. There is no automatic code fix because the diagnostic points at a JSON additional file. The generated appsettings.schema.json output is unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

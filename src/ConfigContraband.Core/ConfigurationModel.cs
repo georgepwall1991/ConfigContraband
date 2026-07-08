@@ -223,7 +223,8 @@ internal sealed class ConfigurationSnapshot
     {
         var key = propertyPathParts[partIndex];
         var fullPath = string.IsNullOrEmpty(parentPath) ? key : parentPath + ":" + key;
-        var value = partIndex == propertyPathParts.Length - 1
+        var isLeaf = partIndex == propertyPathParts.Length - 1;
+        var value = isLeaf
             ? source.Value
             : new ConfigurationNode(ImmutableArray.Create(CreateProjectedProperty(
                 propertyPathParts,
@@ -236,7 +237,10 @@ internal sealed class ConfigurationSnapshot
             fullPath,
             value,
             source.Location,
-            source.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig);
+            source.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig,
+            isLeaf ? source.ScalarKind : ScalarKind.None,
+            isLeaf ? source.ScalarValue : null,
+            isLeaf ? source.ValueLocation : null);
     }
 
     private static bool TryGetChildPathPart(string fullPath, string[] parentPathParts, out string childPart)
@@ -339,6 +343,16 @@ internal sealed class ConfigurationNode
     }
 }
 
+internal enum ScalarKind
+{
+    /// <summary>The value is not a scalar (object, array, or malformed).</summary>
+    None,
+    String,
+    Number,
+    Bool,
+    Null,
+}
+
 internal sealed class ConfigurationProperty
 {
     public ConfigurationProperty(
@@ -346,20 +360,37 @@ internal sealed class ConfigurationProperty
         string fullPath,
         ConfigurationNode value,
         Location location,
-        bool strictUnknownConfigurationKeySuppressedByAnalyzerConfig)
+        bool strictUnknownConfigurationKeySuppressedByAnalyzerConfig,
+        ScalarKind scalarKind = ScalarKind.None,
+        string? scalarValue = null,
+        Location? valueLocation = null)
     {
         Key = key;
         FullPath = fullPath;
         Value = value;
         Location = location;
         StrictUnknownConfigurationKeySuppressedByAnalyzerConfig = strictUnknownConfigurationKeySuppressedByAnalyzerConfig;
+        ScalarKind = scalarKind;
+        ScalarValue = scalarValue;
+        ValueLocation = valueLocation;
     }
 
     public string Key { get; }
     public string FullPath { get; }
     public ConfigurationNode Value { get; }
+
+    /// <summary>Location of the property key.</summary>
     public Location Location { get; }
     public bool StrictUnknownConfigurationKeySuppressedByAnalyzerConfig { get; }
+
+    /// <summary>Kind of the property's scalar value, or <see cref="ScalarKind.None"/> for object/array/malformed values.</summary>
+    public ScalarKind ScalarKind { get; }
+
+    /// <summary>The property's scalar value as text (decoded for strings; the literal for other scalars), or <c>null</c> for non-scalar values.</summary>
+    public string? ScalarValue { get; }
+
+    /// <summary>Location of the property's scalar value, or <c>null</c> for non-scalar values.</summary>
+    public Location? ValueLocation { get; }
 }
 
 internal static class JsonConfigurationParser
@@ -432,13 +463,16 @@ internal static class JsonConfigurationParser
                 }
 
                 SkipWhitespace();
-                var value = ParseValue(fullPath);
+                var parsed = ParseValue(fullPath);
                 properties.Add(new ConfigurationProperty(
                     key,
                     fullPath,
-                    value,
+                    parsed.Node,
                     CreateLocation(TextSpan.FromBounds(keyStart, keyEnd)),
-                    _strictUnknownConfigurationKeySuppressedByAnalyzerConfig));
+                    _strictUnknownConfigurationKeySuppressedByAnalyzerConfig,
+                    parsed.Kind,
+                    parsed.Raw,
+                    parsed.Kind == ScalarKind.None ? null : CreateLocation(parsed.ValueSpan)));
 
                 SkipWhitespace();
                 if (Current == ',')
@@ -459,27 +493,71 @@ internal static class JsonConfigurationParser
             return new ConfigurationNode(properties.ToImmutable());
         }
 
-        private ConfigurationNode ParseValue(string path)
+        private readonly struct ParsedValue
+        {
+            public ParsedValue(ConfigurationNode node, ScalarKind kind, string? raw, TextSpan valueSpan)
+            {
+                Node = node;
+                Kind = kind;
+                Raw = raw;
+                ValueSpan = valueSpan;
+            }
+
+            public ConfigurationNode Node { get; }
+            public ScalarKind Kind { get; }
+            public string? Raw { get; }
+            public TextSpan ValueSpan { get; }
+        }
+
+        private ParsedValue ParseValue(string path)
         {
             SkipWhitespace();
             if (Current == '{')
             {
-                return ParseObject(path);
+                return new ParsedValue(ParseObject(path), ScalarKind.None, raw: null, default);
             }
 
             if (Current == '[')
             {
-                return ParseArray(path);
+                return new ParsedValue(ParseArray(path), ScalarKind.None, raw: null, default);
             }
 
             if (Current == '"')
             {
-                _ = ParseString();
-                return ConfigurationNode.Empty;
+                var stringStart = _position;
+                var decoded = ParseString();
+                return new ParsedValue(
+                    ConfigurationNode.Empty,
+                    ScalarKind.String,
+                    decoded,
+                    TextSpan.FromBounds(stringStart, Math.Min(_position, _text.Length)));
             }
 
+            var scalarStart = _position;
             SkipScalar();
-            return ConfigurationNode.Empty;
+            var rawSpan = TextSpan.FromBounds(scalarStart, Math.Min(_position, _text.Length));
+            var rawText = _text.ToString(rawSpan);
+            var leadingWhitespace = rawText.Length - rawText.TrimStart().Length;
+            var trimmed = rawText.Trim();
+            var trimmedStart = scalarStart + leadingWhitespace;
+            var trimmedSpan = TextSpan.FromBounds(trimmedStart, trimmedStart + trimmed.Length);
+            return new ParsedValue(ConfigurationNode.Empty, ClassifyScalar(trimmed), trimmed, trimmedSpan);
+        }
+
+        private static ScalarKind ClassifyScalar(string value)
+        {
+            if (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "false", StringComparison.OrdinalIgnoreCase))
+            {
+                return ScalarKind.Bool;
+            }
+
+            if (string.Equals(value, "null", StringComparison.OrdinalIgnoreCase))
+            {
+                return ScalarKind.Null;
+            }
+
+            return ScalarKind.Number;
         }
 
         private ConfigurationNode ParseArray(string path)
@@ -494,13 +572,16 @@ internal static class JsonConfigurationParser
                 var itemStart = _position;
                 var itemKey = index.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 var itemPath = path + ":" + itemKey;
-                var value = ParseValue(itemPath);
+                var parsed = ParseValue(itemPath);
                 properties.Add(new ConfigurationProperty(
                     itemKey,
                     itemPath,
-                    value,
+                    parsed.Node,
                     CreateLocation(TextSpan.FromBounds(itemStart, Math.Min(_position, _text.Length))),
-                    _strictUnknownConfigurationKeySuppressedByAnalyzerConfig));
+                    _strictUnknownConfigurationKeySuppressedByAnalyzerConfig,
+                    parsed.Kind,
+                    parsed.Raw,
+                    parsed.Kind == ScalarKind.None ? null : CreateLocation(parsed.ValueSpan)));
                 index++;
 
                 SkipWhitespace();

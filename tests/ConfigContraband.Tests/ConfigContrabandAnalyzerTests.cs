@@ -13745,6 +13745,301 @@ public sealed class ConfigContrabandAnalyzerTests
             expected);
     }
 
+    private const string ServerValueOptions = """
+        public sealed class ServerOptions
+        {
+            public TYPE Value { get; set; }
+        }
+        """;
+
+    private static string ServerOptionsOf(string type) => ServerValueOptions.Replace("TYPE", type);
+
+    private static string BindServer =>
+        """
+        services.AddOptions<ServerOptions>()
+            .BindConfiguration("Server");
+        """;
+
+    [Theory]
+    [InlineData("int", "\"eighty\"", 22)]
+    [InlineData("long", "\"x\"", 17)]
+    [InlineData("double", "\"abc\"", 19)]
+    [InlineData("decimal", "\"abc\"", 19)]
+    [InlineData("System.Guid", "\"not-a-guid\"", 26)]
+    [InlineData("System.TimeSpan", "\"banana\"", 22)]
+    [InlineData("System.DateTime", "\"not-a-date\"", 26)]
+    public async Task Cfg008_reports_value_that_cannot_convert_to_target_type(string type, string jsonValue, int endColumn)
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf(type));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, endColumn)
+            .WithArguments("Server:Value", TypeDisplay(type));
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", $$"""
+            {
+              "Server": {
+                "Value": {{jsonValue}}
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_json_bool_value_bound_to_integer()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, 18)
+            .WithArguments("Server:Value", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": true
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_unknown_enum_member()
+    {
+        var source = OptionsSource(
+            BindServer,
+            optionsTypes: """
+            public enum Level { Low, High }
+
+            public sealed class ServerOptions
+            {
+                public Level Value { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, 20)
+            .WithArguments("Server:Value", "Level");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "Loud"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_non_bool_string_bound_to_bool()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("bool"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, 19)
+            .WithArguments("Server:Value", "bool");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "yes"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_multi_char_string_bound_to_char()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("char"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, 18)
+            .WithArguments("Server:Value", "char");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "ab"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_bad_value_for_nullable_target()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int?"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, 22)
+            .WithArguments("Server:Value", "int?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_value_bound_through_bind_get_section()
+    {
+        var source = OptionsSource(
+            """
+            IConfiguration configuration = null!;
+            services.AddOptions<ServerOptions>()
+                .Bind(configuration.GetSection("Server"));
+            """,
+            extraUsings: "using Microsoft.Extensions.Configuration;\n",
+            optionsTypes: ServerOptionsOf("int"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, 22)
+            .WithArguments("Server:Value", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_value_bound_through_configure_get_section()
+    {
+        var source = OptionsSource(
+            """
+            IConfiguration configuration = null!;
+            services.Configure<ServerOptions>(configuration.GetSection("Server"));
+            """,
+            extraUsings: "using Microsoft.Extensions.Configuration;\n",
+            optionsTypes: ServerOptionsOf("int"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, 22)
+            .WithArguments("Server:Value", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Theory]
+    [InlineData("int", "8080")]
+    [InlineData("int", "\"8080\"")]
+    [InlineData("int", "\"0x1F\"")]
+    [InlineData("int", "\"#FF\"")]
+    [InlineData("bool", "true")]
+    [InlineData("bool", "\"TRUE\"")]
+    [InlineData("char", "\"a\"")]
+    [InlineData("char", "\"\"")]
+    [InlineData("System.DateTime", "\"2020-01-02\"")]
+    [InlineData("System.DateTime", "\"\"")]
+    [InlineData("System.Guid", "\"d3b07384-d9a0-4c9b-8b5e-000000000000\"")]
+    [InlineData("string", "\"anything\"")]
+    [InlineData("object", "\"anything\"")]
+    [InlineData("int", "null")]
+    public async Task Cfg008_does_not_report_convertible_or_skipped_value(string type, string jsonValue)
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf(type));
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", $$"""
+            {
+              "Server": {
+                "Value": {{jsonValue}}
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_does_not_report_numeric_or_comma_list_enum_values()
+    {
+        var source = OptionsSource(
+            BindServer,
+            optionsTypes: """
+            [System.Flags]
+            public enum Access { None = 0, Read = 1, Write = 2 }
+
+            public sealed class ServerOptions
+            {
+                public Access Value { get; set; }
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "Read, Write"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_does_not_report_scalar_given_to_nested_object_property()
+    {
+        var source = OptionsSource(
+            BindServer,
+            optionsTypes: """
+            public sealed class Nested { public string Name { get; set; } = ""; }
+
+            public sealed class ServerOptions
+            {
+                public Nested Value { get; set; } = new();
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "eighty"
+              }
+            }
+            """));
+    }
+
+    private static string TypeDisplay(string type) => type;
+
     private static string OptionsSource(
         string registration,
         string extraUsings = "",
