@@ -7,6 +7,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace ConfigContraband;
 
@@ -28,7 +29,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         DiagnosticDescriptors.NestedValidationNotRecursive,
         DiagnosticDescriptors.UnknownConfigurationKey,
         DiagnosticDescriptors.UnknownConfigurationKeyWillThrow,
-        DiagnosticDescriptors.ConfigurationValueTypeMismatch);
+        DiagnosticDescriptors.ConfigurationValueTypeMismatch,
+        DiagnosticDescriptors.ConfigurationKeyNotFound);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -53,6 +55,11 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     var invocation = (InvocationExpressionSyntax)syntaxContext.Node;
                     if (!TryCreateRegistration(invocation, syntaxContext.SemanticModel, out var registration))
                     {
+                        if (configuration.HasFiles)
+                        {
+                            AnalyzeDirectConfigurationRead(syntaxContext, configuration);
+                        }
+
                         return;
                     }
 
@@ -237,8 +244,31 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var suggestion = FindClosest(registration.SectionPath.Split(':').Last(), configuration.GetSiblingSectionNames(registration.SectionPath));
-        var suggestedSectionPath = suggestion is null ? null : ReplaceSectionLeaf(registration.SectionPath, suggestion);
+        ReportMissingSection(
+            reportDiagnostic,
+            DiagnosticDescriptors.MissingConfigurationSection,
+            registration.SectionPath,
+            registration.SectionExpression,
+            registration.SectionExpressionContainsFullPath,
+            configuration);
+    }
+
+    private static void ReportMissingSection(
+        Action<Diagnostic> reportDiagnostic,
+        DiagnosticDescriptor descriptor,
+        string sectionPath,
+        ExpressionSyntax sectionExpression,
+        bool sectionExpressionContainsFullPath,
+        ConfigurationSnapshot configuration,
+        bool requireSuggestion = false)
+    {
+        var suggestion = FindClosest(sectionPath.Split(':').Last(), configuration.GetSiblingSectionNames(sectionPath));
+        if (suggestion is null && requireSuggestion)
+        {
+            return;
+        }
+
+        var suggestedSectionPath = suggestion is null ? null : ReplaceSectionLeaf(sectionPath, suggestion);
         var suffix = suggestedSectionPath is null ? "." : $". Did you mean \"{suggestedSectionPath}\"?";
         var properties = ImmutableDictionary<string, string?>.Empty;
         if (suggestion is not null && suggestedSectionPath is not null)
@@ -250,9 +280,9 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             // preserve any leading segments the literal itself carries (for example the
             // "Sub:" in `.GetSection("Features").GetSection("Sub:Strpie")`), otherwise the
             // fix would silently drop them and produce a still-broken binding.
-            var suggestedReplacement = registration.SectionExpressionContainsFullPath
+            var suggestedReplacement = sectionExpressionContainsFullPath
                 ? suggestedSectionPath
-                : TryBuildChainedLeafReplacement(registration.SectionExpression, suggestion);
+                : TryBuildChainedLeafReplacement(sectionExpression, suggestion);
             if (suggestedReplacement is not null)
             {
                 properties = properties
@@ -262,10 +292,10 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         }
 
         reportDiagnostic(Diagnostic.Create(
-            DiagnosticDescriptors.MissingConfigurationSection,
-            registration.SectionExpression.GetLocation(),
+            descriptor,
+            sectionExpression.GetLocation(),
             properties,
-            registration.SectionPath,
+            sectionPath,
             suffix));
     }
 
@@ -293,6 +323,429 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         }
 
         return null;
+    }
+
+    private enum DirectConfigurationApiKind
+    {
+        GetRequiredSection,
+        GetConnectionString,
+        Get,
+        Bind,
+    }
+
+    private readonly struct DirectConfigurationInvocation
+    {
+        public DirectConfigurationInvocation(
+            DirectConfigurationApiKind kind,
+            IMethodSymbol originalMethod,
+            ExpressionSyntax receiver,
+            ExpressionSyntax? keyExpression,
+            InvocationExpressionSyntax syntax)
+        {
+            Kind = kind;
+            OriginalMethod = originalMethod;
+            Receiver = receiver;
+            KeyExpression = keyExpression;
+            Syntax = syntax;
+        }
+
+        public DirectConfigurationApiKind Kind { get; }
+        public IMethodSymbol OriginalMethod { get; }
+        public ExpressionSyntax Receiver { get; }
+        public ExpressionSyntax? KeyExpression { get; }
+        public InvocationExpressionSyntax Syntax { get; }
+    }
+
+    private static void AnalyzeDirectConfigurationRead(
+        SyntaxNodeAnalysisContext syntaxContext,
+        ConfigurationSnapshot configuration)
+    {
+        var invocation = (InvocationExpressionSyntax)syntaxContext.Node;
+        if (syntaxContext.SemanticModel.GetOperation(invocation, syntaxContext.CancellationToken) is not IInvocationOperation operation ||
+            !TryNormalizeDirectConfigurationInvocation(operation, out var directInvocation))
+        {
+            return;
+        }
+
+        switch (directInvocation.Kind)
+        {
+            case DirectConfigurationApiKind.GetRequiredSection:
+                AnalyzeStandaloneRequiredSectionRead(syntaxContext, directInvocation, configuration);
+                break;
+            case DirectConfigurationApiKind.GetConnectionString:
+                AnalyzeConnectionStringRead(syntaxContext, directInvocation, configuration);
+                break;
+            case DirectConfigurationApiKind.Get:
+            case DirectConfigurationApiKind.Bind:
+                AnalyzeBoundSectionRead(syntaxContext, directInvocation, configuration);
+                break;
+        }
+    }
+
+    private static bool TryNormalizeDirectConfigurationInvocation(
+        IInvocationOperation operation,
+        out DirectConfigurationInvocation invocation)
+    {
+        invocation = default;
+        if (operation.Syntax is not InvocationExpressionSyntax syntax)
+        {
+            return false;
+        }
+
+        var originalMethod = operation.TargetMethod.ReducedFrom ?? operation.TargetMethod;
+        var containingType = originalMethod.ContainingType?.ToDisplayString();
+        DirectConfigurationApiKind kind;
+        string? keyParameterName = null;
+
+        if (string.Equals(containingType, "Microsoft.Extensions.Configuration.ConfigurationExtensions", StringComparison.Ordinal))
+        {
+            if (string.Equals(originalMethod.Name, "GetRequiredSection", StringComparison.Ordinal))
+            {
+                kind = DirectConfigurationApiKind.GetRequiredSection;
+                keyParameterName = "key";
+            }
+            else if (string.Equals(originalMethod.Name, "GetConnectionString", StringComparison.Ordinal))
+            {
+                kind = DirectConfigurationApiKind.GetConnectionString;
+                keyParameterName = "name";
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else if (string.Equals(containingType, "Microsoft.Extensions.Configuration.ConfigurationBinder", StringComparison.Ordinal))
+        {
+            if (string.Equals(originalMethod.Name, "Get", StringComparison.Ordinal))
+            {
+                kind = DirectConfigurationApiKind.Get;
+            }
+            else if (string.Equals(originalMethod.Name, "Bind", StringComparison.Ordinal))
+            {
+                if (originalMethod.Parameters.Any(parameter =>
+                        string.Equals(parameter.Name, "key", StringComparison.Ordinal) &&
+                        parameter.Type.SpecialType == SpecialType.System_String))
+                {
+                    return false;
+                }
+
+                kind = DirectConfigurationApiKind.Bind;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+
+        ExpressionSyntax? receiver = null;
+        if (operation.TargetMethod.ReducedFrom is not null)
+        {
+            receiver = operation.Instance?.Syntax as ExpressionSyntax;
+        }
+        else
+        {
+            foreach (var argument in operation.Arguments)
+            {
+                if (argument.Parameter?.Ordinal == 0 && argument.Value.Syntax is ExpressionSyntax receiverExpression)
+                {
+                    receiver = receiverExpression;
+                    break;
+                }
+            }
+        }
+
+        if (receiver is null)
+        {
+            return false;
+        }
+
+        ExpressionSyntax? keyExpression = null;
+        if (keyParameterName is not null)
+        {
+            foreach (var argument in operation.Arguments)
+            {
+                if (string.Equals(argument.Parameter?.Name, keyParameterName, StringComparison.Ordinal) &&
+                    argument.Value.Syntax is ExpressionSyntax argumentExpression)
+                {
+                    keyExpression = argumentExpression;
+                    break;
+                }
+            }
+
+            if (keyExpression is null)
+            {
+                return false;
+            }
+        }
+
+        invocation = new DirectConfigurationInvocation(kind, originalMethod, receiver, keyExpression, syntax);
+        return true;
+    }
+
+    private static void AnalyzeStandaloneRequiredSectionRead(
+        SyntaxNodeAnalysisContext syntaxContext,
+        DirectConfigurationInvocation invocation,
+        ConfigurationSnapshot configuration)
+    {
+        var semanticModel = syntaxContext.SemanticModel;
+        if (invocation.KeyExpression is not { } keyExpression ||
+            !TryGetConfigurationSectionPath(
+                invocation.Receiver,
+                keyExpression,
+                semanticModel,
+                out var sectionPath,
+                out var sectionExpression,
+                out var sectionExpressionContainsFullPath) ||
+            configuration.TryFindSection(sectionPath, out _) ||
+            IsOptionsRegistrationSectionRead(invocation.Syntax, semanticModel) ||
+            IsLocallyBuiltConfigurationChain(invocation.Receiver, semanticModel) ||
+            ChainContainsMissingRequiredParent(invocation.Syntax, semanticModel, configuration))
+        {
+            return;
+        }
+
+        ReportMissingSection(
+            syntaxContext.ReportDiagnostic,
+            DiagnosticDescriptors.ConfigurationKeyNotFound,
+            sectionPath,
+            sectionExpression,
+            sectionExpressionContainsFullPath,
+            configuration);
+    }
+
+    private static void AnalyzeBoundSectionRead(
+        SyntaxNodeAnalysisContext syntaxContext,
+        DirectConfigurationInvocation invocation,
+        ConfigurationSnapshot configuration)
+    {
+        var semanticModel = syntaxContext.SemanticModel;
+        if (!TryGetConfigurationSectionPath(invocation.Receiver, semanticModel, out var sectionPath, out var sectionExpression, out var sectionExpressionContainsFullPath) ||
+            configuration.TryFindSection(sectionPath, out _) ||
+            IsOptionsRegistrationSectionRead(invocation.Syntax, semanticModel) ||
+            IsLocallyBuiltConfigurationChain(invocation.Receiver, semanticModel) ||
+            ChainContainsMissingRequiredParent(invocation.Syntax, semanticModel, configuration))
+        {
+            return;
+        }
+
+        ReportMissingSection(
+            syntaxContext.ReportDiagnostic,
+            DiagnosticDescriptors.ConfigurationKeyNotFound,
+            sectionPath,
+            sectionExpression,
+            sectionExpressionContainsFullPath,
+            configuration);
+    }
+
+    private static void AnalyzeConnectionStringRead(
+        SyntaxNodeAnalysisContext syntaxContext,
+        DirectConfigurationInvocation invocation,
+        ConfigurationSnapshot configuration)
+    {
+        if (invocation.KeyExpression is not { } nameExpression)
+        {
+            return;
+        }
+
+        var semanticModel = syntaxContext.SemanticModel;
+        if (!TryGetConstantSectionPath(nameExpression, semanticModel, out var connectionName))
+        {
+            return;
+        }
+
+        string? prefix = null;
+        if (TryGetConfigurationSectionPath(invocation.Receiver, semanticModel, out var receiverPath, out _, out _))
+        {
+            prefix = receiverPath;
+        }
+        else
+        {
+            var receiverType = semanticModel.GetTypeInfo(invocation.Receiver).Type;
+            if (IsConfigurationSectionType(receiverType) || !IsConfigurationType(receiverType))
+            {
+                return;
+            }
+        }
+
+        var connectionStringsPath = prefix is null ? "ConnectionStrings" : prefix + ":ConnectionStrings";
+        var fullPath = connectionStringsPath + ":" + connectionName;
+        if (configuration.FindSections(connectionStringsPath).IsDefaultOrEmpty ||
+            configuration.TryFindSection(fullPath, out _) ||
+            IsLocallyBuiltConfigurationChain(invocation.Receiver, semanticModel))
+        {
+            return;
+        }
+
+        // Connection strings are routinely supplied by environment variables or secret
+        // stores, so a plain "name not in appsettings" signal is too weak on its own.
+        // Only report when the name is a near-miss of a connection string that IS
+        // declared in appsettings — a provable typo.
+        ReportMissingSection(
+            syntaxContext.ReportDiagnostic,
+            DiagnosticDescriptors.ConfigurationKeyNotFound,
+            fullPath,
+            nameExpression,
+            sectionExpressionContainsFullPath: false,
+            configuration,
+            requireSuggestion: true);
+    }
+
+    /// <summary>
+    /// Resolves the expression the shared section-chain resolver should start from for a
+    /// direct-read invocation: the invocation itself for a plain member access, or the
+    /// enclosing conditional-access expression when the invocation is the immediate
+    /// `?.`-bound call (`config?.GetRequiredSection("X")`). Deeper conditional-access
+    /// shapes are not resolved — returning <c>null</c> keeps the analyzer quiet there.
+    /// </summary>
+    private static ExpressionSyntax? GetChainResolutionTarget(InvocationExpressionSyntax invocation)
+    {
+        if (invocation.Expression is MemberAccessExpressionSyntax)
+        {
+            return invocation;
+        }
+
+        if (invocation.Expression is MemberBindingExpressionSyntax &&
+            invocation.Parent is ConditionalAccessExpressionSyntax conditionalAccess &&
+            conditionalAccess.WhenNotNull == invocation)
+        {
+            return conditionalAccess;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Determines whether the direct read feeds a recognized options registration in the
+    /// same statement (for example `services.Configure&lt;T&gt;(config.GetRequiredSection("X"))`).
+    /// Those reads are already covered by CFG001 through the registration itself, so
+    /// reporting CFG009 as well would double-report the same missing section.
+    /// </summary>
+    private static bool IsOptionsRegistrationSectionRead(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        if (invocation.FirstAncestorOrSelf<StatementSyntax>() is not { } statement)
+        {
+            return false;
+        }
+
+        foreach (var candidate in statement.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            if (candidate == invocation)
+            {
+                continue;
+            }
+
+            if (TryCreateRegistration(candidate, semanticModel, out var registration) &&
+                invocation.Span.Contains(registration.SectionExpression.Span))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Walks the receiver chain of a direct-read invocation looking for an earlier
+    /// `GetRequiredSection` link whose own resolved path is already missing. That inner
+    /// link produces its own CFG009, so the outer read stays quiet instead of cascading
+    /// a second diagnostic for the same root cause.
+    /// </summary>
+    private static bool ChainContainsMissingRequiredParent(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        ConfigurationSnapshot configuration)
+    {
+        var expression = invocation.Expression is MemberAccessExpressionSyntax memberAccess
+            ? memberAccess.Expression
+            : null;
+
+        while (expression is not null)
+        {
+            expression = UnwrapForSectionChainResolution(expression);
+            if (expression is not InvocationExpressionSyntax parentInvocation ||
+                parentInvocation.Expression is not MemberAccessExpressionSyntax parentMemberAccess ||
+                !IsConfigurationSectionMethodName(parentMemberAccess.Name.Identifier.ValueText))
+            {
+                return false;
+            }
+
+            if (string.Equals(parentMemberAccess.Name.Identifier.ValueText, "GetRequiredSection", StringComparison.Ordinal) &&
+                semanticModel.GetSymbolInfo(parentInvocation).Symbol is IMethodSymbol parentMethod &&
+                string.Equals((parentMethod.ReducedFrom ?? parentMethod).ContainingType?.ToDisplayString(), "Microsoft.Extensions.Configuration.ConfigurationExtensions", StringComparison.Ordinal) &&
+                TryGetConfigurationSectionPath(parentInvocation, semanticModel, out var parentPath, out _, out _) &&
+                !configuration.TryFindSection(parentPath, out _))
+            {
+                return true;
+            }
+
+            expression = parentMemberAccess.Expression;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Detects a configuration chain rooted in a locally built configuration
+    /// (`new ConfigurationBuilder()...Build()`, directly or through a local variable's
+    /// initializer). Such configurations are visibly not the host's appsettings pipeline,
+    /// so their keys cannot be judged against the appsettings model.
+    /// </summary>
+    private static bool IsLocallyBuiltConfigurationChain(ExpressionSyntax expression, SemanticModel semanticModel)
+    {
+        var root = GetConfigurationChainRoot(expression);
+        if (IsConfigurationBuilderBuildInvocation(root, semanticModel))
+        {
+            return true;
+        }
+
+        if (root is IdentifierNameSyntax identifier &&
+            semanticModel.GetSymbolInfo(identifier).Symbol is ILocalSymbol local &&
+            local.DeclaringSyntaxReferences.Length == 1 &&
+            local.DeclaringSyntaxReferences[0].GetSyntax() is VariableDeclaratorSyntax declarator &&
+            declarator.SyntaxTree == identifier.SyntaxTree &&
+            declarator.Initializer?.Value is { } initializer)
+        {
+            return IsConfigurationBuilderBuildInvocation(UnwrapForSectionChainResolution(initializer), semanticModel);
+        }
+
+        return false;
+    }
+
+    private static ExpressionSyntax GetConfigurationChainRoot(ExpressionSyntax expression)
+    {
+        while (true)
+        {
+            expression = UnwrapForSectionChainResolution(expression);
+            if (expression is ConditionalAccessExpressionSyntax conditionalAccess)
+            {
+                expression = conditionalAccess.Expression;
+                continue;
+            }
+
+            if (expression is InvocationExpressionSyntax invocation &&
+                invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
+                IsConfigurationSectionMethodName(memberAccess.Name.Identifier.ValueText))
+            {
+                expression = memberAccess.Expression;
+                continue;
+            }
+
+            return expression;
+        }
+    }
+
+    private static bool IsConfigurationBuilderBuildInvocation(ExpressionSyntax expression, SemanticModel semanticModel)
+    {
+        return expression is InvocationExpressionSyntax invocation &&
+               invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
+               string.Equals(memberAccess.Name.Identifier.ValueText, "Build", StringComparison.Ordinal) &&
+               IsOrImplements(semanticModel.GetTypeInfo(memberAccess.Expression).Type, "Microsoft.Extensions.Configuration.IConfigurationBuilder");
     }
 
     private static void AnalyzeUnknownKeys(
@@ -2811,6 +3264,47 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
     }
 
     private static bool TryGetConfigurationSectionPath(
+        ExpressionSyntax receiver,
+        ExpressionSyntax keyExpression,
+        SemanticModel semanticModel,
+        out string sectionPath,
+        out ExpressionSyntax sectionExpression,
+        out bool sectionExpressionContainsFullPath)
+    {
+        sectionPath = null!;
+        sectionExpression = null!;
+        sectionExpressionContainsFullPath = false;
+
+        if (!TryGetConstantSectionPath(keyExpression, semanticModel, out var currentSectionPath))
+        {
+            return false;
+        }
+
+        if (TryGetConfigurationSectionPath(
+                receiver,
+                semanticModel,
+                out var parentSectionPath,
+                out _,
+                out _))
+        {
+            sectionPath = parentSectionPath + ":" + currentSectionPath;
+            sectionExpression = keyExpression;
+            return true;
+        }
+
+        var receiverType = semanticModel.GetTypeInfo(receiver).Type;
+        if (IsConfigurationSectionType(receiverType) || !IsConfigurationType(receiverType))
+        {
+            return false;
+        }
+
+        sectionPath = currentSectionPath;
+        sectionExpression = keyExpression;
+        sectionExpressionContainsFullPath = true;
+        return true;
+    }
+
+    private static bool TryGetConfigurationSectionPath(
         ExpressionSyntax expression,
         SemanticModel semanticModel,
         out string sectionPath,
@@ -2834,10 +3328,28 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 out sectionExpressionContainsFullPath);
         }
 
-        if (expression is not InvocationExpressionSyntax invocation ||
-            invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
+        if (expression is not InvocationExpressionSyntax invocation)
+        {
+            return false;
+        }
+
+        if (semanticModel.GetOperation(invocation) is IInvocationOperation operation &&
+            TryNormalizeDirectConfigurationInvocation(operation, out var directInvocation) &&
+            directInvocation.Kind == DirectConfigurationApiKind.GetRequiredSection &&
+            directInvocation.KeyExpression is { } requiredSectionKey)
+        {
+            return TryGetConfigurationSectionPath(
+                directInvocation.Receiver,
+                requiredSectionKey,
+                semanticModel,
+                out sectionPath,
+                out sectionExpression,
+                out sectionExpressionContainsFullPath);
+        }
+
+        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
             invocation.ArgumentList.Arguments.Count == 0 ||
-            !IsConfigurationSectionMethodName(memberAccess.Name.Identifier.ValueText))
+            !string.Equals(memberAccess.Name.Identifier.ValueText, "GetSection", StringComparison.Ordinal))
         {
             return false;
         }
@@ -2952,7 +3464,16 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 return false;
         }
 
-        if (!IsConfigurationSectionMethodName(methodName))
+        if (string.Equals(methodName, "GetRequiredSection", StringComparison.Ordinal))
+        {
+            if (semanticModel.GetOperation(invocation) is not IInvocationOperation operation ||
+                !TryNormalizeDirectConfigurationInvocation(operation, out var directInvocation) ||
+                directInvocation.Kind != DirectConfigurationApiKind.GetRequiredSection)
+            {
+                return false;
+            }
+        }
+        else if (!string.Equals(methodName, "GetSection", StringComparison.Ordinal))
         {
             return false;
         }
@@ -3025,38 +3546,22 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
     private static bool IsConfigurationSectionType(ITypeSymbol? type)
     {
-        if (type is null)
-        {
-            return false;
-        }
-
-        if (string.Equals(GetNonNullableDisplayString(type), "Microsoft.Extensions.Configuration.IConfigurationSection", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (type is INamedTypeSymbol namedType)
-        {
-            foreach (var iface in namedType.AllInterfaces)
-            {
-                if (string.Equals(GetNonNullableDisplayString(iface), "Microsoft.Extensions.Configuration.IConfigurationSection", StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return IsOrImplements(type, "Microsoft.Extensions.Configuration.IConfigurationSection");
     }
 
     private static bool IsConfigurationType(ITypeSymbol? type)
+    {
+        return IsOrImplements(type, "Microsoft.Extensions.Configuration.IConfiguration");
+    }
+
+    private static bool IsOrImplements(ITypeSymbol? type, string interfaceDisplayName)
     {
         if (type is null)
         {
             return false;
         }
 
-        if (string.Equals(GetNonNullableDisplayString(type), "Microsoft.Extensions.Configuration.IConfiguration", StringComparison.Ordinal))
+        if (string.Equals(GetNonNullableDisplayString(type), interfaceDisplayName, StringComparison.Ordinal))
         {
             return true;
         }
@@ -3065,7 +3570,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         {
             foreach (var iface in namedType.AllInterfaces)
             {
-                if (string.Equals(GetNonNullableDisplayString(iface), "Microsoft.Extensions.Configuration.IConfiguration", StringComparison.Ordinal))
+                if (string.Equals(GetNonNullableDisplayString(iface), interfaceDisplayName, StringComparison.Ordinal))
                 {
                     return true;
                 }
