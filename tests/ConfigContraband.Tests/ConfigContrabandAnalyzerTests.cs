@@ -14914,6 +14914,103 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg009_reports_after_contract_reassignment_through_explicit_interface_cast()
+    {
+        var source = DirectReadSource("""
+            IConfiguration current = new ConfigurationBuilder().Build();
+            current = (IConfiguration)configuration;
+            _ = current.GetRequiredSection({|#0:"Missing"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Missing", ".");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_local_configuration_manager_through_explicit_interface_cast()
+    {
+        var source = DirectReadSource("""
+            IConfiguration local = (IConfiguration)new ConfigurationManager();
+            _ = local.GetRequiredSection("Missing");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_custom_configuration_through_explicit_interface_cast()
+    {
+        var source = DirectReadSource(
+            "",
+            extraMembers: """
+            public void ReadCustom(CustomConfiguration custom)
+            {
+                IConfiguration contract = (IConfiguration)custom;
+                _ = contract.GetRequiredSection("Missing");
+            }
+            """,
+            extraTypes: """
+            public sealed class CustomConfiguration : IConfiguration
+            {
+                public string? this[string key] { get => null; set { } }
+                public System.Collections.Generic.IEnumerable<IConfigurationSection> GetChildren() => System.Linq.Enumerable.Empty<IConfigurationSection>();
+                public Microsoft.Extensions.Primitives.IChangeToken GetReloadToken() => null!;
+                public IConfigurationSection GetSection(string key) => null!;
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_downcast_from_contract_to_custom_configuration()
+    {
+        var source = DirectReadSource(
+            """
+            var custom = (CustomConfiguration)configuration;
+            _ = custom.GetRequiredSection("Missing");
+            """,
+            extraTypes: """
+            public sealed class CustomConfiguration : IConfiguration
+            {
+                public string? this[string key] { get => null; set { } }
+                public System.Collections.Generic.IEnumerable<IConfigurationSection> GetChildren() => System.Linq.Enumerable.Empty<IConfigurationSection>();
+                public Microsoft.Extensions.Primitives.IChangeToken GetReloadToken() => null!;
+                public IConfigurationSection GetSection(string key) => null!;
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_stays_quiet_after_mutation_through_interface_cast()
+    {
+        var source = DirectReadSource("""
+            IConfiguration current = (IConfiguration)configuration;
+            ((IConfiguration)current)["Missing"] = "value";
+            _ = current.GetRequiredSection("Missing");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_stays_quiet_after_mutation_through_concrete_cast()
+    {
+        var source = DirectReadSource("""
+            IConfiguration current = (IConfiguration)configuration;
+            ((ConfigurationManager)current)["Missing"] = "value";
+            _ = current.GetRequiredSection("Missing");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
     public async Task Cfg009_uses_latest_local_assignment_when_host_is_replaced_by_local_configuration()
     {
         var source = DirectReadSource("""

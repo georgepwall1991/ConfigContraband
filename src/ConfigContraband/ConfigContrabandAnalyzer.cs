@@ -763,7 +763,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         int safetyUntilPosition,
         HashSet<ILocalSymbol> visitedLocals)
     {
-        expression = UnwrapForSectionChainResolution(expression);
+        expression = UnwrapConfigurationInterfaceConversions(expression, semanticModel);
+
         if (IsConfigurationBuilderBuildInvocation(expression, semanticModel))
         {
             return ConfigurationReceiverProvenance.Local;
@@ -1032,7 +1033,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         ISymbol symbol,
         SemanticModel semanticModel)
     {
-        expression = UnwrapForSectionChainResolution(expression);
+        expression = UnwrapNonUserDefinedConversions(expression, semanticModel);
         return expression switch
         {
             IdentifierNameSyntax or MemberAccessExpressionSyntax
@@ -1047,6 +1048,38 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 IsExpressionRootedInSymbol(memberAccess.Expression, symbol, semanticModel),
             _ => false,
         };
+    }
+
+    private static ExpressionSyntax UnwrapConfigurationInterfaceConversions(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel)
+    {
+        expression = UnwrapForSectionChainResolution(expression);
+        while (semanticModel.GetOperation(expression) is IConversionOperation conversion &&
+               !conversion.Conversion.IsUserDefined &&
+               conversion.Type?.TypeKind == TypeKind.Interface &&
+               IsConfigurationType(conversion.Type) &&
+               conversion.Operand.Syntax is ExpressionSyntax operand)
+        {
+            expression = UnwrapForSectionChainResolution(operand);
+        }
+
+        return expression;
+    }
+
+    private static ExpressionSyntax UnwrapNonUserDefinedConversions(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel)
+    {
+        expression = UnwrapForSectionChainResolution(expression);
+        while (semanticModel.GetOperation(expression) is IConversionOperation conversion &&
+               !conversion.Conversion.IsUserDefined &&
+               conversion.Operand.Syntax is ExpressionSyntax operand)
+        {
+            expression = UnwrapForSectionChainResolution(operand);
+        }
+
+        return expression;
     }
 
     private static bool ReferencesSymbol(SyntaxNode node, ISymbol symbol, SemanticModel semanticModel)
