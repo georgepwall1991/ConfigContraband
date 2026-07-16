@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.11 - 2026-07-16
+
+- Fixed a `CFG008` false positive for integral hexadecimal text using the runtime converter's Visual Basic-style `&h`/`&H` prefix. All eight signed and unsigned integral targets now accept that prefix alongside the existing `0x` and `#` forms, with runtime-backed core and analyzer coverage preserving the exact converter boundary.
+
 ## 0.7.10 - 2026-07-16
 
 - Fixed a `CFG008` false negative for decimal text using number styles the runtime `DecimalConverter` rejects. Values such as `"1,000"` (thousands separator) and `"1-"` (trailing sign) now report, while exponent notation such as `"1e2"` remains accepted. Runtime-backed tests pin the converter boundary directly; other numeric targets are unchanged.

@@ -157,7 +157,7 @@ internal static class ScalarConversion
             return true;
         }
 
-        // The runtime integral converters also accept "0x"/"0X"/"#"-prefixed hex.
+        // The runtime integral converters also accept "0x"/"0X"/"&h"/"&H"/"#"-prefixed hex.
         var hex = StripHexPrefix(trimmed);
         return hex is not null && tryHex(hex);
     }
@@ -165,6 +165,11 @@ internal static class ScalarConversion
     private static string? StripHexPrefix(string value)
     {
         if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase) && value.Length > 2)
+        {
+            return value.Substring(2);
+        }
+
+        if (value.StartsWith("&h", StringComparison.OrdinalIgnoreCase) && value.Length > 2)
         {
             return value.Substring(2);
         }
