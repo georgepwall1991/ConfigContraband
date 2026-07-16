@@ -43,7 +43,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.7.2" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.7.3" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -527,9 +527,10 @@ There is no automatic code fix — like `CFG006`/`CFG007`, the diagnostic points
 
 - `configuration.GetRequiredSection("Section")` — reported when the section is missing from every `appsettings*.json` file. Chained paths (`GetSection("Parent").GetRequiredSection("Child")`), constant and `nameof` keys, `?.`/parenthesized/null-forgiving receivers, and host `IConfiguration`/`IConfigurationRoot`/`ConfigurationManager` contracts are resolved through the same path machinery as `CFG001`.
 - `configuration.GetSection("Section").Get<T>()` / `.Bind(instance)` — reported only when the missing path is a near-miss of a declared sibling. Plain misses stay quiet because environment providers may supply them. A bare `GetSection(...)` with no binder consumer also stays quiet: probing with `.Exists()` is idiomatic and `GetSection` never throws.
+- `configuration.Bind("Section", instance)` — follows the same suggestion-gated policy for a root key or a key relative to a known `GetSection(...)` chain. Instance and static calls are supported, including named arguments, when evaluating the instance argument is provably side-effect free; helper calls, property getters, and other effectful or unproven expressions stay quiet because they can mutate configuration before binding begins.
 - `configuration.GetConnectionString("Name")` — connection strings are routinely supplied by environment variables or secret stores, so a plain miss is not reported. The rule fires only when a `ConnectionStrings` section exists in appsettings and the name is a near-miss of a declared entry — a provable typo.
 
-The rule stays quiet whenever the absolute path or receiver provenance cannot be proven: non-constant keys, reads off a stored or parameter-typed `IConfigurationSection` (its own path is invisible), concrete custom `IConfiguration` implementations, locally constructed `ConfigurationBuilder`/`ConfigurationManager` roots, and receiver locals that are conditionally reassigned, mutated, escaped, or captured. Same-block straight-line assignments and aliases are followed — including harmless non-user-defined interface casts — so a local that ultimately points back to the host contract is still checked. Reads that feed a recognized options registration — `services.Configure<T>(configuration.GetRequiredSection("X"))` — are left to `CFG001` so the same miss is not reported twice, and a chain whose `GetRequiredSection` parent is already missing reports only once, at the parent. Runtime section existence follows the referenced JSON provider: .NET 10 empty objects and explicit `null` are missing, while empty arrays exist; unknown version-sensitive shapes stay quiet. The `configuration["key"]` indexer, the `Bind("key", instance)` overload, and deeper conditional-access chains remain deliberately out of scope.
+The rule stays quiet whenever the absolute path or receiver provenance cannot be proven: non-constant keys, reads off a stored or parameter-typed `IConfigurationSection` (its own path is invisible), concrete custom `IConfiguration` implementations, locally constructed `ConfigurationBuilder`/`ConfigurationManager` roots, and receiver locals that are conditionally reassigned, mutated, escaped, or captured. Same-block straight-line assignments and aliases are followed — including harmless non-user-defined interface casts — so a local that ultimately points back to the host contract is still checked. Framework binder calls require the signed Microsoft symbol, so same-FQN source shadows stay quiet. Reads that feed a recognized options registration — `services.Configure<T>(configuration.GetRequiredSection("X"))` — are left to `CFG001` so the same miss is not reported twice, and a chain whose `GetRequiredSection` parent is already missing reports only once, at the parent. Runtime section existence follows the referenced JSON provider: .NET 10 empty objects and explicit `null` are missing, while empty arrays exist; unknown version-sensitive shapes stay quiet. The `configuration["key"]` indexer and deeper conditional-access chains remain deliberately out of scope.
 
 ## Design Principles
 
@@ -547,7 +548,7 @@ ConfigContraband currently focuses on:
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
 - Direct `Configure<T>(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations for section and JSON-key drift.
 - Direct framework `ConfigurationBinder.GetValue<T>` reads for provable scalar conversion failures (`CFG008`).
-- Direct configuration reads: standalone `GetRequiredSection(...)`, suggestion-gated `GetSection(...).Get<T>()`/`.Bind(instance)`, and suggestion-gated `GetConnectionString(...)` (`CFG009`).
+- Direct configuration reads: standalone `GetRequiredSection(...)`, suggestion-gated `GetSection(...).Get<T>()`/`.Bind(instance)`, keyed `Bind("key", instance)`, and suggestion-gated `GetConnectionString(...)` (`CFG009`).
 - Strict `ErrorOnUnknownConfiguration` binder options for unknown-key failures.
 - String-literal section names.
 - Public bindable properties on options types, including inherited and constructor-bound bindable properties.

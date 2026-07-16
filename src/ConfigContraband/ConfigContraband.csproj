@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.2</Version>
+    <Version>0.7.3</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Extended CFG008 to direct framework ConfigurationBinder.GetValue&lt;T&gt; reads when a visible appsettings scalar provably cannot convert to T. Resolves root and known section-chain paths, supports constant defaults, reuses host-provenance and conversion safety boundaries, deduplicates against options-binding diagnostics, and rejects non-framework/same-FQN shadows; missing, null, non-scalar, dynamic, effectful-default, member-origin, stored-section, local, mutated, escaped, and custom-provider reads remain quiet.</PackageReleaseNotes>
+    <PackageReleaseNotes>Extended CFG009 to the framework configuration.Bind("key", instance) overload. Root and known section-chain paths now report only suggestion-backed missing-key typos, with static/named-call support, host-provenance guards, and signed framework symbol verification; plain misses, dynamic keys, local/custom/mutated receivers, and same-FQN shadows remain quiet.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
