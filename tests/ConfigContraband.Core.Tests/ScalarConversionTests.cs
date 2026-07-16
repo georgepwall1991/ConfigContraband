@@ -201,6 +201,20 @@ public sealed class ScalarConversionTests
                 .ConvertFromInvariantString(value));
     }
 
+    [Fact]
+    public void IsIntegerLiteral_returns_false_when_no_enum_underlying_type_is_available()
+    {
+        var method = typeof(ScalarConversion).GetMethod(
+            "IsIntegerLiteral",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        var result = method!.Invoke(
+            null,
+            [Compilation.GetTypeByMetadataName("Nested")!, "1"]);
+
+        Assert.Equal(false, result);
+    }
+
     private enum RuntimeColor
     {
         Red,
