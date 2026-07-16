@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.3</Version>
+    <Version>0.7.4</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Extended CFG009 to the framework configuration.Bind("key", instance) overload. Root and known section-chain paths now report only suggestion-backed missing-key typos, with static/named-call support, host-provenance guards, and signed framework symbol verification; plain misses, dynamic keys, local/custom/mutated receivers, and same-FQN shadows remain quiet.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed CFG009 false positives when Bind instance evaluation or binder-options callbacks can mutate configuration before binding, including static-field and unprovable implicit-construction initialisation. Signed Microsoft identity checks now cover ConfigurationExtensions as well as ConfigurationBinder; proven-safe calls retain suggestion-backed typo diagnostics.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
