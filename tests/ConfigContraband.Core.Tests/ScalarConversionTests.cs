@@ -37,6 +37,14 @@ public sealed class ScalarConversionTests
     [InlineData("int", "String", "8080", false)]
     [InlineData("int", "String", "0x1F", false)] // hex form the converter accepts
     [InlineData("int", "String", "#FF", false)]
+    [InlineData("int", "String", "&h1F", false)]
+    [InlineData("sbyte", "String", "&H7F", false)]
+    [InlineData("byte", "String", "&hFF", false)]
+    [InlineData("short", "String", "&h7FFF", false)]
+    [InlineData("ushort", "String", "&hFFFF", false)]
+    [InlineData("uint", "String", "&hFFFFFFFF", false)]
+    [InlineData("long", "String", "&h7FFFFFFFFFFFFFFF", false)]
+    [InlineData("ulong", "String", "&hFFFFFFFFFFFFFFFF", false)]
     [InlineData("int", "String", " 80 ", false)] // surrounding whitespace
     [InlineData("bool", "Bool", "true", false)]
     [InlineData("bool", "String", "TRUE", false)] // case-insensitive
@@ -120,6 +128,22 @@ public sealed class ScalarConversionTests
             System.ComponentModel.TypeDescriptor
                 .GetConverter(typeof(decimal))
                 .ConvertFromInvariantString(value));
+    }
+
+    [Theory]
+    [InlineData(typeof(sbyte), "&H7F")]
+    [InlineData(typeof(byte), "&hFF")]
+    [InlineData(typeof(short), "&h7FFF")]
+    [InlineData(typeof(ushort), "&hFFFF")]
+    [InlineData(typeof(int), "&h7FFFFFFF")]
+    [InlineData(typeof(uint), "&hFFFFFFFF")]
+    [InlineData(typeof(long), "&h7FFFFFFFFFFFFFFF")]
+    [InlineData(typeof(ulong), "&hFFFFFFFFFFFFFFFF")]
+    public void Runtime_integer_converter_accepts_ampersand_h_hex_prefix(Type type, string value)
+    {
+        _ = System.ComponentModel.TypeDescriptor
+            .GetConverter(type)
+            .ConvertFromInvariantString(value);
     }
 
     [Theory]
@@ -267,7 +291,13 @@ public sealed class ScalarConversionTests
         return key switch
         {
             "int" => Compilation.GetSpecialType(SpecialType.System_Int32),
+            "sbyte" => Compilation.GetSpecialType(SpecialType.System_SByte),
+            "byte" => Compilation.GetSpecialType(SpecialType.System_Byte),
+            "short" => Compilation.GetSpecialType(SpecialType.System_Int16),
+            "ushort" => Compilation.GetSpecialType(SpecialType.System_UInt16),
+            "uint" => Compilation.GetSpecialType(SpecialType.System_UInt32),
             "long" => Compilation.GetSpecialType(SpecialType.System_Int64),
+            "ulong" => Compilation.GetSpecialType(SpecialType.System_UInt64),
             "double" => Compilation.GetSpecialType(SpecialType.System_Double),
             "decimal" => Compilation.GetSpecialType(SpecialType.System_Decimal),
             "bool" => Compilation.GetSpecialType(SpecialType.System_Boolean),
