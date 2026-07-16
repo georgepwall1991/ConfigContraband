@@ -367,7 +367,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             ExpressionSyntax receiver,
             ExpressionSyntax? keyExpression,
             ITypeSymbol? targetType,
-            bool defaultValueIsProvablySafe,
+            bool argumentsAreProvablySafe,
             InvocationExpressionSyntax syntax)
         {
             Kind = kind;
@@ -375,7 +375,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             Receiver = receiver;
             KeyExpression = keyExpression;
             TargetType = targetType;
-            DefaultValueIsProvablySafe = defaultValueIsProvablySafe;
+            ArgumentsAreProvablySafe = argumentsAreProvablySafe;
             Syntax = syntax;
         }
 
@@ -384,7 +384,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         public ExpressionSyntax Receiver { get; }
         public ExpressionSyntax? KeyExpression { get; }
         public ITypeSymbol? TargetType { get; }
-        public bool DefaultValueIsProvablySafe { get; }
+        public bool ArgumentsAreProvablySafe { get; }
         public InvocationExpressionSyntax Syntax { get; }
     }
 
@@ -450,7 +450,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         DirectConfigurationApiKind kind;
         string? keyParameterName = null;
         ITypeSymbol? targetType = null;
-        var defaultValueIsProvablySafe = true;
+        var argumentsAreProvablySafe = true;
 
         if (string.Equals(containingType, "Microsoft.Extensions.Configuration.ConfigurationExtensions", StringComparison.Ordinal))
         {
@@ -471,6 +471,11 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         }
         else if (string.Equals(containingType, "Microsoft.Extensions.Configuration.ConfigurationBinder", StringComparison.Ordinal))
         {
+            if (!IsFrameworkConfigurationBinderMethod(originalMethod))
+            {
+                return false;
+            }
+
             if (string.Equals(originalMethod.Name, "Get", StringComparison.Ordinal))
             {
                 kind = DirectConfigurationApiKind.Get;
@@ -482,7 +487,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 targetType = operation.TargetMethod.TypeArguments[0];
                 if (originalMethod.Parameters.Length == 3)
                 {
-                    defaultValueIsProvablySafe = operation.Arguments.Any(argument =>
+                    argumentsAreProvablySafe = operation.Arguments.Any(argument =>
                         string.Equals(argument.Parameter?.Name, "defaultValue", StringComparison.Ordinal) &&
                         argument.Value.ConstantValue.HasValue);
                 }
@@ -493,7 +498,11 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         string.Equals(parameter.Name, "key", StringComparison.Ordinal) &&
                         parameter.Type.SpecialType == SpecialType.System_String))
                 {
-                    return false;
+                    keyParameterName = "key";
+                    var instanceArgument = operation.Arguments.FirstOrDefault(argument =>
+                        string.Equals(argument.Parameter?.Name, "instance", StringComparison.Ordinal));
+                    argumentsAreProvablySafe = instanceArgument is not null &&
+                        IsProvablySafeBinderInstanceArgument(instanceArgument.Value);
                 }
 
                 kind = DirectConfigurationApiKind.Bind;
@@ -555,20 +564,41 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             receiver,
             keyExpression,
             targetType,
-            defaultValueIsProvablySafe,
+            argumentsAreProvablySafe,
             syntax);
         return true;
+    }
+
+    private static bool IsProvablySafeBinderInstanceArgument(IOperation operation)
+    {
+        while (operation is IConversionOperation conversion)
+        {
+            operation = conversion.Operand;
+        }
+
+        return operation switch
+        {
+            ILocalReferenceOperation => true,
+            IParameterReferenceOperation => true,
+            IInstanceReferenceOperation => true,
+            IFieldReferenceOperation field =>
+                field.Instance is null || IsProvablySafeBinderInstanceArgument(field.Instance),
+            ILiteralOperation => true,
+            IDefaultValueOperation => true,
+            IObjectCreationOperation creation =>
+                creation.Constructor?.IsImplicitlyDeclared == true &&
+                creation.Arguments.IsEmpty &&
+                creation.Initializer is null,
+            _ => false,
+        };
     }
 
     private static bool IsFrameworkGenericGetValueMethod(
         IMethodSymbol originalMethod,
         IMethodSymbol targetMethod)
     {
-        if (!string.Equals(originalMethod.Name, "GetValue", StringComparison.Ordinal) ||
-            !string.Equals(
-                originalMethod.ContainingAssembly.Identity.Name,
-                "Microsoft.Extensions.Configuration.Binder",
-                StringComparison.Ordinal) ||
+        if (!IsFrameworkConfigurationBinderMethod(originalMethod) ||
+            !string.Equals(originalMethod.Name, "GetValue", StringComparison.Ordinal) ||
             !targetMethod.IsGenericMethod ||
             targetMethod.TypeArguments.Length != 1 ||
             originalMethod.Arity != 1 ||
@@ -579,16 +609,37 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
         var configurationParameter = originalMethod.Parameters[0];
         var keyParameter = originalMethod.Parameters[1];
-        var binderPublicKeyToken = originalMethod.ContainingAssembly.Identity.PublicKeyToken;
-        var configurationPublicKeyToken = configurationParameter.Type.ContainingAssembly.Identity.PublicKeyToken;
         return string.Equals(
                    configurationParameter.Type.ToDisplayString(),
                    "Microsoft.Extensions.Configuration.IConfiguration",
                    StringComparison.Ordinal) &&
-               !binderPublicKeyToken.IsDefaultOrEmpty &&
-               binderPublicKeyToken.SequenceEqual(configurationPublicKeyToken) &&
                string.Equals(keyParameter.Name, "key", StringComparison.Ordinal) &&
                keyParameter.Type.SpecialType == SpecialType.System_String;
+    }
+
+    private static bool IsFrameworkConfigurationBinderMethod(IMethodSymbol method)
+    {
+        if (!string.Equals(
+                method.ContainingType?.ToDisplayString(),
+                "Microsoft.Extensions.Configuration.ConfigurationBinder",
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                method.ContainingAssembly.Identity.Name,
+                "Microsoft.Extensions.Configuration.Binder",
+                StringComparison.Ordinal) ||
+            method.Parameters.Length == 0 ||
+            !string.Equals(
+                method.Parameters[0].Type.ToDisplayString(),
+                "Microsoft.Extensions.Configuration.IConfiguration",
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var binderPublicKeyToken = method.ContainingAssembly.Identity.PublicKeyToken;
+        var configurationPublicKeyToken = method.Parameters[0].Type.ContainingAssembly.Identity.PublicKeyToken;
+        return !binderPublicKeyToken.IsDefaultOrEmpty &&
+               binderPublicKeyToken.SequenceEqual(configurationPublicKeyToken);
     }
 
     private static void AnalyzeGetValueRead(
@@ -599,7 +650,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
     {
         if (invocation.KeyExpression is not { } keyExpression ||
             invocation.TargetType is not { } targetType ||
-            !invocation.DefaultValueIsProvablySafe ||
+            !invocation.ArgumentsAreProvablySafe ||
             !TryGetConfigurationSectionPath(
                 invocation.Receiver,
                 keyExpression,
@@ -685,7 +736,22 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         ConfigurationProviderSemantics providerSemantics)
     {
         var semanticModel = syntaxContext.SemanticModel;
-        if (!TryGetConfigurationSectionPath(invocation.Receiver, semanticModel, out var sectionPath, out var sectionExpression, out var sectionExpressionContainsFullPath) ||
+        var hasSectionPath = invocation.KeyExpression is { } keyExpression
+            ? TryGetConfigurationSectionPath(
+                invocation.Receiver,
+                keyExpression,
+                semanticModel,
+                out var sectionPath,
+                out var sectionExpression,
+                out var sectionExpressionContainsFullPath)
+            : TryGetConfigurationSectionPath(
+                invocation.Receiver,
+                semanticModel,
+                out sectionPath,
+                out sectionExpression,
+                out sectionExpressionContainsFullPath);
+        if (!hasSectionPath ||
+            invocation.KeyExpression is not null && !invocation.ArgumentsAreProvablySafe ||
             configuration.GetSectionExistence(sectionPath, providerSemantics) != ConfigurationSectionExistence.Missing ||
             IsOptionsRegistrationSectionRead(invocation.Syntax, semanticModel) ||
             ClassifyConfigurationReceiver(invocation.Receiver, semanticModel) !=

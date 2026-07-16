@@ -15234,6 +15234,153 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg009_reports_keyed_bind_typo()
+    {
+        var source = DirectReadSource("""
+            configuration.Bind({|#0:"Strpie"|}, new ServerOptions());
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_static_named_keyed_bind_typo()
+    {
+        var source = DirectReadSource("""
+            ConfigurationBinder.Bind(
+                instance: new ServerOptions(),
+                key: {|#0:"Strpie"|},
+                configuration: configuration);
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_keyed_bind_typo_on_known_section_chain()
+    {
+        var source = DirectReadSource("""
+            configuration.GetSection("Features").Bind({|#0:"Strpie"|}, new ServerOptions());
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "Name": "value"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_keyed_bind_when_instance_argument_can_seed_configuration()
+    {
+        var source = DirectReadSource(
+            """
+            configuration.Bind("Strpie", Seed(configuration));
+            """,
+            extraMembers: """
+            private static ServerOptions Seed(IConfiguration configuration)
+            {
+                configuration["Strpie:Host"] = "value";
+                return new ServerOptions();
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_static_named_keyed_bind_when_instance_argument_can_seed_configuration()
+    {
+        var source = DirectReadSource(
+            """
+            ConfigurationBinder.Bind(
+                instance: Seed(configuration),
+                key: "Strpie",
+                configuration: configuration);
+            """,
+            extraMembers: """
+            private static ServerOptions Seed(IConfiguration configuration)
+            {
+                configuration["Strpie:Host"] = "value";
+                return new ServerOptions();
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_keyed_bind_when_instance_field_receiver_can_seed_configuration()
+    {
+        var source = DirectReadSource(
+            """
+            configuration.Bind("Strpie", Seed(configuration).InstanceField);
+            """,
+            extraMembers: """
+            private static Holder Seed(IConfiguration configuration)
+            {
+                configuration["Strpie:Host"] = "value";
+                return new Holder();
+            }
+            """,
+            extraTypes: """
+            public sealed class Holder
+            {
+                public ServerOptions InstanceField = new();
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_same_fully_qualified_name_keyed_bind_shadow()
+    {
+        var source = DirectReadSource(
+            """
+            Microsoft.Extensions.Configuration.ConfigurationBinder.Bind(
+                configuration,
+                "Strpie",
+                new ServerOptions());
+            """,
+            extraTypes: """
+            #pragma warning disable CS0436
+            namespace Microsoft.Extensions.Configuration
+            {
+                public static class ConfigurationBinder
+                {
+                    public static void Bind(
+                        IConfiguration configuration,
+                        string key,
+                        object instance) { }
+                }
+            }
+            #pragma warning restore CS0436
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
     public async Task Cfg009_ignores_bind_with_section_key_overload()
     {
         var source = DirectReadSource("""
