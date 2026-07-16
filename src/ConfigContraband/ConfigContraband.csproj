@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.6</Version>
+    <Version>0.7.7</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed CFG006 false negatives for ConfigurationKeyName aliases declared only on overridden virtual properties. Alias resolution now follows the setter override chain to the base-most property used by ConfigurationBinder, and generated schemas merge each override chain without losing inherited validation metadata.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed CFG009 false negatives for constant GetSection chains expressed through conditional access before Get or Bind, including keyed Bind and ordinary prefixes. The analyzer preserves conservative callback, receiver-alias, key, provenance, and side-effect gates.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
