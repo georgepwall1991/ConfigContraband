@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.20 - 2026-07-16
+
+- Added runtime-backed CFG008 regression coverage for floating-point text containing thousands separators. The shared scalar-conversion matrix and end-to-end analyzer tests now pin that both `SingleConverter` and `DoubleConverter` reject `"1,000"`, matching the existing `NumberStyles.Float` implementation and protecting the boundary from a permissive parsing regression. No diagnostic behavior changed.
+
 ## 0.7.19 - 2026-07-16
 
 - Added focused CFG009 regression coverage for connection-string typos relative to a statically known configuration section. Instance and static named calls now explicitly pin suggestions under `Tenant:ConnectionStrings:*`, while stored `IConfigurationSection` receivers remain conservatively quiet because their origin is not visible. No diagnostic behavior changed.
