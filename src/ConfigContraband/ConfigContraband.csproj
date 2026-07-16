@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.1</Version>
+    <Version>0.7.2</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed a CFG009 false negative where a safe same-block assignment or alias stopped being recognized when the host IConfiguration contract was wrapped in a non-user-defined interface conversion. Provenance unwraps only configuration-interface conversions, while mutation rooting conservatively follows any non-user-defined cast; existing local, concrete-custom, mutated, escaped, and captured safety boundaries remain intact.</PackageReleaseNotes>
+    <PackageReleaseNotes>Extended CFG008 to direct framework ConfigurationBinder.GetValue&lt;T&gt; reads when a visible appsettings scalar provably cannot convert to T. Resolves root and known section-chain paths, supports constant defaults, reuses host-provenance and conversion safety boundaries, deduplicates against options-binding diagnostics, and rejects non-framework/same-FQN shadows; missing, null, non-scalar, dynamic, effectful-default, member-origin, stored-section, local, mutated, escaped, and custom-provider reads remain quiet.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

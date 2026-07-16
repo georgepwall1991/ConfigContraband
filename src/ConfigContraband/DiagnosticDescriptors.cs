@@ -71,12 +71,12 @@ public static class DiagnosticDescriptors
 
     public static readonly DiagnosticDescriptor ConfigurationValueTypeMismatch = new(
         id: DiagnosticIds.ConfigurationValueTypeMismatch,
-        title: "Configuration value cannot be bound to the target property type",
+        title: "Configuration value cannot be bound to the target type",
         messageFormat: "Configuration value for \"{0}\" cannot be bound to {1}",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "A scalar value in an appsettings section cannot be converted to the bound property's CLR type, so the configuration binder will throw during binding.");
+        description: "A scalar value in appsettings cannot be converted to a bound property or direct read's CLR target type, so the configuration binder will throw during binding or reading.");
 
     public static readonly DiagnosticDescriptor ConfigurationKeyNotFound = new(
         id: DiagnosticIds.ConfigurationKeyNotFound,
