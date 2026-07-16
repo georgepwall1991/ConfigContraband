@@ -14558,6 +14558,32 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg009_ignores_same_fully_qualified_name_configuration_extensions_shadow()
+    {
+        var source = DirectReadSource(
+            """
+            _ = Microsoft.Extensions.Configuration.ConfigurationExtensions.GetRequiredSection(
+                configuration,
+                "Strpie");
+            """,
+            extraTypes: """
+            #pragma warning disable CS0436
+            namespace Microsoft.Extensions.Configuration
+            {
+                public static class ConfigurationExtensions
+                {
+                    public static IConfigurationSection GetRequiredSection(
+                        IConfiguration configuration,
+                        string key) => configuration.GetSection(key);
+                }
+            }
+            #pragma warning restore CS0436
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
     public async Task Cfg009_ignores_user_defined_required_section_inside_real_binder_call()
     {
         var source = DirectReadSource(
@@ -15287,6 +15313,238 @@ public sealed class ConfigContrabandAnalyzerTests
             }
             """),
             expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_section_bind_when_instance_argument_can_seed_configuration()
+    {
+        var source = DirectReadSource(
+            """
+            configuration.GetSection("Strpie").Bind(Seed(configuration));
+            """,
+            extraMembers: """
+            private static ServerOptions Seed(IConfiguration configuration)
+            {
+                configuration["Strpie:Host"] = "value";
+                return new ServerOptions();
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_section_bind_with_static_field_instance()
+    {
+        var source = DirectReadSource(
+            """
+            configuration.GetSection("Strpie").Bind(Holder.Instance);
+            """,
+            extraTypes: """
+            public static class Holder
+            {
+                public static readonly ServerOptions Instance = Create();
+
+                private static ServerOptions Create() => new();
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_section_bind_with_unprovable_instance_initializer()
+    {
+        var source = DirectReadSource(
+            """
+            configuration.GetSection("Strpie").Bind(new EffectfulOptions());
+            """,
+            extraTypes: """
+            public sealed class EffectfulOptions
+            {
+                public string Host { get; set; } = Create();
+
+                private static string Create() => "value";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_section_bind_with_user_defined_initializer_cast()
+    {
+        var source = DirectReadSource(
+            """
+            configuration.GetSection("Strpie").Bind(new CastOptions());
+            """,
+            extraTypes: """
+            public sealed class CastOptions
+            {
+                public Converted Value { get; set; } = (Converted)1;
+            }
+
+            public readonly struct Converted
+            {
+                public static implicit operator Converted(int value) => new();
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_section_bind_with_user_defined_initializer_after_unary_expression()
+    {
+        var source = DirectReadSource(
+            """
+            configuration.GetSection("Strpie").Bind(new UnaryOptions());
+            """,
+            extraTypes: """
+            public sealed class UnaryOptions
+            {
+                public Converted Value { get; set; } = -1;
+            }
+
+            public readonly struct Converted
+            {
+                public static implicit operator Converted(int value) => new();
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_section_bind_with_escaped_nameof_initializer_call()
+    {
+        var source = DirectReadSource(
+            """
+            configuration.GetSection("Strpie").Bind(new EscapedNameofOptions());
+            """,
+            extraTypes: """
+            public sealed class EscapedNameofOptions
+            {
+                public string Value { get; set; } = @nameof(Seed());
+
+                private static string @nameof(string value) => value;
+
+                private static string Seed() => "value";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_section_bind_with_safe_instance_field()
+    {
+        var source = DirectReadSource(
+            """
+            configuration.GetSection({|#0:"Strpie"|}).Bind(_instance);
+            """,
+            extraMembers: """
+            private readonly ServerOptions _instance = new();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_section_bind_with_safe_parameter_instance()
+    {
+        var source = DirectReadSource("""
+            configuration.GetSection({|#0:"Strpie"|}).Bind(configuration);
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_section_bind_with_safe_implicit_initializers()
+    {
+        var source = DirectReadSource(
+            """
+            configuration.GetSection({|#0:"Strpie"|}).Bind(new SafeInitializerOptions());
+            """,
+            extraTypes: """
+            public sealed class SafeInitializerOptions
+            {
+                public string? NullValue { get; set; } = null;
+                public int? NullableValue { get; set; } = null;
+                public object RuntimeType { get; set; } = typeof(string);
+                public System.Type TypeValue { get; set; } = typeof(string);
+                public string Name { get; set; } = nameof(SafeInitializerOptions);
+                public int Parenthesized { get; set; } = (1);
+                public int Negative { get; set; } = -1;
+                public string Suppressed { get; set; } = null!;
+                public int DefaultValue { get; set; } = default;
+                public int Field = 1;
+                public event System.Action? Changed;
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_proves_only_inline_converted_binder_options_callbacks()
+    {
+        var safeSource = DirectReadSource("""
+            configuration.GetSection({|#0:"Strpie"|}).Bind(
+                new ServerOptions(),
+                (System.Action<BinderOptions>)(options => options.BindNonPublicProperties = true));
+            """);
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+        await Verifier.VerifyAnalyzerAsync(safeSource, StripeAppSettings, expected);
+
+        var escapedSource = DirectReadSource("""
+            System.Action<BinderOptions> configure = options => options.BindNonPublicProperties = true;
+            configuration.GetSection("Strpie").Bind(new ServerOptions(), configure);
+            """);
+        await Verifier.VerifyAnalyzerAsync(escapedSource, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_section_bind_when_binder_options_callback_can_seed_configuration()
+    {
+        var source = DirectReadSource("""
+            configuration.GetSection("Strpie").Bind(
+                new ServerOptions(),
+                options => configuration["Strpie:Host"] = "value");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_section_bind_with_safe_binder_options_callback()
+    {
+        var source = DirectReadSource("""
+            configuration.GetSection({|#0:"Strpie"|}).Bind(
+                new ServerOptions(),
+                options => options.BindNonPublicProperties = true);
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
     }
 
     [Fact]
