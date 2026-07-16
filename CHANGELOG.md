@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.17 - 2026-07-16
+
+- Corrected CFG001 documentation to match shipped semantics: section paths may be any compile-time constant string, including `const` and `nameof(...)`, while code fixes remain gated on safe expression rewriting. The health coverage inventories now also list both `GetSection(...)` and `GetRequiredSection(...)` for `Bind` and direct `Configure<T>` registrations. No diagnostic behaviour changed.
+
 ## 0.7.16 - 2026-07-16
 
 - Rewrote the analyzer-health Current Posture as a concise current-state summary. It no longer carries superseded CFG002/CFG008 residual claims or release-by-release history; the canonical surface, live conservative boundaries, all-P3 monitor state, automation fallback, and release gates are now stated directly. No diagnostic behaviour changed.

@@ -43,7 +43,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.7.16" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.7.17" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -78,7 +78,7 @@ services.Configure<StripeOptions>(
     configuration.GetSection("Stripe"));
 ```
 
-The section name must be a compile-time string literal. The analyzer follows normal fluent chains:
+The section name must resolve to a compile-time constant string. Literals, `const` values, and `nameof(...)` are supported; code-fix availability depends on whether the anchored expression can be rewritten safely. The analyzer follows normal fluent chains:
 
 ```csharp
 services.AddOptions<StripeOptions>()
@@ -283,7 +283,7 @@ The analyzer checks every visible `appsettings.json` and `appsettings.*.json` ad
 
 ### `CFG002`: Required Configuration Keys Must Be Present
 
-`CFG002` runs when a supported binding has a visible DataAnnotations validation path. That includes `OptionsBuilder<TOptions>` chains with `ValidateDataAnnotations()` and direct `Configure<TOptions>(GetSection(...))` calls when the same top-level block also registers matching `AddOptions<TOptions>().ValidateDataAnnotations()`. It reports `[Required]` reference, string, or nullable value properties that are missing from every visible `appsettings.json` and `appsettings.*.json` section for that binding.
+`CFG002` runs when a supported binding has a visible DataAnnotations validation path. That includes `OptionsBuilder<TOptions>` chains with `ValidateDataAnnotations()` and direct `Configure<TOptions>(GetSection(...))` or `Configure<TOptions>(GetRequiredSection(...))` calls when the same top-level block also registers matching `AddOptions<TOptions>().ValidateDataAnnotations()`. It reports `[Required]` reference, string, or nullable value properties that are missing from every visible `appsettings.json` and `appsettings.*.json` section for that binding.
 
 Before:
 
@@ -552,7 +552,7 @@ ConfigContraband currently focuses on:
 - Direct framework `ConfigurationBinder.GetValue<T>` reads for provable scalar conversion failures (`CFG008`).
 - Direct configuration reads: standalone `GetRequiredSection(...)`, suggestion-gated `GetSection(...).Get<T>()`/`.Bind(instance)`, keyed `Bind("key", instance)`, and suggestion-gated `GetConnectionString(...)` (`CFG009`).
 - Strict `ErrorOnUnknownConfiguration` binder options for unknown-key failures.
-- String-literal section names.
+- Compile-time constant section names, including literals, `const` values, and `nameof` expressions.
 - Public bindable properties on options types, including inherited and constructor-bound bindable properties.
 - `[ConfigurationKeyName]` key-name overrides.
 - Normal fluent chains and immediate same-block local `OptionsBuilder<T>` chains.
