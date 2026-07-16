@@ -14321,6 +14321,224 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg009_reports_missing_bound_section_through_deep_conditional_access()
+    {
+        var source = DirectReadSource("""
+            _ = configuration?.GetSection("Parent")?.GetSection({|#0:"Chlid"|})?.Get<ServerOptions>();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Parent:Chlid", ". Did you mean \"Parent:Child\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Parent": { "Child": { "Value": "present" } } }"""),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_missing_bound_root_section_through_conditional_access()
+    {
+        var source = DirectReadSource("""
+            _ = configuration?.GetSection({|#0:"Chlid"|})?.Get<ServerOptions>();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Chlid", ". Did you mean \"Child\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Child": { "Value": "present" } }"""),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_missing_bind_section_through_conditional_access()
+    {
+        var source = DirectReadSource("""
+            configuration?.GetSection({|#0:"Chlid"|})?.Bind(new ServerOptions());
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Chlid", ". Did you mean \"Child\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Child": { "Value": "present" } }"""),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_deep_conditional_access_preserves_conservative_receiver_and_key_gates()
+    {
+        var source = DirectReadSource(
+            """
+            var dynamicKey = System.DateTime.UtcNow.Ticks.ToString();
+            _ = configuration?.GetSection("Parent")?.GetSection(dynamicKey)?.Get<ServerOptions>();
+
+            var local = new ConfigurationManager();
+            _ = local?.GetSection("Parent")?.GetSection("Chlid")?.Get<ServerOptions>();
+            """,
+            extraMembers: """
+            public void ReadStored(IConfigurationSection stored)
+            {
+                _ = stored?.GetSection("Parent")?.GetSection("Chlid")?.Get<ServerOptions>();
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Parent": { "Child": { "Value": "present" } } }"""));
+    }
+
+    [Fact]
+    public async Task Cfg009_deep_conditional_read_does_not_taint_later_receiver()
+    {
+        var source = DirectReadSource("""
+            _ = configuration?.GetSection("Parent")?.GetSection("Child")?.Get<ServerOptions>();
+            _ = configuration.GetRequiredSection({|#0:"Missing"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Missing", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Parent": { "Child": { "Value": "present" } } }"""),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_conditional_bind_with_unproven_instance_taints_later_receiver()
+    {
+        var source = DirectReadSource(
+            """
+            configuration?.GetSection("Child")?.Bind(BindingTarget);
+            _ = configuration.GetRequiredSection("Missing");
+            """,
+            extraMembers: """
+            private ServerOptions BindingTarget => new();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Child": { "Value": "present" } }"""));
+    }
+
+    [Fact]
+    public async Task Cfg009_conditional_get_with_unproven_callback_stays_quiet()
+    {
+        var source = DirectReadSource(
+            """
+            _ = configuration?.GetSection("Chlid")?.Get<ServerOptions>(options => Seed(configuration));
+            """,
+            extraMembers: """
+            private static void Seed(IConfiguration configuration)
+            {
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Child": { "Value": "present" } }"""));
+    }
+
+    [Fact]
+    public async Task Cfg009_conditional_bind_into_receiver_taints_later_read()
+    {
+        var source = DirectReadSource("""
+            configuration?.GetSection("Child")?.Bind(configuration);
+            _ = configuration.GetRequiredSection("Missing");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Child": { "Value": "present" } }"""));
+    }
+
+    [Fact]
+    public async Task Cfg009_conditional_bind_into_cast_receiver_taints_later_read()
+    {
+        var source = DirectReadSource("""
+            ((IConfiguration)configuration)?.GetSection("Child")?.Bind(configuration);
+            _ = configuration.GetRequiredSection("Missing");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Child": { "Value": "present" } }"""));
+    }
+
+    [Fact]
+    public async Task Cfg009_conditional_bind_into_cast_target_taints_later_read()
+    {
+        var source = DirectReadSource("""
+            configuration?.GetSection("Child")?.Bind((IConfiguration)configuration);
+            _ = configuration.GetRequiredSection("Missing");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Child": { "Value": "present" } }"""));
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_keyed_bind_typo_after_conditional_section_prefix()
+    {
+        var source = DirectReadSource("""
+            configuration?.GetSection("Features")?.Bind({|#0:"Strpie"|}, new ServerOptions());
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Features": { "Stripe": { "Value": "present" } } }"""),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_conditional_typo_after_ordinary_section_prefix()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetSection("Parent")?.GetSection({|#0:"Chlid"|})?.Get<ServerOptions>();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Parent:Chlid", ". Did you mean \"Parent:Child\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Parent": { "Child": { "Value": "present" } } }"""),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_wrapped_conditional_nameof_read_does_not_taint_later_receiver()
+    {
+        var source = DirectReadSource("""
+            _ = (configuration?.GetSection(nameof(ServerOptions))?.Get<ServerOptions>())!;
+            _ = configuration.GetRequiredSection({|#0:"Missing"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Missing", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "ServerOptions": { "Value": "present" } }"""),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg009_reports_missing_get_required_section_on_null_forgiving_receiver()
     {
         var source = DirectReadSource("""
