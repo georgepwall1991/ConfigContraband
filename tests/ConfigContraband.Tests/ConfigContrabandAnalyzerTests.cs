@@ -33,6 +33,34 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg001_reports_missing_section_with_reordered_named_bind_configuration_arguments()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration(
+                    configureBinder: binder => binder.BindNonPublicProperties = true,
+                    configSectionPath: {|#0:"Strpie"|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg001_reports_missing_nested_section_with_full_path_suggestion()
     {
         var source = OptionsSource("""

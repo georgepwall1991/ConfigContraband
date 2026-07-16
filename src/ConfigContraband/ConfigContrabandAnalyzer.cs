@@ -2647,7 +2647,10 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         bool sectionExpressionContainsFullPath;
         if (string.Equals(methodName, "BindConfiguration", StringComparison.Ordinal))
         {
-            sectionExpression = invocation.ArgumentList.Arguments[0].Expression;
+            var operation = (IInvocationOperation)semanticModel.GetOperation(invocation)!;
+            var sectionArgument = operation.Arguments.First(argument =>
+                string.Equals(argument.Parameter!.Name, "configSectionPath", StringComparison.Ordinal));
+            sectionExpression = (ExpressionSyntax)sectionArgument.Value.Syntax;
             if (!TryGetConstantSectionPath(sectionExpression, semanticModel, out sectionPath))
             {
                 return false;

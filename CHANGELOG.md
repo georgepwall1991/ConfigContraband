@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.5 - 2026-07-16
+
+- Fixed a `CFG001` false negative for `OptionsBuilder<T>.BindConfiguration(...)` calls whose named arguments are reordered. The registration parser previously treated the first source argument as the section path, so `BindConfiguration(configureBinder: ..., configSectionPath: "Strpie")` tried to read the binder callback as a constant string and silently skipped every configuration diagnostic for that registration. The analyzer now resolves `configSectionPath` through Roslyn's bound argument-to-parameter mapping, preserving the exact section expression for the existing suggestion and code fix. Positional calls and unrelated inference boundaries are unchanged.
+
 ## 0.7.4 - 2026-07-16
 
 - Fixed `CFG009` false positives for section-based `Bind` calls whose evaluated arguments can mutate configuration before binding begins. `configuration.GetSection("Strpie").Bind(Seed(configuration))` now stays quiet when `Seed` is effectful or otherwise unprovable, matching the conservative instance-provenance guard already applied to keyed `configuration.Bind("Strpie", instance)` calls. The proof now rejects static fields (type initialisation can run at access) and implicit constructions with unprovable type/member initialisers, while retaining simple source types whose target-type-safe literal/default initialisers and implicit object base constructor are side-effect free; casts and unary expressions flowing through user-defined conversions, plus escaped `@nameof(...)` method calls, stay quiet. The three-argument overload also proves its binder-options callback: simple constant assignments to the real `BinderOptions` parameter preserve the typo diagnostic, while helpers, captures, or other effectful callback bodies stay quiet because the callback runs before binding. Review also closed a same-FQN shadow false positive by applying the signed Microsoft assembly identity gate to `ConfigurationExtensions`, matching the existing `ConfigurationBinder` guard. Diagnostic IDs, severities, receiver provenance, and unrelated inference boundaries are unchanged.
