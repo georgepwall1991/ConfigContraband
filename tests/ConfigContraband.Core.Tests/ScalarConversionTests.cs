@@ -14,6 +14,8 @@ public sealed class ScalarConversionTests
     [InlineData("long", "String", "x", true)]
     [InlineData("double", "String", "abc", true)]
     [InlineData("decimal", "String", "abc", true)]
+    [InlineData("decimal", "String", "1,000", true)]
+    [InlineData("decimal", "String", "1-", true)]
     [InlineData("bool", "String", "yes", true)]
     [InlineData("enum", "String", "Loud", true)]
     [InlineData("byteenum", "String", "256", true)]
@@ -99,6 +101,25 @@ public sealed class ScalarConversionTests
     public void Runtime_converter_accepts_empty_string_for_supported_targets(Type type, string value)
     {
         _ = System.ComponentModel.TypeDescriptor.GetConverter(type).ConvertFromInvariantString(value);
+    }
+
+    [Fact]
+    public void Runtime_decimal_converter_accepts_exponent_form()
+    {
+        _ = System.ComponentModel.TypeDescriptor
+            .GetConverter(typeof(decimal))
+            .ConvertFromInvariantString("1e2");
+    }
+
+    [Theory]
+    [InlineData("1,000")]
+    [InlineData("1-")]
+    public void Runtime_decimal_converter_rejects_unsupported_number_style(string value)
+    {
+        Assert.ThrowsAny<Exception>(() =>
+            System.ComponentModel.TypeDescriptor
+                .GetConverter(typeof(decimal))
+                .ConvertFromInvariantString(value));
     }
 
     [Theory]

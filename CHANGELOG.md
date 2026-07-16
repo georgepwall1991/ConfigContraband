@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.10 - 2026-07-16
+
+- Fixed a `CFG008` false negative for decimal text using number styles the runtime `DecimalConverter` rejects. Values such as `"1,000"` (thousands separator) and `"1-"` (trailing sign) now report, while exponent notation such as `"1e2"` remains accepted. Runtime-backed tests pin the converter boundary directly; other numeric targets are unchanged.
+
 ## 0.7.9 - 2026-07-16
 
 - Fixed a `CFG008` false negative for numeric enum text outside the enum's actual underlying range, such as `"256"` bound to a `byte`-backed enum. The analyzer previously accepted any value parseable as `long` or `ulong`, while the runtime `EnumConverter` throws when the value overflows the declared backing type. Runtime-backed core and analyzer regressions now keep valid named, comma-list, and in-range numeric enum values unchanged.

@@ -13928,6 +13928,27 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg008_reports_decimal_string_with_thousands_separator()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("decimal"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, 21)
+            .WithArguments("Server:Value", "decimal");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "1,000"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg008_reports_numeric_enum_value_outside_underlying_range()
     {
         var source = OptionsSource(BindServer, optionsTypes: """

@@ -126,12 +126,7 @@ internal static class ScalarConversion
             case SpecialType.System_Double:
                 return !double.TryParse(value, FloatStyles, Invariant, out _);
             case SpecialType.System_Decimal:
-                return !decimal.TryParse(
-                    value,
-                    NumberStyles.Number | NumberStyles.AllowExponent,
-                    Invariant,
-                    out _
-                );
+                return !decimal.TryParse(value, FloatStyles, Invariant, out _);
         }
 
         switch (type.ToDisplayString())

@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.9</Version>
+    <Version>0.7.10</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed CFG008 false negatives for numeric enum values outside the enum's declared underlying-type range. Runtime-backed regressions preserve named, comma-list, and in-range numeric values.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed CFG008 false negatives for decimal thousands separators and trailing signs rejected by the runtime DecimalConverter, while preserving accepted exponent notation.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
