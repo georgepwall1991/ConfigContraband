@@ -154,6 +154,14 @@ internal sealed class ConfigurationSnapshot
         return builder.ToImmutable();
     }
 
+    public ImmutableArray<ConfigurationProperty> FindProperties(string fullPath)
+    {
+        return _files
+            .SelectMany(file => EnumerateProperties(file.Root))
+            .Where(property => string.Equals(property.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+            .ToImmutableArray();
+    }
+
     private static ImmutableArray<ConfigurationNode> FindSections(ConfigurationNode root, string sectionPath)
     {
         var builder = ImmutableArray.CreateBuilder<ConfigurationNode>();

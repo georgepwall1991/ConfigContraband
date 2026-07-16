@@ -1,4 +1,6 @@
 using ConfigContraband.Tests.Infrastructure;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace ConfigContraband.Tests;
 
@@ -15239,6 +15241,536 @@ public sealed class ConfigContrabandAnalyzerTests
             """);
 
         await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_get_value_conversion_failure()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetValue<int>("Server:Port");
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 13, 3, 21)
+            .WithArguments("Server:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_static_named_get_value_default_overload_conversion_failure()
+    {
+        var source = DirectReadSource("""
+            _ = ConfigurationBinder.GetValue<int>(
+                configuration: configuration,
+                key: "Server:Port",
+                defaultValue: 8080);
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 13, 3, 21)
+            .WithArguments("Server:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_get_value_when_default_argument_can_mutate_configuration()
+    {
+        var source = DirectReadSource(
+            """
+            _ = configuration.GetValue<int>(
+                "Server:Port",
+                SetValidValue(configuration));
+            """,
+            extraMembers: """
+            private static int SetValidValue(IConfiguration configuration)
+            {
+                configuration["Server:Port"] = "8080";
+                return 0;
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_get_value_on_locally_initialized_interface_members()
+    {
+        var source = """
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Reader
+            {
+                private readonly IConfiguration _configuration = new ConfigurationBuilder().Build();
+                private IConfiguration Configuration { get; } = new ConfigurationBuilder().Build();
+
+                public void Read()
+                {
+                    _ = _configuration.GetValue<int>("Server:Port");
+                    _ = Configuration.GetValue<int>("Server:Port");
+                }
+            }
+            """;
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_get_value_on_constructor_initialized_interface_member()
+    {
+        var source = """
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Reader
+            {
+                private readonly IConfiguration _configuration;
+
+                public Reader()
+                {
+                    _configuration = new ConfigurationBuilder().Build();
+                }
+
+                public void Read()
+                {
+                    _ = _configuration.GetValue<int>("Server:Port");
+                }
+            }
+            """;
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_get_value_on_custom_accessor_member()
+    {
+        var source = """
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Reader
+            {
+                private IConfiguration Configuration
+                {
+                    get
+                    {
+                        return new ConfigurationBuilder().Build();
+                    }
+                }
+
+                public void Read()
+                {
+                    _ = Configuration.GetValue<int>("Server:Port");
+                }
+            }
+            """;
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_get_value_conversion_failure_on_null_forgiving_injected_field()
+    {
+        var source = """
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Reader
+            {
+                private readonly IConfiguration _configuration = null!;
+
+                public void Read()
+                {
+                    _ = _configuration.GetValue<int>("Server:Port");
+                }
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 13, 3, 21)
+            .WithArguments("Server:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_null_forgiving_field_overwritten_with_local_configuration_in_constructor()
+    {
+        var source = """
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Reader
+            {
+                private readonly IConfiguration _configuration = null!;
+
+                public Reader()
+                {
+                    _configuration = new ConfigurationBuilder().Build();
+                }
+
+                public void Read()
+                {
+                    _ = _configuration.GetValue<int>("Server:Port");
+                }
+            }
+            """;
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_for_null_forgiving_field_when_constructor_only_assigns_shadowing_parameter()
+    {
+        var source = """
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Reader
+            {
+                private readonly IConfiguration _configuration = null!;
+
+                public Reader(IConfiguration _configuration)
+                {
+                    _configuration = new ConfigurationBuilder().Build();
+                }
+
+                public void Read()
+                {
+                    _ = _configuration.GetValue<int>("Server:Port");
+                }
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 13, 3, 21)
+            .WithArguments("Server:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public void Cfg008_rejects_get_value_from_unsigned_replacement_binder_assembly()
+    {
+        var syntaxTree = CSharpSyntaxTree.ParseText("""
+            namespace Microsoft.Extensions.Configuration;
+
+            public interface IConfiguration { }
+
+            public static class ConfigurationBinder
+            {
+                public static T? GetValue<T>(IConfiguration configuration, string key) => default;
+            }
+            """);
+        var compilation = CSharpCompilation.Create(
+            "Microsoft.Extensions.Configuration.Binder",
+            [syntaxTree],
+            [
+                MetadataReference.CreateFromFile(typeof(object).Assembly.Location)
+            ],
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var method = compilation.GetTypeByMetadataName(
+                "Microsoft.Extensions.Configuration.ConfigurationBinder")!
+            .GetMembers("GetValue")
+            .OfType<IMethodSymbol>()
+            .Single();
+        var identityGate = typeof(ConfigContrabandAnalyzer).GetMethod(
+            "IsFrameworkGenericGetValueMethod",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+
+        var accepted = (bool)identityGate.Invoke(null, [method, method])!;
+
+        Assert.False(accepted);
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_cross_file_locally_initialized_interface_member_without_ad0001()
+    {
+        var sources = new[]
+        {
+            ("Reader.cs", """
+                using Microsoft.Extensions.Configuration;
+
+                public sealed partial class Reader
+                {
+                    public void Read()
+                    {
+                        _ = Configuration.GetValue<int>("Server:Port");
+                    }
+                }
+                """),
+            ("Reader.Configuration.cs", """
+                using Microsoft.Extensions.Configuration;
+
+                public sealed partial class Reader
+                {
+                    private IConfiguration Configuration { get; } = new ConfigurationBuilder().Build();
+                }
+                """)
+        };
+
+        await Verifier.VerifyAnalyzerAsync(
+            sources,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_get_value_conversion_failure_on_known_section_chain()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetSection("Server").GetValue<int>("Port");
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 13, 3, 21)
+            .WithArguments("Server:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_get_value_conversion_failure_once_for_repeated_read()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetValue<int>("Server:Port");
+            _ = configuration.GetValue<int>("Server:Port");
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 13, 3, 21)
+            .WithArguments("Server:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_once_across_options_binding_and_direct_get_value_read()
+    {
+        var source = """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    services.AddOptions<ServerOptions>().BindConfiguration("Server");
+                    _ = configuration.GetValue<int>("Server:Port");
+                }
+            }
+
+            public sealed class ServerOptions
+            {
+                public int Port { get; set; }
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 13, 3, 21)
+            .WithArguments("Server:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_same_fully_qualified_name_get_value_shadow()
+    {
+        var source = DirectReadSource(
+            """
+            _ = Microsoft.Extensions.Configuration.ConfigurationBinder.GetValue<int>(
+                configuration,
+                "Server:Port");
+            """,
+            extraTypes: """
+            #pragma warning disable CS0436
+            namespace Microsoft.Extensions.Configuration
+            {
+                public static class ConfigurationBinder
+                {
+                    public static int GetValue<T>(this IConfiguration configuration, string key) => 0;
+                }
+            }
+            #pragma warning restore CS0436
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_get_value_on_stored_configuration_section()
+    {
+        var source = DirectReadSource("""
+            IConfigurationSection section = configuration.GetSection("Server");
+            _ = section.GetValue<int>("Port");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Port": "eighty"
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_safe_or_unprovable_get_value_reads()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetValue<int>("Server:Port");
+            _ = configuration.GetValue<int>("Missing:Port");
+            _ = configuration.GetValue<int>("Server:NullPort");
+            _ = configuration.GetValue<ServerOptions>("Server");
+            var key = "Server:BadPort";
+            _ = configuration.GetValue<int>(key);
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": 8080,
+                "NullPort": null,
+                "BadPort": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_get_value_on_local_or_mutated_configuration()
+    {
+        var source = DirectReadSource("""
+            var local = new ConfigurationBuilder().Build();
+            _ = local.GetValue<int>("Server:Port");
+
+            configuration["Server:Port"] = "8080";
+            _ = configuration.GetValue<int>("Server:Port");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
     }
 
     [Fact]

@@ -58,7 +58,11 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     {
                         if (configuration.HasFiles)
                         {
-                            AnalyzeDirectConfigurationRead(syntaxContext, configuration, providerSemantics);
+                            AnalyzeDirectConfigurationRead(
+                                syntaxContext,
+                                configuration,
+                                providerSemantics,
+                                unknownKeysReported);
                         }
 
                         return;
@@ -351,6 +355,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         GetRequiredSection,
         GetConnectionString,
         Get,
+        GetValue,
         Bind,
     }
 
@@ -361,12 +366,16 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             IMethodSymbol originalMethod,
             ExpressionSyntax receiver,
             ExpressionSyntax? keyExpression,
+            ITypeSymbol? targetType,
+            bool defaultValueIsProvablySafe,
             InvocationExpressionSyntax syntax)
         {
             Kind = kind;
             OriginalMethod = originalMethod;
             Receiver = receiver;
             KeyExpression = keyExpression;
+            TargetType = targetType;
+            DefaultValueIsProvablySafe = defaultValueIsProvablySafe;
             Syntax = syntax;
         }
 
@@ -374,13 +383,16 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         public IMethodSymbol OriginalMethod { get; }
         public ExpressionSyntax Receiver { get; }
         public ExpressionSyntax? KeyExpression { get; }
+        public ITypeSymbol? TargetType { get; }
+        public bool DefaultValueIsProvablySafe { get; }
         public InvocationExpressionSyntax Syntax { get; }
     }
 
     private static void AnalyzeDirectConfigurationRead(
         SyntaxNodeAnalysisContext syntaxContext,
         ConfigurationSnapshot configuration,
-        ConfigurationProviderSemantics providerSemantics)
+        ConfigurationProviderSemantics providerSemantics,
+        ConcurrentDictionary<string, byte> configurationDiagnosticsReported)
     {
         var invocation = (InvocationExpressionSyntax)syntaxContext.Node;
         if (syntaxContext.SemanticModel.GetOperation(invocation, syntaxContext.CancellationToken) is not IInvocationOperation operation ||
@@ -413,6 +425,13 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     configuration,
                     providerSemantics);
                 break;
+            case DirectConfigurationApiKind.GetValue:
+                AnalyzeGetValueRead(
+                    syntaxContext,
+                    directInvocation,
+                    configuration,
+                    configurationDiagnosticsReported);
+                break;
         }
     }
 
@@ -430,6 +449,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         var containingType = originalMethod.ContainingType?.ToDisplayString();
         DirectConfigurationApiKind kind;
         string? keyParameterName = null;
+        ITypeSymbol? targetType = null;
+        var defaultValueIsProvablySafe = true;
 
         if (string.Equals(containingType, "Microsoft.Extensions.Configuration.ConfigurationExtensions", StringComparison.Ordinal))
         {
@@ -453,6 +474,18 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             if (string.Equals(originalMethod.Name, "Get", StringComparison.Ordinal))
             {
                 kind = DirectConfigurationApiKind.Get;
+            }
+            else if (IsFrameworkGenericGetValueMethod(originalMethod, operation.TargetMethod))
+            {
+                kind = DirectConfigurationApiKind.GetValue;
+                keyParameterName = "key";
+                targetType = operation.TargetMethod.TypeArguments[0];
+                if (originalMethod.Parameters.Length == 3)
+                {
+                    defaultValueIsProvablySafe = operation.Arguments.Any(argument =>
+                        string.Equals(argument.Parameter?.Name, "defaultValue", StringComparison.Ordinal) &&
+                        argument.Value.ConstantValue.HasValue);
+                }
             }
             else if (string.Equals(originalMethod.Name, "Bind", StringComparison.Ordinal))
             {
@@ -516,8 +549,96 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        invocation = new DirectConfigurationInvocation(kind, originalMethod, receiver, keyExpression, syntax);
+        invocation = new DirectConfigurationInvocation(
+            kind,
+            originalMethod,
+            receiver,
+            keyExpression,
+            targetType,
+            defaultValueIsProvablySafe,
+            syntax);
         return true;
+    }
+
+    private static bool IsFrameworkGenericGetValueMethod(
+        IMethodSymbol originalMethod,
+        IMethodSymbol targetMethod)
+    {
+        if (!string.Equals(originalMethod.Name, "GetValue", StringComparison.Ordinal) ||
+            !string.Equals(
+                originalMethod.ContainingAssembly.Identity.Name,
+                "Microsoft.Extensions.Configuration.Binder",
+                StringComparison.Ordinal) ||
+            !targetMethod.IsGenericMethod ||
+            targetMethod.TypeArguments.Length != 1 ||
+            originalMethod.Arity != 1 ||
+            originalMethod.Parameters.Length is < 2 or > 3)
+        {
+            return false;
+        }
+
+        var configurationParameter = originalMethod.Parameters[0];
+        var keyParameter = originalMethod.Parameters[1];
+        var binderPublicKeyToken = originalMethod.ContainingAssembly.Identity.PublicKeyToken;
+        var configurationPublicKeyToken = configurationParameter.Type.ContainingAssembly.Identity.PublicKeyToken;
+        return string.Equals(
+                   configurationParameter.Type.ToDisplayString(),
+                   "Microsoft.Extensions.Configuration.IConfiguration",
+                   StringComparison.Ordinal) &&
+               !binderPublicKeyToken.IsDefaultOrEmpty &&
+               binderPublicKeyToken.SequenceEqual(configurationPublicKeyToken) &&
+               string.Equals(keyParameter.Name, "key", StringComparison.Ordinal) &&
+               keyParameter.Type.SpecialType == SpecialType.System_String;
+    }
+
+    private static void AnalyzeGetValueRead(
+        SyntaxNodeAnalysisContext syntaxContext,
+        DirectConfigurationInvocation invocation,
+        ConfigurationSnapshot configuration,
+        ConcurrentDictionary<string, byte> configurationDiagnosticsReported)
+    {
+        if (invocation.KeyExpression is not { } keyExpression ||
+            invocation.TargetType is not { } targetType ||
+            !invocation.DefaultValueIsProvablySafe ||
+            !TryGetConfigurationSectionPath(
+                invocation.Receiver,
+                keyExpression,
+                syntaxContext.SemanticModel,
+                out var fullPath,
+                out _,
+                out _) ||
+            ClassifyConfigurationReceiver(invocation.Receiver, syntaxContext.SemanticModel) !=
+                ConfigurationReceiverProvenance.Contract)
+        {
+            return;
+        }
+
+        foreach (var property in configuration.FindProperties(fullPath))
+        {
+            if (!ScalarConversion.IsProvablyNotConvertible(
+                    targetType,
+                    property.ScalarKind,
+                    property.ScalarValue))
+            {
+                continue;
+            }
+
+            var location = property.ValueLocation ?? property.Location;
+            var reportKey = CreateConfigurationValueTypeMismatchReportKey(
+                targetType,
+                location,
+                property.FullPath);
+            if (!configurationDiagnosticsReported.TryAdd(reportKey, 0))
+            {
+                continue;
+            }
+
+            syntaxContext.ReportDiagnostic(Diagnostic.Create(
+                DiagnosticDescriptors.ConfigurationValueTypeMismatch,
+                location,
+                property.FullPath,
+                targetType.ToDisplayString()));
+        }
     }
 
     private static void AnalyzeStandaloneRequiredSectionRead(
@@ -790,7 +911,7 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 visitedLocals);
         }
 
-        if (symbol is IParameterSymbol or IFieldSymbol or IPropertySymbol)
+        if (symbol is IParameterSymbol)
         {
             var typeClassification = ClassifyConfigurationType(GetSymbolType(symbol));
             if (typeClassification != ConfigurationReceiverProvenance.Contract)
@@ -809,7 +930,139 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 : ConfigurationReceiverProvenance.Contract;
         }
 
+        if (symbol is IFieldSymbol or IPropertySymbol)
+        {
+            var typeClassification = ClassifyConfigurationType(GetSymbolType(symbol));
+            if (typeClassification != ConfigurationReceiverProvenance.Contract)
+            {
+                return typeClassification;
+            }
+
+            var declaredOrigin = ClassifyDeclaredConfigurationMemberOrigin(symbol, semanticModel);
+            if (declaredOrigin != ConfigurationReceiverProvenance.Contract)
+            {
+                return declaredOrigin;
+            }
+
+            return HasUnsafeConfigurationUse(
+                    symbol,
+                    expression.FirstAncestorOrSelf<BlockSyntax>(),
+                    semanticModel,
+                    startPosition: expression.FirstAncestorOrSelf<BlockSyntax>()?.SpanStart ?? expression.SpanStart,
+                    resolutionPosition,
+                    safetyUntilPosition)
+                ? ConfigurationReceiverProvenance.Ambiguous
+                : ConfigurationReceiverProvenance.Contract;
+        }
+
         return ConfigurationReceiverProvenance.Ambiguous;
+    }
+
+    private static ConfigurationReceiverProvenance ClassifyDeclaredConfigurationMemberOrigin(
+        ISymbol symbol,
+        SemanticModel semanticModel)
+    {
+        ExpressionSyntax? initializer = null;
+        if (symbol is IFieldSymbol { DeclaringSyntaxReferences.Length: 1 } field &&
+            field.DeclaringSyntaxReferences[0].GetSyntax() is VariableDeclaratorSyntax fieldDeclarator)
+        {
+            initializer = fieldDeclarator.Initializer?.Value;
+        }
+        else if (symbol is IPropertySymbol { DeclaringSyntaxReferences.Length: 1 } property &&
+                 property.DeclaringSyntaxReferences[0].GetSyntax() is PropertyDeclarationSyntax propertyDeclaration)
+        {
+            initializer = propertyDeclaration.Initializer?.Value ?? propertyDeclaration.ExpressionBody?.Expression;
+        }
+
+        if (initializer is null)
+        {
+            // A member without a declaration initializer may be assigned by a constructor or
+            // computed by an accessor. Its provider origin is not proven at the read site.
+            return ConfigurationReceiverProvenance.Ambiguous;
+        }
+
+        initializer = UnwrapForSectionChainResolution(initializer);
+        if (initializer.IsKind(SyntaxKind.NullLiteralExpression))
+        {
+            // A null/null-forgiving field initializer is the established DI placeholder
+            // shape. Constructor writes can replace that placeholder before any read, while
+            // later same-block writes are still rejected by HasUnsafeConfigurationUse.
+            return MemberMayBeAssignedInConstructor(symbol, semanticModel)
+                ? ConfigurationReceiverProvenance.Ambiguous
+                : ConfigurationReceiverProvenance.Contract;
+        }
+
+        if (initializer.SyntaxTree != semanticModel.SyntaxTree)
+        {
+            // Analyzer callbacks provide the invocation tree's semantic model. Requesting a
+            // second model here is discouraged (RS1030), so a non-null cross-file initializer
+            // stays on the conservative side instead of risking AD0001 or a false positive.
+            return ConfigurationReceiverProvenance.Ambiguous;
+        }
+
+        var operation = semanticModel.GetOperation(initializer);
+        if (operation?.ConstantValue is { HasValue: true, Value: null })
+        {
+            return ConfigurationReceiverProvenance.Contract;
+        }
+
+        if (IsConfigurationBuilderBuildInvocation(initializer, semanticModel))
+        {
+            return ConfigurationReceiverProvenance.Local;
+        }
+
+        if (initializer is ObjectCreationExpressionSyntax)
+        {
+            var createdType = semanticModel.GetTypeInfo(initializer).Type;
+            return IsFrameworkConfigurationImplementation(createdType)
+                ? ConfigurationReceiverProvenance.Local
+                : ClassifyConfigurationType(createdType);
+        }
+
+        // Accessors and other member initializers can compute or return any provider.
+        return ConfigurationReceiverProvenance.Ambiguous;
+    }
+
+    private static bool MemberMayBeAssignedInConstructor(ISymbol symbol, SemanticModel semanticModel)
+    {
+        foreach (var typeReference in symbol.ContainingType.DeclaringSyntaxReferences)
+        {
+            if (typeReference.GetSyntax() is not TypeDeclarationSyntax typeDeclaration)
+            {
+                continue;
+            }
+
+            foreach (var constructor in typeDeclaration.Members.OfType<ConstructorDeclarationSyntax>())
+            {
+                foreach (var assignment in constructor.DescendantNodes(ShouldDescendIntoConfigurationOriginNode)
+                             .OfType<AssignmentExpressionSyntax>())
+                {
+                    foreach (var identifier in assignment.Left.DescendantNodesAndSelf()
+                                 .OfType<IdentifierNameSyntax>())
+                    {
+                        if (!string.Equals(identifier.Identifier.ValueText, symbol.Name, StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        if (identifier.SyntaxTree != semanticModel.SyntaxTree ||
+                            SymbolEqualityComparer.Default.Equals(
+                                semanticModel.GetSymbolInfo(identifier).Symbol,
+                                symbol))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ShouldDescendIntoConfigurationOriginNode(SyntaxNode node)
+    {
+        return node is not AnonymousFunctionExpressionSyntax and not LocalFunctionStatementSyntax;
     }
 
     private static ConfigurationReceiverProvenance ClassifyLocalConfiguration(
@@ -1518,7 +1771,6 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 AnalyzeScalarValueConversion(
                     reportDiagnostic,
                     unknownKeysReported,
-                    metadata.TypeKey,
                     bindableProperty,
                     property);
                 continue;
@@ -2058,7 +2310,6 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
     private static void AnalyzeScalarValueConversion(
         Action<Diagnostic> reportDiagnostic,
         ConcurrentDictionary<string, byte> unknownKeysReported,
-        string typeKey,
         BindableProperty bindableProperty,
         ConfigurationProperty property)
     {
@@ -2071,8 +2322,10 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         }
 
         var location = property.ValueLocation ?? property.Location;
-        var reportKey =
-            typeKey + "|" + DiagnosticDescriptors.ConfigurationValueTypeMismatch.Id + "|" + location.GetLineSpan().Path + "|" + property.FullPath;
+        var reportKey = CreateConfigurationValueTypeMismatchReportKey(
+            bindableProperty.Symbol.Type,
+            location,
+            property.FullPath);
         if (!unknownKeysReported.TryAdd(reportKey, 0))
         {
             return;
@@ -2083,6 +2336,17 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             location,
             property.FullPath,
             bindableProperty.Symbol.Type.ToDisplayString()));
+    }
+
+    private static string CreateConfigurationValueTypeMismatchReportKey(
+        ITypeSymbol targetType,
+        Location location,
+        string fullPath)
+    {
+        return targetType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) +
+               "|" + DiagnosticDescriptors.ConfigurationValueTypeMismatch.Id +
+               "|" + location.GetLineSpan().Path +
+               "|" + fullPath;
     }
 
     private static bool TryCreateRegistration(
