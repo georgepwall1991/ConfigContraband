@@ -3,8 +3,8 @@
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
 Last refreshed: 2026-07-16
-Package version: `0.7.12`
-Base audited commit: `f00610c`
+Package version: `0.7.13`
+Base audited commit: `64399d2`
 
 ## Scoring Rubric
 
@@ -46,6 +46,8 @@ Iteration 110 closes CFG008's numeric-enum range false negative: numeric text is
 Iteration 111 closes CFG008's decimal number-style false negative: decimal conversion now uses the runtime converter's `NumberStyles.Float` boundary, reporting thousands separators and trailing signs while preserving exponent notation, decimal points, signs, and surrounding whitespace. All rules remain P3/monitor.
 
 Iteration 112 closes CFG008's `&h`/`&H` hexadecimal-prefix false positive across all eight integral targets. Iteration 113 then re-tested the earlier CFG002 default-struct/member-initializer residual and proved the analyzer already reports the required nested member correctly; runtime validation independently confirms `default(T)` skips the struct's initializer. The earlier Current Posture sentence naming that default-struct shape as a remaining false negative is therefore superseded, its Known Gaps entry has been removed, and the shipped behaviour is now regression-pinned. All rules remain P3/monitor.
+
+Iteration 114 restores the missing CFG008 Rule Notes section, making the health record self-contained for the rule's shipped options-binding and direct-read coverage, runtime converter boundaries, conservative non-goals, and no-fix rationale. The earlier Current Posture description of empty strings and non-integer thousands separators as remaining CFG008 residuals is superseded by iterations 109 and 111. No diagnostic behaviour changed; all rules remain P3/monitor.
 
 As of `0.4.0`, the bindable-property and configuration model lives in a shared `ConfigContraband.Core`
 library (bundled inside the analyzer package), and a companion `ConfigContraband.Tool` reuses that model
@@ -176,6 +178,7 @@ A follow-up evidence-based audit on 2026-07-06 (eight parallel reviewers, one pe
 | 2026-07-16 | 111 | `CFG008` | Decimal conversion used `NumberStyles.Number | AllowExponent`, which accepts thousands separators and trailing signs that the runtime `DecimalConverter` rejects. Three RED regressions (two scalar-matrix cases and one analyzer case) reproduced the false negatives; direct runtime-converter tests proved that `"1,000"` and `"1-"` throw while `"1e2"` remains valid. | Reuse the existing `NumberStyles.Float` boundary for decimal parsing, matching `DecimalConverter` exactly without changing integral, float, or double behavior. Full suite 647 analyzer/test + 230 core (877 total) passed. Patch bump to `0.7.10`; README and CHANGELOG synchronized. | `CFG008` remains `5.00` / P3: the concrete false negatives were found and fixed in the same iteration, strengthening decimal conversion parity without changing score math. |
 | 2026-07-16 | 112 | `CFG008` | Integral conversion recognised the runtime converter's `0x` and `#` hexadecimal prefixes but not its Visual Basic-style `&h`/`&H` prefix, so valid values such as `"&h1F"` produced a false Warning. Core and analyzer RED regressions reproduced the mismatch while direct `TypeDescriptor` tests independently proved acceptance across all eight signed and unsigned integral converters. | Extend the existing prefix stripper with a case-insensitive `&h` branch, preserving the same type-specific hexadecimal range parsing after the prefix is removed. Full suite 655 analyzer/test + 246 core (901 total) passed; Release build completed with zero warnings/errors and formatter verification passed. Patch bump to `0.7.11`; README and CHANGELOG synchronized. | `CFG008` remains `5.00` / P3: the concrete false positive was found and fixed in the same iteration, strengthening integral converter parity without changing score math. |
 | 2026-07-16 | 113 | `CFG002` | The Known Gaps section still described a default-struct member-initializer false negative from iteration 95. A focused analyzer regression unexpectedly passed immediately: CFG002 already reports the nested required member when an absent non-nullable struct is validated as `default(T)`, even if the struct declaration has an explicit parameterless constructor and a satisfying member initializer. A direct `Validator.TryValidateObject` test independently proves that `default(T)` skips the initializer and fails validation. | Pin the shipped analyzer behaviour with the focused regression and remove the obsolete accepted-false-negative entry. No analyzer implementation changed. Full suite 657 analyzer/test + 246 core (903 total) passed; Release build completed with zero warnings/errors and formatter verification passed. Patch bump to `0.7.12`; README and CHANGELOG synchronized. | `CFG002` remains `4.75` / P3: test depth and health-document trust improve without changing score math. |
+| 2026-07-16 | 114 | `CFG008` | The rule shipped in iteration 100 and received four subsequent precision releases, but `analyzer-health.md` still jumped from CFG007 Rule Notes directly to the Verification Baseline. The canonical health record therefore lacked a current CFG008 behaviour, boundary, and no-fix section even though README and tests carried that evidence. | Add a dedicated CFG008 Rule Notes section covering options bindings, signed-framework direct `GetValue<T>` reads, supported scalar targets, runtime-backed empty/nullable/enum/decimal/integral-prefix boundaries, conservative skipped shapes, deduplication, and the JSON-anchored no-fix rationale. No analyzer or test source changed. Full suite 657 analyzer/test + 246 core (903 total) passed; Release build completed with zero warnings/errors and formatter verification passed. Patch bump to `0.7.13`; README and CHANGELOG synchronized. | `CFG008` remains `5.00` / P3: documentation trust improves without changing score math. |
 
 ## Health Baseline
 
@@ -377,6 +380,26 @@ Known gaps:
 - Intentionally does not model order-sensitive tuple-deconstruction cases where one sibling element writes the target property on the original binder-options object while another sibling element simultaneously reassigns the parameter itself to a new instance (e.g. `(options.ErrorOnUnknownConfiguration, options) = (true, new BinderOptions());`). C# evaluates the property write against the original object before the parameter is repointed, so the true runtime state can be `true` even though the analyzer conservatively treats the whole tuple as inconclusive (a false negative, not a false positive) — reviewed and accepted 2026-07-06 given the shape's rarity and the added complexity a precise order-sensitive fix would require.
 - Does not offer a code fix because the diagnostic is anchored in an appsettings additional file.
 
+### CFG008 Configuration Value Cannot Bind To Target Type
+
+Reports a visible appsettings scalar when its string value provably cannot be converted to the target CLR type by the runtime configuration binder.
+
+Current behavior:
+
+- Checks known scalar leaves reached through supported `BindConfiguration(...)`, `Bind(GetSection(...))`, and direct `Configure<T>(GetSection(...))` options registrations.
+- Checks direct generic `ConfigurationBinder.GetValue<T>(...)` reads when the invoked symbol is the real signed Microsoft API, the receiver is provably the host configuration contract, the path is constant, and any default argument is a compile-time constant.
+- Covers nullable and non-nullable integral types, `float`, `double`, `decimal`, `bool`, `char`, enums, `Guid`, `TimeSpan`, `DateTime`, and `DateTimeOffset`; `Nullable<T>` is unwrapped only after preserving the runtime converter's exactly-empty-to-null boundary.
+- Mirrors runtime `TypeConverter` semantics rather than JSON token kinds: numeric and Boolean JSON scalars are evaluated by their stored string content, and case-insensitive Boolean text, enum names/comma-lists/in-range numeric values, `#`/`0x`/`&h` integral hex forms, decimal exponent notation, and accepted empty `char`/date forms stay quiet.
+- Reports empty or whitespace-only values only where the target converter throws, numeric enum values outside the declared backing type's range, decimal thousands separators or trailing signs, malformed GUID/time/date/numeric text, and other proven conversion failures.
+- Deduplicates repeated direct reads and the same scalar reached by both an options binding and a supported direct read.
+- Keeps `string`/`object`, JSON `null`, object/array values, unsupported custom targets, collection/dictionary element mismatches, missing paths, dynamic keys, stored sections, local/custom/mutated/escaped configuration roots, and effectful or otherwise unprovable direct-read defaults quiet.
+
+Known gaps:
+
+- Collection and dictionary element conversion is intentionally outside the current scalar-leaf walk; widen only with runtime-backed evidence and conservative element locations.
+- Direct reads through the configuration indexer remain outside CFG008 because the target type is not statically available.
+- No automatic fix is offered because the diagnostic is anchored in an appsettings additional file and the intended replacement value cannot be inferred safely.
+
 ## Verification Baseline
 
 Focused analyzer test command:
@@ -399,8 +422,8 @@ dotnet format ConfigContraband.slnx --verify-no-changes --no-restore --verbosity
 git diff --check
 ```
 
-Last executed 2026-07-16 verifier status: 657 analyzer/test and 246 core tests passed (903 total), the Release build completed with zero warnings and zero errors, and formatter verification passed for iteration 113. Local git commands were unavailable under the active execution policy, so this run does not claim `git diff --check`; the ready PR's CI diff and package gates remain authoritative for that remote slice. The prior Roslyn analyzer-testing reference-assembly resolution failure remains resolved and is not an active release-readiness blocker.
+Last executed 2026-07-16 verifier status: 657 analyzer/test and 246 core tests passed (903 total), the Release build completed with zero warnings and zero errors, and formatter verification passed for iteration 114. Local git commands were unavailable under the active execution policy, so this run does not claim `git diff --check`; the ready PR's CI diff and package gates remain authoritative for that remote slice. The prior Roslyn analyzer-testing reference-assembly resolution failure remains resolved and is not an active release-readiness blocker.
 
-Latest follow-up audit evidence on 2026-07-16 reported verification status `pass`, with both package projects at `0.7.12` and no score-math issue. Release Readiness remains `5`; rule severity and score math are otherwise unchanged.
+Latest follow-up audit evidence on 2026-07-16 reported verification status `pass`, with both package projects at `0.7.13` and no score-math issue. Release Readiness remains `5`; rule severity and score math are otherwise unchanged.
 
 CI verification is defined in `.github/workflows/ci.yml` and runs restore, build, formatting verification, test with coverage, pack, test-result upload, and package artifact upload against the SDK from `global.json`. Release publication is defined in `.github/workflows/publish.yml` and now runs the same formatting verification before tests, pack, NuGet push, and release asset upload.

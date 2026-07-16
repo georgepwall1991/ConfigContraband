@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.13 - 2026-07-16
+
+- Added the missing `CFG008` Rule Notes section to `analyzer-health.md`, consolidating its options-binding and direct-`GetValue<T>` coverage, runtime `TypeConverter` precision boundaries, deliberate non-goals, and no-fix rationale. No diagnostic behaviour changed.
+
 ## 0.7.12 - 2026-07-16
 
 - Added runtime-backed regression coverage proving that `CFG002` reports a missing required member when an absent non-nullable nested struct is validated as `default(T)`, even if the struct declaration has a parameterless constructor and a satisfying member initializer that `default(T)` skips. This behaviour was already correct; the health document's obsolete accepted-false-negative entry has been removed.

@@ -43,7 +43,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.7.12" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.7.13" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
