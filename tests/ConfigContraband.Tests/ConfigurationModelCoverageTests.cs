@@ -280,6 +280,92 @@ public sealed class ConfigurationModelCoverageTests
         Assert.Null(stripe.ValueLocation);
     }
 
+    [Fact]
+    public void Configuration_snapshot_models_net10_runtime_section_existence()
+    {
+        var snapshot = ConfigurationSnapshot.Create(
+            [
+                new TestAdditionalText("appsettings.json", """
+                    {
+                      "EmptyObject": {},
+                      "NullValue": null,
+                      "EmptyArray": [],
+                      "Scalar": "value",
+                      "ObjectWithChild": {
+                        "Value": "present"
+                      },
+                      "ObjectWithNullChild": {
+                        "Value": null
+                      },
+                      "ObjectWithEmptyObjectChild": {
+                        "Value": {}
+                      },
+                      "Colon:EmptyChild": {}
+                    }
+                    """)
+            ],
+            _ => false,
+            CancellationToken.None);
+
+        Assert.Equal(
+            ConfigurationSectionExistence.Missing,
+            snapshot.GetSectionExistence("EmptyObject", ConfigurationProviderSemantics.Net10OrLater));
+        Assert.Equal(
+            ConfigurationSectionExistence.Missing,
+            snapshot.GetSectionExistence("NullValue", ConfigurationProviderSemantics.Net10OrLater));
+        Assert.Equal(
+            ConfigurationSectionExistence.Exists,
+            snapshot.GetSectionExistence("EmptyArray", ConfigurationProviderSemantics.Net10OrLater));
+        Assert.Equal(
+            ConfigurationSectionExistence.Exists,
+            snapshot.GetSectionExistence("Scalar", ConfigurationProviderSemantics.Net10OrLater));
+        Assert.Equal(
+            ConfigurationSectionExistence.Exists,
+            snapshot.GetSectionExistence("ObjectWithChild", ConfigurationProviderSemantics.Net10OrLater));
+        Assert.Equal(
+            ConfigurationSectionExistence.Exists,
+            snapshot.GetSectionExistence("ObjectWithNullChild", ConfigurationProviderSemantics.Net10OrLater));
+        Assert.Equal(
+            ConfigurationSectionExistence.Exists,
+            snapshot.GetSectionExistence("ObjectWithEmptyObjectChild", ConfigurationProviderSemantics.Net10OrLater));
+        Assert.Equal(
+            ConfigurationSectionExistence.Exists,
+            snapshot.GetSectionExistence("Colon", ConfigurationProviderSemantics.Net10OrLater));
+    }
+
+    [Fact]
+    public void Configuration_snapshot_keeps_version_sensitive_shapes_unknown_without_provider_evidence()
+    {
+        var snapshot = ConfigurationSnapshot.Create(
+            [
+                new TestAdditionalText("appsettings.json", """
+                    {
+                      "EmptyObject": {},
+                      "NullValue": null,
+                      "EmptyArray": []
+                    }
+                    """)
+            ],
+            _ => false,
+            CancellationToken.None);
+
+        Assert.Equal(
+            ConfigurationSectionExistence.Missing,
+            snapshot.GetSectionExistence("EmptyObject", ConfigurationProviderSemantics.Unknown));
+        Assert.Equal(
+            ConfigurationSectionExistence.Unknown,
+            snapshot.GetSectionExistence("NullValue", ConfigurationProviderSemantics.Unknown));
+        Assert.Equal(
+            ConfigurationSectionExistence.Unknown,
+            snapshot.GetSectionExistence("EmptyArray", ConfigurationProviderSemantics.Unknown));
+        Assert.Equal(
+            ConfigurationSectionExistence.Exists,
+            snapshot.GetSectionExistence("NullValue", ConfigurationProviderSemantics.BeforeNet10));
+        Assert.Equal(
+            ConfigurationSectionExistence.Missing,
+            snapshot.GetSectionExistence("EmptyArray", ConfigurationProviderSemantics.BeforeNet10));
+    }
+
     private sealed class TestAdditionalText : AdditionalText
     {
         private readonly SourceText _text;

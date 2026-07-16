@@ -21,7 +21,8 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         DiagnosticIds.MissingConfigurationSection,
         DiagnosticIds.ValidationNotOnStart,
         DiagnosticIds.DataAnnotationsNotEnabled,
-        DiagnosticIds.NestedValidationNotRecursive);
+        DiagnosticIds.NestedValidationNotRecursive,
+        DiagnosticIds.ConfigurationKeyNotFound);
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -32,6 +33,7 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             switch (diagnostic.Id)
             {
                 case DiagnosticIds.MissingConfigurationSection:
+                case DiagnosticIds.ConfigurationKeyNotFound:
                     RegisterMissingSectionFix(context, diagnostic);
                     break;
 

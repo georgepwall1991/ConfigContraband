@@ -1,6 +1,20 @@
 ; Shipped analyzer releases
 ; https://github.com/dotnet/roslyn-analyzers/blob/main/src/Microsoft.CodeAnalysis.Analyzers/ReleaseTrackingAnalyzers.Help.md
 
+## Release 0.7.0
+
+### New Rules
+Rule ID | Category | Severity | Notes
+--------|----------|----------|-------
+CFG009 | Configuration | Warning | Direct configuration path is unavailable from visible appsettings files
+
+## Release 0.6.0
+
+### New Rules
+Rule ID | Category | Severity | Notes
+--------|----------|----------|-------
+CFG008 | Configuration | Warning | Configuration value cannot be bound to the target property type
+
 ## Release 0.3.0
 
 ### New Rules

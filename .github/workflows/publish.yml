@@ -20,6 +20,18 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          analyzer_version="$(dotnet msbuild src/ConfigContraband/ConfigContraband.csproj -getProperty:Version -nologo)"
+          tool_version="$(dotnet msbuild src/ConfigContraband.Tool/ConfigContraband.Tool.csproj -getProperty:Version -nologo)"
+
+          if [[ "$GITHUB_REF_NAME" != "v$analyzer_version" || "$analyzer_version" != "$tool_version" ]]; then
+            echo "Release tag and package versions must match: tag=$GITHUB_REF_NAME analyzer=$analyzer_version tool=$tool_version" >&2
+            exit 1
+          fi
+
       - name: Restore
         run: dotnet restore ConfigContraband.slnx
 
@@ -37,10 +49,175 @@ jobs:
           dotnet pack src/ConfigContraband/ConfigContraband.csproj --configuration Release --no-build --output artifacts/packages
           dotnet pack src/ConfigContraband.Tool/ConfigContraband.Tool.csproj --configuration Release --no-build --output artifacts/packages
 
+      - name: Verify packages match release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          analyzer_package="artifacts/packages/ConfigContraband.$version.nupkg"
+          tool_package="artifacts/packages/ConfigContraband.Tool.$version.nupkg"
+
+          test -f "$analyzer_package"
+          test -f "$tool_package"
+
+          analyzer_nuspec="$(unzip -p "$analyzer_package" '*.nuspec')"
+          tool_nuspec="$(unzip -p "$tool_package" '*.nuspec')"
+          [[ "$analyzer_nuspec" == *"<version>$version</version>"* ]]
+          [[ "$tool_nuspec" == *"<version>$version</version>"* ]]
+          [[ "$analyzer_nuspec" == *"<releaseNotes>"*"</releaseNotes>"* ]]
+          [[ "$analyzer_nuspec" != *"<releaseNotes></releaseNotes>"* ]]
+
       - name: Publish to NuGet
-        run: dotnet nuget push "artifacts/packages/*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          normalized_package_digest() {
+            local package="$1"
+            python3 - "$package" <<'PY'
+          import hashlib
+          import sys
+          import zipfile
+
+          digest = hashlib.sha256()
+          with zipfile.ZipFile(sys.argv[1]) as package:
+              for name in sorted(package.namelist()):
+                  if (name in {".signature.p7s", "_rels/.rels", "[Content_Types].xml"} or
+                          name.startswith("package/services/metadata/core-properties/")):
+                      continue
+                  digest.update(name.encode("utf-8"))
+                  digest.update(b"\0")
+                  digest.update(package.read(name))
+          print(digest.hexdigest())
+          PY
+          }
+
+          publish_package() {
+            local package_id="$1"
+            local package_path="$2"
+            local version="${GITHUB_REF_NAME#v}"
+            local lower_id="${package_id,,}"
+            local remote_url="https://api.nuget.org/v3-flatcontainer/$lower_id/$version/$lower_id.$version.nupkg"
+            local remote_package
+            local status
+            remote_package="$(mktemp --suffix=.nupkg)"
+            status="$(curl --silent --show-error --location --output "$remote_package" --write-out '%{http_code}' "$remote_url")"
+
+            case "$status" in
+              404)
+                if dotnet nuget push "$package_path" \
+                    --api-key "$NUGET_API_KEY" \
+                    --source https://api.nuget.org/v3/index.json; then
+                  return 0
+                else
+                  push_status=$?
+                fi
+
+                # NuGet can accept a package before the flat-container endpoint
+                # exposes it. A retry during that validation window sees 404 here
+                # and then 409 from the push endpoint. Poll until the accepted
+                # package is readable, then prove its content is identical.
+                for attempt in {1..30}; do
+                  sleep 10
+                  status="$(curl --silent --show-error --location --output "$remote_package" --write-out '%{http_code}' "$remote_url")"
+                  case "$status" in
+                    200)
+                      if [[ "$(normalized_package_digest "$package_path")" != \
+                            "$(normalized_package_digest "$remote_package")" ]]; then
+                        echo "$package_id $version became visible with different content after a failed push." >&2
+                        return 1
+                      fi
+
+                      echo "$package_id $version became visible with identical content after a failed push."
+                      return 0
+                      ;;
+                    404)
+                      ;;
+                    *)
+                      echo "NuGet returned HTTP $status while waiting for $package_id $version to become visible." >&2
+                      return 1
+                      ;;
+                  esac
+                done
+
+                echo "$package_id $version did not become visible after the failed push." >&2
+                return "$push_status"
+                ;;
+              200)
+                if [[ "$(normalized_package_digest "$package_path")" != \
+                      "$(normalized_package_digest "$remote_package")" ]]; then
+                  echo "$package_id $version already exists on NuGet with different content." >&2
+                  exit 1
+                fi
+
+                echo "$package_id $version already exists with identical content; skipping push."
+                ;;
+              *)
+                echo "NuGet returned HTTP $status while checking $package_id $version." >&2
+                exit 1
+                ;;
+            esac
+          }
+
+          version="${GITHUB_REF_NAME#v}"
+          publish_package "ConfigContraband" "artifacts/packages/ConfigContraband.$version.nupkg"
+          publish_package "ConfigContraband.Tool" "artifacts/packages/ConfigContraband.Tool.$version.nupkg"
 
       - name: Attach package to release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" artifacts/packages/*.nupkg --clobber
+        run: |
+          set -euo pipefail
+
+          normalized_package_digest() {
+            local package="$1"
+            python3 - "$package" <<'PY'
+          import hashlib
+          import sys
+          import zipfile
+
+          digest = hashlib.sha256()
+          with zipfile.ZipFile(sys.argv[1]) as package:
+              for name in sorted(package.namelist()):
+                  if (name in {".signature.p7s", "_rels/.rels", "[Content_Types].xml"} or
+                          name.startswith("package/services/metadata/core-properties/")):
+                      continue
+                  digest.update(name.encode("utf-8"))
+                  digest.update(b"\0")
+                  digest.update(package.read(name))
+          print(digest.hexdigest())
+          PY
+          }
+
+          tag="${{ github.event.release.tag_name }}"
+          version="${GITHUB_REF_NAME#v}"
+          for package in \
+            "artifacts/packages/ConfigContraband.$version.nupkg" \
+            "artifacts/packages/ConfigContraband.Tool.$version.nupkg"; do
+            name="$(basename "$package")"
+            asset_exists=false
+            while IFS= read -r asset; do
+              if [[ "$asset" == "$name" ]]; then
+                asset_exists=true
+                break
+              fi
+            done < <(gh release view "$tag" --json assets --jq '.assets[].name')
+
+            if [[ "$asset_exists" == true ]]; then
+              existing_dir="$(mktemp -d)"
+              gh release download "$tag" --pattern "$name" --dir "$existing_dir"
+              if [[ "$(normalized_package_digest "$package")" != \
+                    "$(normalized_package_digest "$existing_dir/$name")" ]]; then
+                echo "Release asset $name already exists with different content." >&2
+                exit 1
+              fi
+
+              echo "Release asset $name already exists with identical content; skipping upload."
+              continue
+            fi
+
+            gh release upload "$tag" "$package"
+          done

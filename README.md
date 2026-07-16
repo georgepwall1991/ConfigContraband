@@ -21,6 +21,8 @@ It focuses on the boring production failures:
 - nested options that look validated but are silently skipped
 - misspelled JSON keys hiding under a bound section
 - strict binding that will throw because an unknown key is present
+- scalar values that the configuration binder cannot convert to the target CLR type
+- direct configuration reads whose path is unavailable from visible appsettings files
 
 Use it when your app relies on strongly typed options and you want configuration validation feedback in the editor, in pull requests, and in CI before a bad setting reaches production.
 
@@ -35,11 +37,13 @@ Use it when your app relies on strongly typed options and you want configuration
 | Nested validation | Detects nested options objects and collections that need recursive validation attributes. |
 | JSON key drift | Reports likely misspelled keys under bound sections while staying conservative for flexible binding shapes. |
 | Strict binding | Warns when `ErrorOnUnknownConfiguration` makes an unknown key a binding failure. |
+| Value conversion | Warns when a visible appsettings scalar provably cannot convert to the target CLR type. |
+| Direct reads | Checks supported direct `IConfiguration` reads against visible appsettings paths. |
 
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.5.8" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.7.0" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -118,6 +122,7 @@ When the analyzer cannot prove a configuration shape statically, it stays quiet.
 | `CFG006` | Unknown configuration key under bound section | Info | JSON keys that do not match bindable options properties or aliases. |
 | `CFG007` | Unknown configuration key will throw during binding | Warning | JSON keys that do not match bindable options properties while `ErrorOnUnknownConfiguration` is enabled. |
 | `CFG008` | Configuration value cannot be bound to the target property type | Warning | Scalar values that provably cannot convert to the bound property's CLR type, e.g. `"Port": "eighty"` for an `int`. |
+| `CFG009` | Direct configuration path is unavailable from visible appsettings files | Warning | `configuration.GetRequiredSection("Strpie")` (throws at runtime), near-miss `GetSection("Strpie").Get<T>()`/`.Bind(instance)` typos (bind nothing), and provable `GetConnectionString` typos. |
 
 ## appsettings IntelliSense (schema generation)
 
@@ -507,6 +512,16 @@ The rule fires only on a **provable** conversion failure and is deliberately con
 
 There is no automatic code fix — like `CFG006`/`CFG007`, the diagnostic points at a JSON additional file rather than at C# the analyzer can rewrite.
 
+### `CFG009`: Direct Configuration Paths Unavailable from Visible Appsettings Files
+
+`CFG001` only sees sections consumed through an options registration, but plenty of code reads configuration directly. A typo there is just as fatal and even quieter: `GetRequiredSection("Strpie")` throws `InvalidOperationException` at runtime, while `GetSection("Strpie").Get<ServerOptions>()` or `.Bind(instance)` silently binds nothing. `CFG009` extends the same missing-section check (including the "Did you mean" suggestion and the code fix that rewrites the literal) to direct reads:
+
+- `configuration.GetRequiredSection("Section")` — reported when the section is missing from every `appsettings*.json` file. Chained paths (`GetSection("Parent").GetRequiredSection("Child")`), constant and `nameof` keys, `?.`/parenthesized/null-forgiving receivers, and host `IConfiguration`/`IConfigurationRoot`/`ConfigurationManager` contracts are resolved through the same path machinery as `CFG001`.
+- `configuration.GetSection("Section").Get<T>()` / `.Bind(instance)` — reported only when the missing path is a near-miss of a declared sibling. Plain misses stay quiet because environment providers may supply them. A bare `GetSection(...)` with no binder consumer also stays quiet: probing with `.Exists()` is idiomatic and `GetSection` never throws.
+- `configuration.GetConnectionString("Name")` — connection strings are routinely supplied by environment variables or secret stores, so a plain miss is not reported. The rule fires only when a `ConnectionStrings` section exists in appsettings and the name is a near-miss of a declared entry — a provable typo.
+
+The rule stays quiet whenever the absolute path or receiver provenance cannot be proven: non-constant keys, reads off a stored or parameter-typed `IConfigurationSection` (its own path is invisible), concrete custom `IConfiguration` implementations, locally constructed `ConfigurationBuilder`/`ConfigurationManager` roots, and receiver locals that are conditionally reassigned, mutated, escaped, or captured. Same-block straight-line assignments and aliases are followed so a local that ultimately points back to the host contract is still checked. Reads that feed a recognized options registration — `services.Configure<T>(configuration.GetRequiredSection("X"))` — are left to `CFG001` so the same miss is not reported twice, and a chain whose `GetRequiredSection` parent is already missing reports only once, at the parent. Runtime section existence follows the referenced JSON provider: .NET 10 empty objects and explicit `null` are missing, while empty arrays exist; unknown version-sensitive shapes stay quiet. `GetValue<T>(...)`, the `configuration["key"]` indexer, and the `Bind("key", instance)` overload are deliberately out of scope for now.
+
 ## Design Principles
 
 - Prefer warnings for configuration failures that are likely to break production.
@@ -522,6 +537,7 @@ ConfigContraband currently focuses on:
 - `AddOptions<T>().BindConfiguration("Section")` registrations.
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
 - Direct `Configure<T>(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations for section and JSON-key drift.
+- Direct configuration reads: standalone `GetRequiredSection(...)`, suggestion-gated `GetSection(...).Get<T>()`/`.Bind(instance)`, and suggestion-gated `GetConnectionString(...)` (`CFG009`).
 - Strict `ErrorOnUnknownConfiguration` binder options for unknown-key failures.
 - String-literal section names.
 - Public bindable properties on options types, including inherited and constructor-bound bindable properties.

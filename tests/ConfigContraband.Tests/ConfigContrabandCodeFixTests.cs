@@ -2303,6 +2303,33 @@ public sealed class ConfigContrabandCodeFixTests
             expected);
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("null")]
+    public async Task Cfg009_fix_not_offered_for_exact_declared_runtime_empty_section(string jsonValue)
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetRequiredSection({|#0:"Empty"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Empty", ".");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            source,
+            ("appsettings.json", $$"""
+            {
+              "Empty": {{jsonValue}},
+              "Empt": {
+                "Value": "present"
+              }
+            }
+            """),
+            expected);
+    }
+
     private static string DirectReadSource(string body)
     {
         return $$"""

@@ -1,14 +1,14 @@
 # CFG009 Direct Configuration Reads Hardening Design
 
-**Date:** 2026-07-13  
-**Status:** Approved for implementation  
+**Date:** 2026-07-13
+**Status:** Release candidate
 **Target release:** 0.7.0
 
 ## Purpose
 
 Harden the uncommitted CFG009 implementation before its first release. CFG009 enforces a visible-appsettings contract for direct `IConfiguration` reads while remaining conservative around locally owned or custom configuration providers.
 
-The rule must not claim that a key is absent from every runtime provider. Its public wording will state that the requested path is not declared in the visible appsettings files supplied to the analyzer.
+The rule must not claim that a key is absent from every runtime provider. Its public wording states that the requested path is unavailable from the visible appsettings files supplied to the analyzer.
 
 ## Scope
 
@@ -41,7 +41,7 @@ Every inferred `GetRequiredSection` chain link must resolve semantically to the 
 
 ### Injected configuration
 
-Injected `IConfiguration` and `IConfigurationRoot` receivers are evaluated against the visible appsettings files. Diagnostics mean “not declared in visible appsettings,” not “guaranteed absent at runtime.”
+Injected `IConfiguration` and `IConfigurationRoot` receivers are evaluated against the visible appsettings files. Diagnostics mean “unavailable from visible appsettings,” not “guaranteed absent at runtime.”
 
 ### Locally owned and custom configuration
 
@@ -132,8 +132,8 @@ Before release:
 - set both package projects to version 0.7.0 consistently;
 - make package release notes describe CFG009 rather than CFG008;
 - move CFG008 from unshipped to the shipped 0.6.0 analyzer-release record;
-- keep CFG009 unshipped until release preparation is complete;
-- describe 0.7.0 as unreleased/in development until its tag exists;
+- move CFG009 from unshipped into the 0.7.0 shipped ledger during release preparation so the packaged analyzer carries the correct release record;
+- keep 0.7.0 a release candidate until its GitHub release is published, with the changelog date aligned to the intended tag date;
 - update README feature summaries, supported-scope wording, and installation version;
 - refresh analyzer-health metadata only after final verification;
 - ensure changelog, package metadata, README, analyzer-release files, and tag agree.

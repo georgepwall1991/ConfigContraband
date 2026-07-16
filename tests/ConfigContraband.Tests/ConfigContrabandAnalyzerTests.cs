@@ -14149,31 +14149,23 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
-    public async Task Cfg009_reports_missing_section_bound_through_get()
+    public async Task Cfg009_ignores_missing_section_bound_through_get_without_typo_evidence()
     {
         var source = DirectReadSource("""
-            _ = configuration.GetSection({|#0:"Missing"|}).Get<ServerOptions>();
+            _ = configuration.GetSection("Missing").Get<ServerOptions>();
             """);
 
-        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
-            .WithLocation(0)
-            .WithArguments("Missing", ".");
-
-        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
     }
 
     [Fact]
-    public async Task Cfg009_reports_missing_section_bound_through_bind_instance()
+    public async Task Cfg009_ignores_missing_section_bound_through_bind_without_typo_evidence()
     {
         var source = DirectReadSource("""
-            configuration.GetSection({|#0:"Missing"|}).Bind(new ServerOptions());
+            configuration.GetSection("Missing").Bind(new ServerOptions());
             """);
 
-        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
-            .WithLocation(0)
-            .WithArguments("Missing", ".");
-
-        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
     }
 
     [Fact]
@@ -14322,14 +14314,14 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
-    public async Task Cfg009_reports_missing_get_required_section_on_custom_configuration_implementation()
+    public async Task Cfg009_ignores_concrete_custom_configuration_implementation()
     {
         var source = DirectReadSource(
             "",
             extraMembers: """
             public void ReadCustom(CustomConfiguration custom)
             {
-                _ = custom.GetRequiredSection({|#0:"Missing"|});
+                _ = custom.GetRequiredSection("Missing");
             }
             """,
             extraTypes: """
@@ -14342,11 +14334,7 @@ public sealed class ConfigContrabandAnalyzerTests
             }
             """);
 
-        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
-            .WithLocation(0)
-            .WithArguments("Missing", ".");
-
-        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
     }
 
     [Fact]
@@ -14375,6 +14363,38 @@ public sealed class ConfigContrabandAnalyzerTests
             .WithArguments("Missing", ".");
 
         await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_single_diagnostic_for_static_get_after_missing_required_parent()
+    {
+        var source = DirectReadSource("""
+            _ = ConfigurationBinder.Get<ServerOptions>(configuration.GetRequiredSection({|#0:"Strpie"|}));
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_missing_child_in_static_required_section_chain()
+    {
+        var source = DirectReadSource("""
+            _ = ConfigurationExtensions.GetRequiredSection(configuration, "Parent")
+                .GetRequiredSection({|#0:"Chlid"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Parent:Chlid", ". Did you mean \"Parent:Child\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Parent": { "Child": { "Value": "present" } } }"""),
+            expected);
     }
 
     [Fact]
@@ -14602,6 +14622,211 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg009_does_not_duplicate_cfg001_for_expression_bodied_registration()
+    {
+        var source = """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services, IConfiguration configuration) =>
+                    services.Configure<ServerOptions>(configuration.GetRequiredSection({|#0:"Missing"|}));
+            }
+
+            public sealed class ServerOptions
+            {
+                public string Host { get; set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Missing", ".");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_does_not_duplicate_cfg001_for_nested_registration_section_chain()
+    {
+        var source = """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    services.Configure<ServerOptions>(
+                        configuration.GetRequiredSection("Missing").GetSection({|#0:"Child"|}));
+                }
+            }
+
+            public sealed class ServerOptions
+            {
+                public string Host { get; set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Missing:Child", ".");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_only_missing_required_parent_before_conditional_child()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetRequiredSection({|#0:"Missing"|})?.GetRequiredSection("Child");
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Missing", ".");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_throwing_chain_when_parent_existence_depends_on_provider_version()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetRequiredSection("Parent").GetRequiredSection({|#0:"Child"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Parent:Child", ".");
+
+        await Verifier.VerifyAnalyzerWithReferencesAsync(
+            source,
+            ("appsettings.json", """{ "Parent": null }"""),
+            Verifier.ConfigurationAbstractionsReferences,
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_net10_empty_object_as_missing_required_section()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetRequiredSection({|#0:"Empty"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Empty", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Empty": {} }"""),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_net10_null_as_missing_required_section()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetRequiredSection({|#0:"Empty"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Empty", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Empty": null }"""),
+            expected);
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("\"value\"")]
+    [InlineData("{ \"Value\": \"present\" }")]
+    public async Task Cfg009_accepts_net10_shapes_that_create_a_runtime_section(string jsonValue)
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetRequiredSection("Present");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", $$"""{ "Present": {{jsonValue}} }"""));
+    }
+
+    [Fact]
+    public async Task Cfg001_reports_net10_empty_object_once_without_cfg009_duplicate()
+    {
+        var source = """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    services.Configure<ServerOptions>(configuration.GetRequiredSection({|#0:"Empty"|}));
+                }
+            }
+
+            public sealed class ServerOptions
+            {
+                public string Host { get; set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Empty", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "Empty": {} }"""),
+            expected);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("null")]
+    public async Task Cfg001_does_not_cascade_cfg002_when_required_section_is_unavailable(string jsonValue)
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    services.AddOptions<ServerOptions>()
+                        .Bind(configuration.GetRequiredSection({|#0:"Empty"|}))
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+
+            public sealed class ServerOptions
+            {
+                [Required]
+                public string Host { get; set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Empty", ".");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", $$"""{ "Empty": {{jsonValue}} }"""),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg009_does_not_report_section_read_feeding_options_builder_bind()
     {
         var source = """
@@ -14636,6 +14861,236 @@ public sealed class ConfigContrabandAnalyzerTests
             var config = new ConfigurationBuilder().Build();
             _ = config.GetRequiredSection("Missing");
             _ = new ConfigurationBuilder().Build().GetRequiredSection("AlsoMissing");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_direct_and_local_configuration_manager_instances()
+    {
+        var source = DirectReadSource("""
+            var local = new ConfigurationManager();
+            _ = local.GetRequiredSection("Missing");
+            _ = new ConfigurationManager().GetRequiredSection("AlsoMissing");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_configuration_manager_parameter_as_host_contract()
+    {
+        var source = DirectReadSource(
+            "",
+            extraMembers: """
+            public void ReadManager(ConfigurationManager manager)
+            {
+                _ = manager.GetRequiredSection({|#0:"Missing"|});
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Missing", ".");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_tracks_latest_straight_line_configuration_assignment()
+    {
+        var source = DirectReadSource("""
+            IConfiguration host = new ConfigurationBuilder().Build();
+            host = configuration;
+            _ = host.GetRequiredSection({|#0:"HostMissing"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("HostMissing", ".");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_uses_latest_local_assignment_when_host_is_replaced_by_local_configuration()
+    {
+        var source = DirectReadSource("""
+            IConfiguration local = configuration;
+            local = new ConfigurationBuilder().Build();
+            _ = local.GetRequiredSection("LocalMissing");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_after_earlier_read_only_configuration_calls()
+    {
+        var source = DirectReadSource("""
+            configuration.GetSection("Stripe");
+            _ = configuration.GetRequiredSection({|#0:"Missing"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Missing", ".");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_after_earlier_read_only_required_section_call()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetRequiredSection("Stripe");
+            _ = configuration.GetRequiredSection({|#0:"Missing"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Missing", ".");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_after_earlier_read_only_connection_string_call()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetConnectionString("Database");
+            _ = configuration.GetRequiredSection({|#0:"Missing"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("Missing", ".");
+
+        await Verifier.VerifyAnalyzerAsync(source, DatabaseConnectionAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_stays_quiet_after_nested_configuration_section_mutation()
+    {
+        var source = DirectReadSource("""
+            configuration.GetSection("Dynamic").Value = "value";
+            _ = configuration.GetRequiredSection("Dynamic");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_stays_quiet_after_contract_parameter_is_reassigned_to_local_configuration()
+    {
+        var source = DirectReadSource(
+            "",
+            extraMembers: """
+            public void ReadReassigned(IConfiguration configuration)
+            {
+                configuration = new ConfigurationBuilder().Build();
+                _ = configuration.GetRequiredSection("Missing");
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_stays_quiet_after_contract_members_are_reassigned_to_local_configuration()
+    {
+        var source = DirectReadSource(
+            "",
+            extraMembers: """
+            private IConfiguration _configuration = null!;
+            private IConfiguration Configuration { get; set; } = null!;
+
+            public void ReadReassignedMembers()
+            {
+                _configuration = new ConfigurationBuilder().Build();
+                _ = _configuration.GetRequiredSection("FieldMissing");
+
+                Configuration = new ConfigurationBuilder().Build();
+                _ = Configuration.GetRequiredSection("PropertyMissing");
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_tracks_straight_line_configuration_aliases()
+    {
+        var source = DirectReadSource("""
+            var localSource = new ConfigurationBuilder().Build();
+            IConfiguration localAlias = localSource;
+            _ = localAlias.GetRequiredSection("LocalMissing");
+
+            IConfiguration hostSource = configuration;
+            var hostAlias = hostSource;
+            _ = hostAlias.GetRequiredSection({|#0:"HostMissing"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments("HostMissing", ".");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_stays_quiet_after_conditional_receiver_reassignment()
+    {
+        var source = DirectReadSource("""
+            IConfiguration local = configuration;
+            if (System.DateTime.UtcNow.Ticks > 0)
+            {
+                local = new ConfigurationBuilder().Build();
+            }
+
+            _ = local.GetRequiredSection("Missing");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_stays_quiet_after_configuration_manager_mutation()
+    {
+        var source = DirectReadSource(
+            "",
+            extraMembers: """
+            public void ReadMutatedManager(ConfigurationManager manager)
+            {
+                manager["Dynamic"] = "value";
+                _ = manager.GetRequiredSection("Missing");
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_stays_quiet_after_receiver_escapes_or_is_captured()
+    {
+        var source = DirectReadSource(
+            """
+            IConfiguration byValue = configuration;
+            Escape(byValue);
+            _ = byValue.GetRequiredSection("ByValueMissing");
+
+            IConfiguration byReference = configuration;
+            EscapeByReference(ref byReference);
+            _ = byReference.GetRequiredSection("ByReferenceMissing");
+
+            IConfiguration captured = configuration;
+            System.Action action = () => _ = captured["Dynamic"];
+            _ = captured.GetRequiredSection("CapturedMissing");
+            """,
+            extraMembers: """
+            private static void Escape(IConfiguration value) { }
+            private static void EscapeByReference(ref IConfiguration value) { }
             """);
 
         await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
@@ -14694,6 +15149,26 @@ public sealed class ConfigContrabandAnalyzerTests
     {
         var source = DirectReadSource("""
             _ = configuration.GetValue<int>("Missing:Port");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_custom_get_section_overload_inside_real_binder_call()
+    {
+        var source = DirectReadSource(
+            """
+            _ = configuration.GetSection("Strpie", optional: true).Get<ServerOptions>();
+            """,
+            extraTypes: """
+            public static class CustomConfigurationExtensions
+            {
+                public static IConfigurationSection GetSection(
+                    this IConfiguration configuration,
+                    string key,
+                    bool optional) => configuration.GetSection(key);
+            }
             """);
 
         await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
