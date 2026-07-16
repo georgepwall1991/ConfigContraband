@@ -13928,6 +13928,27 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg008_reports_empty_string_bound_to_non_nullable_integer()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, 16)
+            .WithArguments("Server:Value", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": ""
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg008_reports_multi_char_string_bound_to_char()
     {
         var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("char"));

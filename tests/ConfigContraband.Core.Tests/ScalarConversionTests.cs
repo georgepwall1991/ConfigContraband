@@ -22,6 +22,13 @@ public sealed class ScalarConversionTests
     [InlineData("char", "String", "ab", true)]
     [InlineData("int?", "String", "eighty", true)]
     [InlineData("int", "String", "8,080", true)] // integral converter rejects thousands
+    [InlineData("int", "String", "", true)]
+    [InlineData("double", "String", "   ", true)]
+    [InlineData("decimal", "String", "", true)]
+    [InlineData("bool", "String", "", true)]
+    [InlineData("enum", "String", "", true)]
+    [InlineData("guid", "String", "", true)]
+    [InlineData("timespan", "String", "", true)]
     // Convertible / skipped -> no report.
     [InlineData("int", "Number", "8080", false)]
     [InlineData("int", "String", "8080", false)]
@@ -40,13 +47,15 @@ public sealed class ScalarConversionTests
     [InlineData("timespan", "String", "00:05:00", false)]
     [InlineData("decimal", "String", "1e2", false)] // exponent notation the converter accepts
     [InlineData("int?", "String", "8080", false)]
+    [InlineData("int?", "String", "", false)]
+    [InlineData("int?", "String", "   ", true)]
+    [InlineData("datetimeoffset", "String", "   ", false)]
     [InlineData("string", "String", "anything", false)]
     [InlineData("object", "String", "anything", false)]
     [InlineData("class", "String", "anything", false)] // nested-object target given a scalar
     [InlineData("intlist", "String", "eighty", false)] // collection target is out of scope
     [InlineData("int", "Null", "null", false)] // JSON null -> CFG002's concern
     [InlineData("int", "None", null, false)] // object/array value
-    [InlineData("int", "String", "   ", false)] // whitespace-only
     public void IsProvablyNotConvertible_matches_runtime_binder(
         string typeKey,
         string kindKey,
@@ -64,6 +73,36 @@ public sealed class ScalarConversionTests
     public void IsProvablyNotConvertible_returns_false_for_null_target()
     {
         Assert.False(ScalarConversion.IsProvablyNotConvertible(null, ScalarKind.String, "eighty"));
+    }
+
+    [Theory]
+    [InlineData(typeof(int), "")]
+    [InlineData(typeof(double), "   ")]
+    [InlineData(typeof(decimal), "")]
+    [InlineData(typeof(bool), "")]
+    [InlineData(typeof(RuntimeColor), "")]
+    [InlineData(typeof(Guid), "")]
+    [InlineData(typeof(TimeSpan), "")]
+    [InlineData(typeof(int?), "   ")]
+    public void Runtime_converter_rejects_invalid_empty_or_whitespace_string(Type type, string value)
+    {
+        Assert.ThrowsAny<Exception>(() =>
+            System.ComponentModel.TypeDescriptor.GetConverter(type).ConvertFromInvariantString(value));
+    }
+
+    [Theory]
+    [InlineData(typeof(int?), "")]
+    [InlineData(typeof(char), "")]
+    [InlineData(typeof(DateTime), "")]
+    [InlineData(typeof(DateTimeOffset), "   ")]
+    public void Runtime_converter_accepts_empty_string_for_supported_targets(Type type, string value)
+    {
+        _ = System.ComponentModel.TypeDescriptor.GetConverter(type).ConvertFromInvariantString(value);
+    }
+
+    private enum RuntimeColor
+    {
+        Red,
     }
 
     private static ITypeSymbol ResolveType(string key)

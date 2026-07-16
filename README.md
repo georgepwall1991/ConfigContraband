@@ -43,7 +43,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.7.7" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.7.8" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -519,7 +519,7 @@ The rule fires only on a **provable** conversion failure and is deliberately con
 
 - **Covered target types:** the integral types (`sbyte`–`ulong`), `float`/`double`/`decimal`, `bool`, `char`, enums, `Guid`, `TimeSpan`, `DateTime`, and `DateTimeOffset` (each unwrapped from `Nullable<T>`).
 - **Left alone (never reported):** `string`/`object` targets, JSON `null` (that is `CFG002`'s concern), object/array values under a scalar-typed property (a shape mismatch, not a conversion one), and collection- or dictionary-*element* mismatches such as `List<int>` given `[1, "x"]`.
-- **Precision boundaries matched to the binder:** `#`/`0x`-prefixed hex integers, empty strings for `char`/`DateTime`/`DateTimeOffset` (the converters default them), enum comma-lists (`"Read, Write"`) and numeric enum values, and case-insensitive `bool` values are all accepted, because the runtime converter accepts them.
+- **Precision boundaries matched to the binder:** empty or whitespace-only strings are reported for non-nullable numeric, Boolean, enum, `Guid`, and `TimeSpan` targets because their converters throw. An exactly empty nullable value stays quiet because `NullableConverter` maps it to null, while nullable whitespace is delegated to the underlying converter and reports when that converter throws. `char`/`DateTime`/`DateTimeOffset` remain quiet for accepted empty/whitespace forms. `#`/`0x`-prefixed hex integers, enum comma-lists (`"Read, Write"`) and numeric enum values, and case-insensitive `bool` values are also accepted because the runtime converter accepts them.
 
 There is no automatic code fix — like `CFG006`/`CFG007`, the diagnostic points at a JSON additional file rather than at C# the analyzer can rewrite.
 
