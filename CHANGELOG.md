@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.12 - 2026-07-16
+
+- Added runtime-backed regression coverage proving that `CFG002` reports a missing required member when an absent non-nullable nested struct is validated as `default(T)`, even if the struct declaration has a parameterless constructor and a satisfying member initializer that `default(T)` skips. This behaviour was already correct; the health document's obsolete accepted-false-negative entry has been removed.
+
 ## 0.7.11 - 2026-07-16
 
 - Fixed a `CFG008` false positive for integral hexadecimal text using the runtime converter's Visual Basic-style `&h`/`&H` prefix. All eight signed and unsigned integral targets now accept that prefix alongside the existing `0x` and `#` forms, with runtime-backed core and analyzer coverage preserving the exact converter boundary.
