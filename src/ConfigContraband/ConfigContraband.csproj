@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.4</Version>
+    <Version>0.7.5</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Fixed CFG009 false positives when Bind instance evaluation or binder-options callbacks can mutate configuration before binding, including static-field and unprovable implicit-construction initialisation. Signed Microsoft identity checks now cover ConfigurationExtensions as well as ConfigurationBinder; proven-safe calls retain suggestion-backed typo diagnostics.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed CFG001 missing-section false negatives when BindConfiguration uses reordered named arguments. The analyzer now resolves configSectionPath through Roslyn's semantic parameter mapping, preserving the existing suggestion and safe code-fix location.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

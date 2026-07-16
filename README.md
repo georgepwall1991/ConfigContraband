@@ -43,7 +43,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.7.4" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.7.5" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -257,6 +257,8 @@ services.AddOptions<StripeOptions>()
 ```
 
 When ConfigContraband sees a likely typo, it can offer a code fix. The fix keeps regular, verbatim, and raw string literal style when replacing the section name, falling back to an escaped string literal if a raw replacement would need line breaks. Nested section paths use the same colon-separated shape as .NET configuration:
+
+`BindConfiguration(...)` arguments are matched to their semantic parameters, so reordered named arguments such as `configureBinder: ..., configSectionPath: "Strpie"` retain the same diagnostic and section-literal fix.
 
 ```csharp
 services.AddOptions<StripeOptions>()
