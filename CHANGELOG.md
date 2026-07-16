@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.15 - 2026-07-16
+
+- Replaced the obsolete analyzer-health Current Shortlist, which still presented six completed fixes as candidates and contradicted itself about the fixed CFG005/CFG006 struct gap. The shortlist now records the actual all-P3 monitor posture and only the deliberate boundaries that could justify future evidence-backed work. No diagnostic behaviour changed.
+
 ## 0.7.14 - 2026-07-16
 
 - Added the missing `CFG009` Rule Notes section to `analyzer-health.md`, consolidating direct-read coverage, suggestion and code-fix policy, signed-framework/provenance gates, argument side-effect boundaries, intentional indexer/environment-provider exclusions, and deduplication with `CFG001`. No diagnostic behaviour changed.
