@@ -2306,6 +2306,56 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg002_reports_missing_key_when_default_struct_skips_member_initializer()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<AppOptions>()
+                .BindConfiguration("App")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, """
+            using Microsoft.Extensions.Options;
+            public class AppOptions { [ValidateObjectMembers] public DatabaseOptions Database { get; set; } }
+            public struct DatabaseOptions
+            {
+                public DatabaseOptions() { }
+                [Required] public string ConnectionString { get; set; } = "ok";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithSpan(16, 24, 16, 29)
+            .WithArguments("ConnectionString", "App:Database");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "App": {
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public void Runtime_validation_rejects_default_struct_that_skips_member_initializer()
+    {
+        var value = default(RuntimeDefaultStructOptions);
+        object instance = value;
+        var results = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
+
+        var isValid = System.ComponentModel.DataAnnotations.Validator.TryValidateObject(
+            instance,
+            new System.ComponentModel.DataAnnotations.ValidationContext(instance),
+            results,
+            validateAllProperties: true);
+
+        Assert.False(isValid);
+        Assert.Null(value.ConnectionString);
+    }
+
+    [Fact]
     public async Task Cfg002_stays_quiet_for_default_struct_nested_object_when_initializer_satisfies_required()
     {
         // The settable struct property's initializer sets the [Required] member, and the binder
@@ -16613,6 +16663,14 @@ public sealed class ConfigContrabandAnalyzerTests
 
             {{extraTypes}}
             """;
+    }
+
+    private struct RuntimeDefaultStructOptions
+    {
+        public RuntimeDefaultStructOptions() { }
+
+        [System.ComponentModel.DataAnnotations.Required]
+        public string ConnectionString { get; set; } = "ok";
     }
 
     private static string TypeDisplay(string type) => type;
