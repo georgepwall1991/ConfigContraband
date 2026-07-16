@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.14 - 2026-07-16
+
+- Added the missing `CFG009` Rule Notes section to `analyzer-health.md`, consolidating direct-read coverage, suggestion and code-fix policy, signed-framework/provenance gates, argument side-effect boundaries, intentional indexer/environment-provider exclusions, and deduplication with `CFG001`. No diagnostic behaviour changed.
+
 ## 0.7.13 - 2026-07-16
 
 - Added the missing `CFG008` Rule Notes section to `analyzer-health.md`, consolidating its options-binding and direct-`GetValue<T>` coverage, runtime `TypeConverter` precision boundaries, deliberate non-goals, and no-fix rationale. No diagnostic behaviour changed.

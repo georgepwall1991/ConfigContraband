@@ -3,8 +3,8 @@
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
 Last refreshed: 2026-07-16
-Package version: `0.7.13`
-Base audited commit: `64399d2`
+Package version: `0.7.14`
+Base audited commit: `da48529`
 
 ## Scoring Rubric
 
@@ -48,6 +48,8 @@ Iteration 111 closes CFG008's decimal number-style false negative: decimal conve
 Iteration 112 closes CFG008's `&h`/`&H` hexadecimal-prefix false positive across all eight integral targets. Iteration 113 then re-tested the earlier CFG002 default-struct/member-initializer residual and proved the analyzer already reports the required nested member correctly; runtime validation independently confirms `default(T)` skips the struct's initializer. The earlier Current Posture sentence naming that default-struct shape as a remaining false negative is therefore superseded, its Known Gaps entry has been removed, and the shipped behaviour is now regression-pinned. All rules remain P3/monitor.
 
 Iteration 114 restores the missing CFG008 Rule Notes section, making the health record self-contained for the rule's shipped options-binding and direct-read coverage, runtime converter boundaries, conservative non-goals, and no-fix rationale. The earlier Current Posture description of empty strings and non-integer thousands separators as remaining CFG008 residuals is superseded by iterations 109 and 111. No diagnostic behaviour changed; all rules remain P3/monitor.
+
+Iteration 115 restores the adjacent missing CFG009 Rule Notes section, making the health record self-contained for signed-framework direct reads, suggestion and code-fix policy, receiver provenance, argument side-effect safety, deduplication, and intentional environment/indexer boundaries. No diagnostic behaviour changed; all rules remain P3/monitor.
 
 As of `0.4.0`, the bindable-property and configuration model lives in a shared `ConfigContraband.Core`
 library (bundled inside the analyzer package), and a companion `ConfigContraband.Tool` reuses that model
@@ -179,6 +181,7 @@ A follow-up evidence-based audit on 2026-07-06 (eight parallel reviewers, one pe
 | 2026-07-16 | 112 | `CFG008` | Integral conversion recognised the runtime converter's `0x` and `#` hexadecimal prefixes but not its Visual Basic-style `&h`/`&H` prefix, so valid values such as `"&h1F"` produced a false Warning. Core and analyzer RED regressions reproduced the mismatch while direct `TypeDescriptor` tests independently proved acceptance across all eight signed and unsigned integral converters. | Extend the existing prefix stripper with a case-insensitive `&h` branch, preserving the same type-specific hexadecimal range parsing after the prefix is removed. Full suite 655 analyzer/test + 246 core (901 total) passed; Release build completed with zero warnings/errors and formatter verification passed. Patch bump to `0.7.11`; README and CHANGELOG synchronized. | `CFG008` remains `5.00` / P3: the concrete false positive was found and fixed in the same iteration, strengthening integral converter parity without changing score math. |
 | 2026-07-16 | 113 | `CFG002` | The Known Gaps section still described a default-struct member-initializer false negative from iteration 95. A focused analyzer regression unexpectedly passed immediately: CFG002 already reports the nested required member when an absent non-nullable struct is validated as `default(T)`, even if the struct declaration has an explicit parameterless constructor and a satisfying member initializer. A direct `Validator.TryValidateObject` test independently proves that `default(T)` skips the initializer and fails validation. | Pin the shipped analyzer behaviour with the focused regression and remove the obsolete accepted-false-negative entry. No analyzer implementation changed. Full suite 657 analyzer/test + 246 core (903 total) passed; Release build completed with zero warnings/errors and formatter verification passed. Patch bump to `0.7.12`; README and CHANGELOG synchronized. | `CFG002` remains `4.75` / P3: test depth and health-document trust improve without changing score math. |
 | 2026-07-16 | 114 | `CFG008` | The rule shipped in iteration 100 and received four subsequent precision releases, but `analyzer-health.md` still jumped from CFG007 Rule Notes directly to the Verification Baseline. The canonical health record therefore lacked a current CFG008 behaviour, boundary, and no-fix section even though README and tests carried that evidence. | Add a dedicated CFG008 Rule Notes section covering options bindings, signed-framework direct `GetValue<T>` reads, supported scalar targets, runtime-backed empty/nullable/enum/decimal/integral-prefix boundaries, conservative skipped shapes, deduplication, and the JSON-anchored no-fix rationale. No analyzer or test source changed. Full suite 657 analyzer/test + 246 core (903 total) passed; Release build completed with zero warnings/errors and formatter verification passed. Patch bump to `0.7.13`; README and CHANGELOG synchronized. | `CFG008` remains `5.00` / P3: documentation trust improves without changing score math. |
+| 2026-07-16 | 115 | `CFG009` | The rule shipped in iteration 101 and received seven subsequent provenance, keyed-bind, side-effect, named-argument, override-alias, and conditional-access hardening passes, but `analyzer-health.md` still had no CFG009 Rule Notes section. README and tests carried the evidence, leaving the canonical health record incomplete. | Add a dedicated CFG009 Rule Notes section covering standalone `GetRequiredSection`, suggestion-gated `GetSection(...).Get<T>()`/`Bind(...)`, keyed `Bind`, and `GetConnectionString`; signed-framework identity, constant-path, receiver-provenance, argument/callback safety, deduplication, conditional-chain, suggestion, and code-fix boundaries; and intentional indexer/environment-provider exclusions. No analyzer or test source changed. Full suite 657 analyzer/test + 246 core (903 total) passed; Release build completed with zero warnings/errors and formatter verification passed. Patch bump to `0.7.14`; README and CHANGELOG synchronized. | `CFG009` remains `5.00` / P3: documentation trust improves without changing score math. |
 
 ## Health Baseline
 
@@ -400,6 +403,28 @@ Known gaps:
 - Direct reads through the configuration indexer remain outside CFG008 because the target type is not statically available.
 - No automatic fix is offered because the diagnostic is anchored in an appsettings additional file and the intended replacement value cannot be inferred safely.
 
+### CFG009 Direct Configuration Path Is Unavailable
+
+Reports a direct configuration path that is provably absent from visible appsettings files while preserving common environment-provider and probing patterns.
+
+Current behavior:
+
+- Reports a missing constant path passed to the real signed Microsoft `GetRequiredSection(...)` API because that call throws when the section is absent.
+- Reports `GetSection(...).Get<T>()`, section-based `Bind(instance)`, keyed `Bind("path", instance)`, and `GetConnectionString(...)` only when the absent leaf is a near-miss of a visible sibling, making the signal a provable typo rather than an environment-supplied plain miss.
+- Resolves constant root and chained section paths, including named arguments, parentheses/null-forgiving wrappers, ordinary-to-conditional prefixes, and supported conditional-access `GetSection(...)` chains whose detached Roslyn receiver can be reconstructed back to the host configuration root.
+- Requires the invoked extension method to come from the real signed Microsoft configuration assembly; same-FQN source shadows and unsigned replacements stay quiet.
+- Tracks receiver provenance through safe same-block assignments, aliases, and non-user-defined interface conversions, while locally built/custom, conditionally reassigned, mutated, escaped, captured, stored-section, and otherwise ambiguous receivers stay quiet.
+- Requires `Get<T>`/`Bind` default, target-instance, and binder-options arguments to be provably free of configuration side effects before reporting. Constant defaults, simple side-effect-free constructions, and constant assignments to the real `BinderOptions` callback parameter are supported; helpers, property getters, captures, receiver-aliasing targets, and unproven initialisation stay quiet.
+- Leaves reads that feed a recognised options registration to CFG001 and suppresses duplicate missing-parent reports in a `GetRequiredSection` chain.
+- Reuses CFG001's closest-match suggestion and literal rewrite for supported section/key arguments, preserving colon-delimited prefixes and suppressing the fix when the anchored expression cannot be reproduced safely.
+
+Known gaps:
+
+- Missing paths read through `GetValue<T>(...)` remain intentionally outside CFG009 because that API returns the supplied/default value rather than throwing; CFG008 separately reports only a visible scalar that is present but provably cannot convert to `T`.
+- The configuration indexer remains intentionally out of scope because null probing is idiomatic and the intended required/optional semantics are not statically visible.
+- Plain `GetSection`, binder-consumer, and connection-string misses without a close visible sibling stay quiet because environment variables, user secrets, and other providers may supply them.
+- Non-constant paths, stored `IConfigurationSection` receivers, broader control flow, custom provider provenance, and effectful or otherwise unprovable conditional chains are intentionally not inferred.
+
 ## Verification Baseline
 
 Focused analyzer test command:
@@ -422,8 +447,8 @@ dotnet format ConfigContraband.slnx --verify-no-changes --no-restore --verbosity
 git diff --check
 ```
 
-Last executed 2026-07-16 verifier status: 657 analyzer/test and 246 core tests passed (903 total), the Release build completed with zero warnings and zero errors, and formatter verification passed for iteration 114. Local git commands were unavailable under the active execution policy, so this run does not claim `git diff --check`; the ready PR's CI diff and package gates remain authoritative for that remote slice. The prior Roslyn analyzer-testing reference-assembly resolution failure remains resolved and is not an active release-readiness blocker.
+Last executed 2026-07-16 verifier status: 657 analyzer/test and 246 core tests passed (903 total), the Release build completed with zero warnings and zero errors, and formatter verification passed for iteration 115. Local git commands were unavailable under the active execution policy, so this run does not claim `git diff --check`; the ready PR's CI diff and package gates remain authoritative for that remote slice. The prior Roslyn analyzer-testing reference-assembly resolution failure remains resolved and is not an active release-readiness blocker.
 
-Latest follow-up audit evidence on 2026-07-16 reported verification status `pass`, with both package projects at `0.7.13` and no score-math issue. Release Readiness remains `5`; rule severity and score math are otherwise unchanged.
+Latest follow-up audit evidence on 2026-07-16 reported verification status `pass`, with both package projects at `0.7.14` and no score-math issue. Release Readiness remains `5`; rule severity and score math are otherwise unchanged.
 
 CI verification is defined in `.github/workflows/ci.yml` and runs restore, build, formatting verification, test with coverage, pack, test-result upload, and package artifact upload against the SDK from `global.json`. Release publication is defined in `.github/workflows/publish.yml` and now runs the same formatting verification before tests, pack, NuGet push, and release asset upload.
