@@ -14707,6 +14707,83 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg009_reports_connection_string_typo_on_known_section_chain()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetSection("Tenant").GetConnectionString({|#0:"Databsae"|});
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments(
+                "Tenant:ConnectionStrings:Databsae",
+                ". Did you mean \"Tenant:ConnectionStrings:Database\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Tenant": {
+                "ConnectionStrings": {
+                  "Database": "Server=localhost"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_reports_static_named_connection_string_typo_on_known_section_chain()
+    {
+        var source = DirectReadSource("""
+            _ = ConfigurationExtensions.GetConnectionString(
+                name: {|#0:"Databsae"|},
+                configuration: configuration.GetSection("Tenant"));
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(0)
+            .WithArguments(
+                "Tenant:ConnectionStrings:Databsae",
+                ". Did you mean \"Tenant:ConnectionStrings:Database\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Tenant": {
+                "ConnectionStrings": {
+                  "Database": "Server=localhost"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_connection_string_typo_on_stored_section_receiver()
+    {
+        var source = DirectReadSource("""
+            var tenant = configuration.GetSection("Tenant");
+            _ = tenant.GetConnectionString("Databsae");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Tenant": {
+                "ConnectionStrings": {
+                  "Database": "Server=localhost"
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg009_reports_missing_section_with_composite_key_sibling_suggestion()
     {
         var source = DirectReadSource("""

@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.19 - 2026-07-16
+
+- Added focused CFG009 regression coverage for connection-string typos relative to a statically known configuration section. Instance and static named calls now explicitly pin suggestions under `Tenant:ConnectionStrings:*`, while stored `IConfigurationSection` receivers remain conservatively quiet because their origin is not visible. No diagnostic behavior changed.
+
 ## 0.7.18 - 2026-07-16
 
 - Extended CFG008 to the signed framework's non-generic `ConfigurationBinder.GetValue(IConfiguration, Type, string[, object])` overloads when the target is a direct `typeof(...)` expression. Root and known-section chains, instance/static named calls, and boxed compile-time constant defaults now match generic `GetValue<T>` diagnostics; dynamic `Type` expressions, user-defined conversions, effectful defaults, and same-FQN shadows remain quiet.
