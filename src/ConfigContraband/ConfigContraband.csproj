@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.6.0</Version>
+    <Version>0.7.0</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Added CFG008 (Warning): a scalar value in an appsettings section that provably cannot convert to the bound property's CLR type - for example "Port": "eighty" for an int, or "Level": "Verbos" for an enum - now reports at the value's location, because the runtime ConfigurationBinder throws InvalidOperationException while binding it. The check mirrors the binder's TypeConverter semantics (invariant culture, string content rather than JSON kind) and only fires on a provable failure: hex integers, char/DateTime empty strings, enum comma-lists and numeric values, string/object targets, JSON null, and collection/dictionary element mismatches are all left alone. There is no automatic code fix because the diagnostic points at a JSON additional file. The generated appsettings.schema.json output is unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Added CFG009 (Warning): supported direct IConfiguration reads now report when their path is unavailable from visible appsettings files. Coverage includes unconditional missing GetRequiredSection reads plus suggestion-gated GetSection followed by Get&lt;T&gt; or Bind and GetConnectionString typos. The rule verifies framework APIs, follows safe same-block receiver assignments and aliases, suppresses local/custom/escaped or otherwise unprovable configuration sources, models .NET 10 JSON section existence, avoids duplicate CFG001 reports, and offers the section-literal fix only for a deterministic near-match.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

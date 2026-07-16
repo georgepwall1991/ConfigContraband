@@ -77,4 +77,13 @@ public static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "A scalar value in an appsettings section cannot be converted to the bound property's CLR type, so the configuration binder will throw during binding.");
+
+    public static readonly DiagnosticDescriptor ConfigurationKeyNotFound = new(
+        id: DiagnosticIds.ConfigurationKeyNotFound,
+        title: "Direct configuration path is unavailable from visible appsettings files",
+        messageFormat: "Configuration path \"{0}\" read here is unavailable from visible appsettings files{1}",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Supported paths read directly from IConfiguration (GetRequiredSection, GetSection().Get<T>()/.Bind(), GetConnectionString) should be available from a visible appsettings configuration file.");
 }

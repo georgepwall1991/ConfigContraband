@@ -88,6 +88,60 @@ internal sealed class ConfigurationSnapshot
         return false;
     }
 
+    public ConfigurationSectionExistence GetSectionExistence(
+        string sectionPath,
+        ConfigurationProviderSemantics providerSemantics)
+    {
+        var result = ConfigurationSectionExistence.Missing;
+        foreach (var section in FindSections(sectionPath))
+        {
+            var candidate = GetNodeExistence(section, providerSemantics);
+            if (candidate == ConfigurationSectionExistence.Exists)
+            {
+                return candidate;
+            }
+
+            if (candidate == ConfigurationSectionExistence.Unknown)
+            {
+                result = candidate;
+            }
+        }
+
+        return result;
+    }
+
+    private static ConfigurationSectionExistence GetNodeExistence(
+        ConfigurationNode node,
+        ConfigurationProviderSemantics providerSemantics)
+    {
+        switch (node.Kind)
+        {
+            case ConfigurationNodeKind.Scalar:
+                return ConfigurationSectionExistence.Exists;
+            case ConfigurationNodeKind.Null:
+                return providerSemantics switch
+                {
+                    ConfigurationProviderSemantics.BeforeNet10 => ConfigurationSectionExistence.Exists,
+                    ConfigurationProviderSemantics.Net10OrLater => ConfigurationSectionExistence.Missing,
+                    _ => ConfigurationSectionExistence.Unknown,
+                };
+            case ConfigurationNodeKind.Array when node.Properties.IsDefaultOrEmpty:
+                return providerSemantics switch
+                {
+                    ConfigurationProviderSemantics.BeforeNet10 => ConfigurationSectionExistence.Missing,
+                    ConfigurationProviderSemantics.Net10OrLater => ConfigurationSectionExistence.Exists,
+                    _ => ConfigurationSectionExistence.Unknown,
+                };
+        }
+
+        // IConfigurationSection.Exists() treats any child key as proof that the
+        // parent exists. The child does not itself need to exist: JSON providers
+        // still expose a child key for null, empty-object, and empty-array values.
+        return node.Properties.IsDefaultOrEmpty
+            ? ConfigurationSectionExistence.Missing
+            : ConfigurationSectionExistence.Exists;
+    }
+
     public ImmutableArray<ConfigurationNode> FindSections(string sectionPath)
     {
         var builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
@@ -317,15 +371,24 @@ internal sealed class ConfigurationFile
 
 internal sealed class ConfigurationNode
 {
-    public static readonly ConfigurationNode Empty = new(ImmutableArray<ConfigurationProperty>.Empty);
+    public static readonly ConfigurationNode Empty = new(
+        ImmutableArray<ConfigurationProperty>.Empty,
+        ConfigurationNodeKind.Scalar);
+    public static readonly ConfigurationNode Null = new(
+        ImmutableArray<ConfigurationProperty>.Empty,
+        ConfigurationNodeKind.Null);
 
-    public ConfigurationNode(ImmutableArray<ConfigurationProperty> properties)
+    public ConfigurationNode(
+        ImmutableArray<ConfigurationProperty> properties,
+        ConfigurationNodeKind kind = ConfigurationNodeKind.Object)
     {
         Properties = properties;
+        Kind = kind;
     }
 
     public ImmutableArray<ConfigurationProperty> Properties { get; }
-    public bool IsObject => !Properties.IsDefault;
+    public ConfigurationNodeKind Kind { get; }
+    public bool IsObject => Kind == ConfigurationNodeKind.Object;
 
     public bool TryGetProperty(string key, out ConfigurationProperty property)
     {
@@ -341,6 +404,28 @@ internal sealed class ConfigurationNode
         property = null!;
         return false;
     }
+}
+
+internal enum ConfigurationNodeKind
+{
+    Scalar,
+    Null,
+    Object,
+    Array,
+}
+
+internal enum ConfigurationProviderSemantics
+{
+    Unknown,
+    BeforeNet10,
+    Net10OrLater,
+}
+
+internal enum ConfigurationSectionExistence
+{
+    Missing,
+    Unknown,
+    Exists,
 }
 
 internal enum ScalarKind
@@ -541,7 +626,12 @@ internal static class JsonConfigurationParser
             var trimmed = rawText.Trim();
             var trimmedStart = scalarStart + leadingWhitespace;
             var trimmedSpan = TextSpan.FromBounds(trimmedStart, trimmedStart + trimmed.Length);
-            return new ParsedValue(ConfigurationNode.Empty, ClassifyScalar(trimmed), trimmed, trimmedSpan);
+            var kind = ClassifyScalar(trimmed);
+            return new ParsedValue(
+                kind == ScalarKind.Null ? ConfigurationNode.Null : ConfigurationNode.Empty,
+                kind,
+                trimmed,
+                trimmedSpan);
         }
 
         private static ScalarKind ClassifyScalar(string value)
@@ -600,7 +690,7 @@ internal static class JsonConfigurationParser
                 Read(']');
             }
 
-            return new ConfigurationNode(properties.ToImmutable());
+            return new ConfigurationNode(properties.ToImmutable(), ConfigurationNodeKind.Array);
         }
 
         private string ParseString()

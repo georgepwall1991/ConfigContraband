@@ -12,6 +12,13 @@ internal static class Verifier
             new PackageIdentity("Microsoft.Extensions.Options", "10.0.0"),
             new PackageIdentity("Microsoft.Extensions.Options.ConfigurationExtensions", "10.0.0"),
             new PackageIdentity("Microsoft.Extensions.Options.DataAnnotations", "10.0.0"),
+            new PackageIdentity("Microsoft.Extensions.Configuration.Abstractions", "10.0.0"),
+            new PackageIdentity("Microsoft.Extensions.Configuration", "10.0.0"),
+            new PackageIdentity("Microsoft.Extensions.Configuration.Json", "10.0.0")
+        ]);
+
+    public static ReferenceAssemblies ConfigurationAbstractionsReferences { get; } =
+        ReferenceAssemblies.Net.Net80.AddPackages([
             new PackageIdentity("Microsoft.Extensions.Configuration.Abstractions", "10.0.0")
         ]);
 
@@ -46,6 +53,19 @@ internal static class Verifier
         params DiagnosticResult[] expected)
     {
         var test = CreateAnalyzerTest(source);
+        test.TestState.AdditionalFiles.Add(additionalFile);
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
+    public static async Task VerifyAnalyzerWithReferencesAsync(
+        string source,
+        (string filename, string content) additionalFile,
+        ReferenceAssemblies referenceAssemblies,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateAnalyzerTest(source);
+        test.ReferenceAssemblies = referenceAssemblies;
         test.TestState.AdditionalFiles.Add(additionalFile);
         test.ExpectedDiagnostics.AddRange(expected);
         await test.RunAsync();

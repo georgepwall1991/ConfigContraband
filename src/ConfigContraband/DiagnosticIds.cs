@@ -10,4 +10,5 @@ public static class DiagnosticIds
     public const string UnknownConfigurationKey = "CFG006";
     public const string UnknownConfigurationKeyWillThrow = "CFG007";
     public const string ConfigurationValueTypeMismatch = "CFG008";
+    public const string ConfigurationKeyNotFound = "CFG009";
 }
