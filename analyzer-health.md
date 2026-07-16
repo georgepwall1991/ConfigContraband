@@ -217,11 +217,11 @@ There are no active P1 or P2 hardening items. All nine rules are P3 / monitor, a
 
 Future work must be driven by a reproducible runtime or documentation mismatch. The accepted monitor boundaries are:
 
-1. `CFG001` does not reconstruct paths from stored `IConfigurationSection` values whose origin is not statically visible.
-2. `CFG002` stays conservative for required values supplied by non-file providers and array-shaped compile-time defaults.
-3. Direct `Configure<T>(...)` validation diagnostics remain out of scope until named options and separate validation registrations have a conservative design.
-4. `CFG008` does not inspect collection or dictionary element conversion, and `CFG009` does not infer required semantics for the configuration indexer.
-5. Release verification returns to P1 immediately if the Release tests, build, formatter, CI, package, or publish gates regress.
+- `CFG001` does not reconstruct paths from stored `IConfigurationSection` values whose origin is not statically visible.
+- `CFG002` stays conservative for required values supplied by non-file providers and array-shaped compile-time defaults.
+- Direct `Configure<T>(...)` validation diagnostics remain out of scope until named options and separate validation registrations have a conservative design.
+- `CFG008` does not inspect collection or dictionary element conversion, and `CFG009` does not infer required semantics for the configuration indexer.
+- Release verification returns to P1 immediately if the Release tests, build, formatter, CI, package, or publish gates regress.
 
 ## Rule Notes
 
