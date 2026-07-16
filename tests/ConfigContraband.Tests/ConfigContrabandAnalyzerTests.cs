@@ -13998,6 +13998,29 @@ public sealed class ConfigContrabandAnalyzerTests
             expected);
     }
 
+    [Theory]
+    [InlineData("float")]
+    [InlineData("double")]
+    public async Task Cfg008_reports_floating_point_string_with_thousands_separator(string type)
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf(type));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, 21)
+            .WithArguments("Server:Value", type);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "1,000"
+              }
+            }
+            """),
+            expected);
+    }
+
     [Fact]
     public async Task Cfg008_reports_numeric_enum_value_outside_underlying_range()
     {

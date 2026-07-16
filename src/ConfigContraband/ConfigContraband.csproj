@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.19</Version>
+    <Version>0.7.20</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Pinned CFG009 section-relative connection-string suggestions and stored-section provenance boundaries with focused regression coverage.</PackageReleaseNotes>
+    <PackageReleaseNotes>Pinned CFG008 SingleConverter and DoubleConverter thousands-separator parity with runtime-backed regression coverage.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

@@ -13,6 +13,8 @@ public sealed class ScalarConversionTests
     [InlineData("int", "Bool", "true", true)]
     [InlineData("long", "String", "x", true)]
     [InlineData("double", "String", "abc", true)]
+    [InlineData("float", "String", "1,000", true)]
+    [InlineData("double", "String", "1,000", true)]
     [InlineData("decimal", "String", "abc", true)]
     [InlineData("decimal", "String", "1,000", true)]
     [InlineData("decimal", "String", "1-", true)]
@@ -128,6 +130,17 @@ public sealed class ScalarConversionTests
             System.ComponentModel.TypeDescriptor
                 .GetConverter(typeof(decimal))
                 .ConvertFromInvariantString(value));
+    }
+
+    [Theory]
+    [InlineData(typeof(float))]
+    [InlineData(typeof(double))]
+    public void Runtime_floating_point_converter_rejects_thousands_separator(Type type)
+    {
+        Assert.ThrowsAny<Exception>(() =>
+            System.ComponentModel.TypeDescriptor
+                .GetConverter(type)
+                .ConvertFromInvariantString("1,000"));
     }
 
     [Theory]
@@ -298,6 +311,7 @@ public sealed class ScalarConversionTests
             "uint" => Compilation.GetSpecialType(SpecialType.System_UInt32),
             "long" => Compilation.GetSpecialType(SpecialType.System_Int64),
             "ulong" => Compilation.GetSpecialType(SpecialType.System_UInt64),
+            "float" => Compilation.GetSpecialType(SpecialType.System_Single),
             "double" => Compilation.GetSpecialType(SpecialType.System_Double),
             "decimal" => Compilation.GetSpecialType(SpecialType.System_Decimal),
             "bool" => Compilation.GetSpecialType(SpecialType.System_Boolean),
