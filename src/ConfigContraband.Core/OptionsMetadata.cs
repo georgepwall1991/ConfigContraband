@@ -82,6 +82,97 @@ internal sealed class OptionsTypeMetadata
         return _hasAnyDataAnnotations;
     }
 
+    internal bool IsRequiredForSchema(IReadOnlyList<BindableProperty> overrideGroup)
+    {
+        var runtimeProperty = overrideGroup[0];
+        var requiredAttributes = GetEffectiveRequiredAttributes(overrideGroup);
+        if (requiredAttributes.Count == 0 ||
+            (runtimeProperty.Symbol.Type.IsValueType && !IsNullableValueType(runtimeProperty.Symbol.Type)))
+        {
+            return false;
+        }
+
+        var candidate = new BindablePropertyCandidate(
+            runtimeProperty.Symbol,
+            runtimeProperty.IsConstructorBound,
+            runtimeProperty.ConstructorParameterCanUseDefault);
+        var recursiveValidationEnabled = overrideGroup.Any(property => IsRecursiveValidationEnabled(property.Symbol));
+
+        return HasTypeLevelValidationInChain(TypeSymbol) ||
+               overrideGroup.Any(property => HasNonRequiredValidationAttribute(property.Symbol)) ||
+               requiredAttributes.Any(attribute =>
+                   !HasRequiredSatisfyingDefault(
+                       candidate,
+                       TypeSymbol,
+                       _compilation,
+                       RequiredAllowsEmptyStrings(attribute))) ||
+               RecursiveDefaultStillFailsValidation(
+                   runtimeProperty.Symbol,
+                   TypeSymbol,
+                   _bindsNonPublicProperties,
+                   _compilation,
+                   recursiveValidationEnabled);
+    }
+
+    private static IReadOnlyList<AttributeData> GetEffectiveRequiredAttributes(IReadOnlyList<BindableProperty> overrideGroup)
+    {
+        var allAttributesByDeclaration = overrideGroup
+            .Select(property => property.Symbol.GetAttributes().ToArray())
+            .ToArray();
+        var requiredAttributesByDeclaration = allAttributesByDeclaration
+            .Select(attributes => attributes
+                .Where(attribute => IsRequiredAttribute(attribute.AttributeClass))
+                .ToArray())
+            .ToArray();
+
+        if (allAttributesByDeclaration
+            .SelectMany(static attributes => attributes)
+            .Any(attribute => OverridesAttributeTypeId(attribute.AttributeClass)))
+        {
+            // Attribute.TypeId is virtual, and even a non-validation attribute can replace an
+            // inherited RequiredAttribute. Source symbols cannot generally prove which attribute
+            // a custom implementation replaces, so omit the schema requirement for this unusual
+            // property. That safe-side false negative cannot reject runtime-valid configuration.
+            return Array.Empty<AttributeData>();
+        }
+
+        // Bindable properties are ordered most-derived first. TypeDescriptor replaces an inherited
+        // attribute only when a derived declaration has the same TypeId. When TypeId keeps its
+        // framework default, concrete attribute type is that identity: build the set base-to-derived
+        // so a redeclaration replaces its own type while distinct RequiredAttribute subclasses remain.
+        var attributesByType = new Dictionary<INamedTypeSymbol, AttributeData>(SymbolEqualityComparer.Default);
+        for (var index = requiredAttributesByDeclaration.Length - 1; index >= 0; index--)
+        {
+            foreach (var attribute in requiredAttributesByDeclaration[index])
+            {
+                if (attribute.AttributeClass is { } attributeClass)
+                {
+                    attributesByType[attributeClass] = attribute;
+                }
+            }
+        }
+
+        return attributesByType.Values.ToList();
+    }
+
+    internal static bool OverridesAttributeTypeId(INamedTypeSymbol? attributeClass)
+    {
+        for (var current = attributeClass; current is not null; current = current.BaseType)
+        {
+            if (current.GetMembers("TypeId").OfType<IPropertySymbol>().Any(property => property.IsOverride))
+            {
+                return true;
+            }
+
+            if (string.Equals(current.ToDisplayString(), "System.Attribute", StringComparison.Ordinal))
+            {
+                break;
+            }
+        }
+
+        return false;
+    }
+
     public bool TryGetConfigurationProperty(string key, out BindableProperty bindableProperty)
     {
         foreach (var property in BindableProperties)
@@ -557,6 +648,7 @@ internal sealed class OptionsTypeMetadata
             yield break;
         }
 
+        property = GetRuntimeBindingProperty(property);
         var hasAlias = false;
         foreach (var attribute in property.GetAttributes())
         {
@@ -575,6 +667,7 @@ internal sealed class OptionsTypeMetadata
 
     private static bool HasConfigurationAlias(IPropertySymbol property, string key)
     {
+        property = GetRuntimeBindingProperty(property);
         foreach (var attribute in property.GetAttributes())
         {
             if (TryGetConfigurationAlias(attribute, out var alias) &&
@@ -589,6 +682,7 @@ internal sealed class OptionsTypeMetadata
 
     private static bool HasConfigurationAlias(IPropertySymbol property)
     {
+        property = GetRuntimeBindingProperty(property);
         foreach (var attribute in property.GetAttributes())
         {
             if (TryGetConfigurationAlias(attribute, out _))
@@ -598,6 +692,19 @@ internal sealed class OptionsTypeMetadata
         }
 
         return false;
+    }
+
+    internal static IPropertySymbol GetRuntimeBindingProperty(IPropertySymbol property)
+    {
+        // ConfigurationBinder.GetAllProperties keeps only the base-most declaration of a
+        // virtual property, using the setter's base definition to identify overrides.
+        while (property.SetMethod?.OverriddenMethod is not null &&
+               property.OverriddenProperty is { } overriddenProperty)
+        {
+            property = overriddenProperty;
+        }
+
+        return property;
     }
 
     private static bool TryGetConfigurationAlias(AttributeData attribute, out string alias)
@@ -671,7 +778,8 @@ internal sealed class OptionsTypeMetadata
     private static bool HasRequiredSatisfyingDefault(
         BindablePropertyCandidate member,
         INamedTypeSymbol rootType,
-        Compilation? compilation)
+        Compilation? compilation,
+        bool? allowEmptyStringsOverride = null)
     {
         var property = member.Property;
 
@@ -683,7 +791,7 @@ internal sealed class OptionsTypeMetadata
             return false;
         }
 
-        var allowEmptyStrings = RequiredAllowsEmptyStrings(property);
+        var allowEmptyStrings = allowEmptyStringsOverride ?? RequiredAllowsEmptyStrings(property);
 
         if (member.IsConstructorBound &&
             HasSatisfyingConstructorParameterDefault(property, rootType, allowEmptyStrings))
@@ -708,11 +816,12 @@ internal sealed class OptionsTypeMetadata
         IPropertySymbol property,
         INamedTypeSymbol rootType,
         bool bindsNonPublicProperties,
-        Compilation? compilation)
+        Compilation? compilation,
+        bool? recursiveValidationEnabledOverride = null)
     {
         // Recursive validation walks the default instance, so a nested required member without
         // its own satisfying default keeps the parent key required.
-        if (!IsRecursiveValidationEnabled(property))
+        if (!(recursiveValidationEnabledOverride ?? IsRecursiveValidationEnabled(property)))
         {
             return false;
         }
@@ -1212,25 +1321,32 @@ internal sealed class OptionsTypeMetadata
                 continue;
             }
 
-            // A named argument on the usage (e.g. [MyRequired(AllowEmptyStrings = true)]) is the
-            // most specific setting — property-initializer setters run after the constructor.
-            foreach (var argument in attribute.NamedArguments)
-            {
-                if (string.Equals(argument.Key, "AllowEmptyStrings", StringComparison.Ordinal) &&
-                    argument.Value.Value is bool allowEmptyStrings)
-                {
-                    return allowEmptyStrings;
-                }
-            }
+            return RequiredAllowsEmptyStrings(attribute);
+        }
 
-            // Otherwise a subclass may set the inherited AllowEmptyStrings itself (constructor body,
-            // constructor parameter, base chaining, ...). Only RequiredAttribute itself has a
-            // provable false default with no such possibility.
-            if (!string.Equals(attribute.AttributeClass?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal) &&
-                SubclassAllowsEmptyStrings(attribute))
+        return false;
+    }
+
+    private static bool RequiredAllowsEmptyStrings(AttributeData attribute)
+    {
+        // A named argument on the usage (e.g. [MyRequired(AllowEmptyStrings = true)]) is the
+        // most specific setting — property-initializer setters run after the constructor.
+        foreach (var argument in attribute.NamedArguments)
+        {
+            if (string.Equals(argument.Key, "AllowEmptyStrings", StringComparison.Ordinal) &&
+                argument.Value.Value is bool allowEmptyStrings)
             {
-                return true;
+                return allowEmptyStrings;
             }
+        }
+
+        // Otherwise a subclass may set the inherited AllowEmptyStrings itself (constructor body,
+        // constructor parameter, base chaining, ...). Only RequiredAttribute itself has a
+        // provable false default with no such possibility.
+        if (!string.Equals(attribute.AttributeClass?.ToDisplayString(), "System.ComponentModel.DataAnnotations.RequiredAttribute", StringComparison.Ordinal) &&
+            SubclassAllowsEmptyStrings(attribute))
+        {
+            return true;
         }
 
         return false;

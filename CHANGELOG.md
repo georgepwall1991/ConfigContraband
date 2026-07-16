@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.6 - 2026-07-16
+
+- Fixed a `CFG006` false negative for `[ConfigurationKeyName]` aliases declared only on an overridden virtual property. The runtime `ConfigurationBinder` keeps the base-most property declaration when a virtual setter is overridden, but the analyzer previously accepted aliases from every declaration in the inheritance chain, so a key the runtime silently ignored could be treated as known. Alias resolution now follows the setter override chain to the same base-most property as the runtime. The schema generator shares that binding model and now groups a virtual override chain into one runtime property, merging inherited validation metadata by runtime `TypeId` semantics while preventing duplicate JSON schema properties; custom `TypeId` overrides use a conservative no-false-positive fallback. Non-virtual hidden properties, constructor-bound keys, diagnostic severity, and unrelated binding boundaries are unchanged.
+
 ## 0.7.5 - 2026-07-16
 
 - Fixed a `CFG001` false negative for `OptionsBuilder<T>.BindConfiguration(...)` calls whose named arguments are reordered. The registration parser previously treated the first source argument as the section path, so `BindConfiguration(configureBinder: ..., configSectionPath: "Strpie")` tried to read the binder callback as a constant string and silently skipped every configuration diagnostic for that registration. The analyzer now resolves `configSectionPath` through Roslyn's bound argument-to-parameter mapping, preserving the exact section expression for the existing suggestion and code fix. Positional calls and unrelated inference boundaries are unchanged.

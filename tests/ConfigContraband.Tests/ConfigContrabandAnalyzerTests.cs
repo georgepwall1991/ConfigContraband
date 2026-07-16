@@ -13268,6 +13268,43 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg006_reports_alias_declared_only_on_overridden_virtual_property()
+    {
+        var source = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class BaseOptions
+            {
+                public virtual string ApiKey { get; set; } = "";
+            }
+
+            public sealed class StripeOptions : BaseOptions
+            {
+                [ConfigurationKeyName("api_key")]
+                public override string ApiKey { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.UnknownConfigurationKey)
+            .WithSpan("appsettings.json", 3, 5, 3, 14)
+            .WithArguments("Stripe:api_key", "StripeOptions", ". Did you mean \"ApiKey\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "api_key": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg006_reports_property_name_when_nested_configuration_key_name_overrides_binding_name()
     {
         var source = OptionsSource("""
