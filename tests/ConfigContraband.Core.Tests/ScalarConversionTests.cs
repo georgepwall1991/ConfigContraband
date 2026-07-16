@@ -16,6 +16,7 @@ public sealed class ScalarConversionTests
     [InlineData("decimal", "String", "abc", true)]
     [InlineData("bool", "String", "yes", true)]
     [InlineData("enum", "String", "Loud", true)]
+    [InlineData("byteenum", "String", "256", true)]
     [InlineData("guid", "String", "not-a-guid", true)]
     [InlineData("timespan", "String", "banana", true)]
     [InlineData("datetime", "String", "not-a-date", true)]
@@ -100,9 +101,130 @@ public sealed class ScalarConversionTests
         _ = System.ComponentModel.TypeDescriptor.GetConverter(type).ConvertFromInvariantString(value);
     }
 
+    [Theory]
+    [InlineData("sbyteenum", "-128", false)]
+    [InlineData("sbyteenum", "127", false)]
+    [InlineData("sbyteenum", "-129", true)]
+    [InlineData("sbyteenum", "128", true)]
+    [InlineData("byteenum", "0", false)]
+    [InlineData("byteenum", "255", false)]
+    [InlineData("byteenum", "-1", true)]
+    [InlineData("shortenum", "-32768", false)]
+    [InlineData("shortenum", "32767", false)]
+    [InlineData("shortenum", "-32769", true)]
+    [InlineData("shortenum", "32768", true)]
+    [InlineData("ushortenum", "0", false)]
+    [InlineData("ushortenum", "65535", false)]
+    [InlineData("ushortenum", "-1", true)]
+    [InlineData("ushortenum", "65536", true)]
+    [InlineData("intenum", "-2147483648", false)]
+    [InlineData("intenum", "2147483647", false)]
+    [InlineData("intenum", "-2147483649", true)]
+    [InlineData("intenum", "2147483648", true)]
+    [InlineData("uintenum", "0", false)]
+    [InlineData("uintenum", "4294967295", false)]
+    [InlineData("uintenum", "-1", true)]
+    [InlineData("uintenum", "4294967296", true)]
+    [InlineData("longenum", "-9223372036854775808", false)]
+    [InlineData("longenum", "9223372036854775807", false)]
+    [InlineData("longenum", "-9223372036854775809", true)]
+    [InlineData("longenum", "9223372036854775808", true)]
+    [InlineData("ulongenum", "0", false)]
+    [InlineData("ulongenum", "18446744073709551615", false)]
+    [InlineData("ulongenum", "-1", true)]
+    [InlineData("ulongenum", "18446744073709551616", true)]
+    [InlineData("byteflags", "Read, 2", false)]
+    public void IsProvablyNotConvertible_matches_enum_converter_ranges(
+        string typeKey,
+        string value,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            ScalarConversion.IsProvablyNotConvertible(
+                ResolveType(typeKey),
+                ScalarKind.String,
+                value));
+    }
+
+    [Theory]
+    [InlineData(typeof(RuntimeSByteColor), "-128")]
+    [InlineData(typeof(RuntimeSByteColor), "127")]
+    [InlineData(typeof(RuntimeByteColor), "0")]
+    [InlineData(typeof(RuntimeByteColor), "255")]
+    [InlineData(typeof(RuntimeShortColor), "-32768")]
+    [InlineData(typeof(RuntimeShortColor), "32767")]
+    [InlineData(typeof(RuntimeUShortColor), "0")]
+    [InlineData(typeof(RuntimeUShortColor), "65535")]
+    [InlineData(typeof(RuntimeIntColor), "-2147483648")]
+    [InlineData(typeof(RuntimeIntColor), "2147483647")]
+    [InlineData(typeof(RuntimeUIntColor), "0")]
+    [InlineData(typeof(RuntimeUIntColor), "4294967295")]
+    [InlineData(typeof(RuntimeLongColor), "-9223372036854775808")]
+    [InlineData(typeof(RuntimeLongColor), "9223372036854775807")]
+    [InlineData(typeof(RuntimeULongColor), "0")]
+    [InlineData(typeof(RuntimeULongColor), "18446744073709551615")]
+    [InlineData(typeof(RuntimeByteAccess), "Read, 2")]
+    public void Runtime_converter_accepts_enum_value_inside_underlying_range_or_valid_comma_list(
+        Type type,
+        string value)
+    {
+        _ = System.ComponentModel.TypeDescriptor
+            .GetConverter(type)
+            .ConvertFromInvariantString(value);
+    }
+
+    [Theory]
+    [InlineData(typeof(RuntimeSByteColor), "-129")]
+    [InlineData(typeof(RuntimeSByteColor), "128")]
+    [InlineData(typeof(RuntimeByteColor), "-1")]
+    [InlineData(typeof(RuntimeByteColor), "256")]
+    [InlineData(typeof(RuntimeShortColor), "-32769")]
+    [InlineData(typeof(RuntimeShortColor), "32768")]
+    [InlineData(typeof(RuntimeUShortColor), "-1")]
+    [InlineData(typeof(RuntimeUShortColor), "65536")]
+    [InlineData(typeof(RuntimeIntColor), "-2147483649")]
+    [InlineData(typeof(RuntimeIntColor), "2147483648")]
+    [InlineData(typeof(RuntimeUIntColor), "-1")]
+    [InlineData(typeof(RuntimeUIntColor), "4294967296")]
+    [InlineData(typeof(RuntimeLongColor), "-9223372036854775809")]
+    [InlineData(typeof(RuntimeLongColor), "9223372036854775808")]
+    [InlineData(typeof(RuntimeULongColor), "-1")]
+    [InlineData(typeof(RuntimeULongColor), "18446744073709551616")]
+    public void Runtime_converter_rejects_numeric_enum_value_outside_underlying_range(
+        Type type,
+        string value)
+    {
+        Assert.ThrowsAny<Exception>(() =>
+            System.ComponentModel.TypeDescriptor
+                .GetConverter(type)
+                .ConvertFromInvariantString(value));
+    }
+
     private enum RuntimeColor
     {
         Red,
+    }
+
+    private enum RuntimeByteColor : byte
+    {
+        Red,
+    }
+
+    private enum RuntimeSByteColor : sbyte { Zero }
+    private enum RuntimeShortColor : short { Zero }
+    private enum RuntimeUShortColor : ushort { Zero }
+    private enum RuntimeIntColor : int { Zero }
+    private enum RuntimeUIntColor : uint { Zero }
+    private enum RuntimeLongColor : long { Zero }
+    private enum RuntimeULongColor : ulong { Zero }
+
+    [Flags]
+    private enum RuntimeByteAccess : byte
+    {
+        None = 0,
+        Read = 1,
+        Write = 2,
     }
 
     private static ITypeSymbol ResolveType(string key)
@@ -128,6 +250,15 @@ public sealed class ScalarConversionTests
                 .GetTypeByMetadataName("System.Collections.Generic.List`1")!
                 .Construct(Compilation.GetSpecialType(SpecialType.System_Int32)),
             "enum" => Compilation.GetTypeByMetadataName("Color")!,
+            "byteenum" => Compilation.GetTypeByMetadataName("ByteColor")!,
+            "sbyteenum" => Compilation.GetTypeByMetadataName("SByteColor")!,
+            "shortenum" => Compilation.GetTypeByMetadataName("ShortColor")!,
+            "ushortenum" => Compilation.GetTypeByMetadataName("UShortColor")!,
+            "intenum" => Compilation.GetTypeByMetadataName("IntColor")!,
+            "uintenum" => Compilation.GetTypeByMetadataName("UIntColor")!,
+            "longenum" => Compilation.GetTypeByMetadataName("LongColor")!,
+            "ulongenum" => Compilation.GetTypeByMetadataName("ULongColor")!,
+            "byteflags" => Compilation.GetTypeByMetadataName("ByteAccess")!,
             "flags" => Compilation.GetTypeByMetadataName("Access")!,
             "class" => Compilation.GetTypeByMetadataName("Nested")!,
             _ => throw new System.ArgumentOutOfRangeException(nameof(key), key, "Unknown type key"),
@@ -146,6 +277,18 @@ public sealed class ScalarConversionTests
                 CSharpSyntaxTree.ParseText(
                     """
                     public enum Color { Red, Green, Blue }
+
+                    public enum ByteColor : byte { Red }
+                    public enum SByteColor : sbyte { Zero }
+                    public enum ShortColor : short { Zero }
+                    public enum UShortColor : ushort { Zero }
+                    public enum IntColor : int { Zero }
+                    public enum UIntColor : uint { Zero }
+                    public enum LongColor : long { Zero }
+                    public enum ULongColor : ulong { Zero }
+
+                    [System.Flags]
+                    public enum ByteAccess : byte { None = 0, Read = 1, Write = 2 }
 
                     [System.Flags]
                     public enum Access { None = 0, Read = 1, Write = 2 }

@@ -211,7 +211,7 @@ internal static class ScalarConversion
                 continue;
             }
 
-            if (IsIntegerLiteral(trimmed))
+            if (IsIntegerLiteral(enumType, trimmed))
             {
                 continue;
             }
@@ -222,10 +222,20 @@ internal static class ScalarConversion
         return true;
     }
 
-    private static bool IsIntegerLiteral(string value)
+    private static bool IsIntegerLiteral(INamedTypeSymbol enumType, string value)
     {
-        return long.TryParse(value, IntegerStyles, Invariant, out _)
-            || ulong.TryParse(value, IntegerStyles, Invariant, out _);
+        return enumType.EnumUnderlyingType?.SpecialType switch
+        {
+            SpecialType.System_SByte => sbyte.TryParse(value, IntegerStyles, Invariant, out _),
+            SpecialType.System_Byte => byte.TryParse(value, IntegerStyles, Invariant, out _),
+            SpecialType.System_Int16 => short.TryParse(value, IntegerStyles, Invariant, out _),
+            SpecialType.System_UInt16 => ushort.TryParse(value, IntegerStyles, Invariant, out _),
+            SpecialType.System_Int32 => int.TryParse(value, IntegerStyles, Invariant, out _),
+            SpecialType.System_UInt32 => uint.TryParse(value, IntegerStyles, Invariant, out _),
+            SpecialType.System_Int64 => long.TryParse(value, IntegerStyles, Invariant, out _),
+            SpecialType.System_UInt64 => ulong.TryParse(value, IntegerStyles, Invariant, out _),
+            _ => false,
+        };
     }
 
     private static ITypeSymbol UnwrapNullable(ITypeSymbol type)

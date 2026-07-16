@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.9 - 2026-07-16
+
+- Fixed a `CFG008` false negative for numeric enum text outside the enum's actual underlying range, such as `"256"` bound to a `byte`-backed enum. The analyzer previously accepted any value parseable as `long` or `ulong`, while the runtime `EnumConverter` throws when the value overflows the declared backing type. Runtime-backed core and analyzer regressions now keep valid named, comma-list, and in-range numeric enum values unchanged.
+
 ## 0.7.8 - 2026-07-16
 
 - Fixed a `CFG008` false negative for empty or whitespace-only appsettings strings bound to non-nullable numeric, Boolean, enum, `Guid`, or `TimeSpan` targets, plus whitespace-only strings bound to their nullable forms. The runtime `TypeConverter` throws for those values, but the analyzer previously suppressed every empty scalar before inspecting the target type. Runtime-backed regressions now preserve only the exact empty-string nullable case and the empty/whitespace forms accepted by `char`/`DateTime`/`DateTimeOffset`. String/object, JSON null, object/array, and collection/dictionary element boundaries are unchanged.

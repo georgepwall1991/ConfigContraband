@@ -13928,6 +13928,37 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg008_reports_numeric_enum_value_outside_underlying_range()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: """
+            public enum ByteColor : byte
+            {
+                Red,
+            }
+
+            public sealed class ServerOptions
+            {
+                public ByteColor Value { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 14, 3, 19)
+            .WithArguments("Server:Value", "ByteColor");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "256"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg008_reports_empty_string_bound_to_non_nullable_integer()
     {
         var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
