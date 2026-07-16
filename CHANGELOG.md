@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.8 - 2026-07-16
+
+- Fixed a `CFG008` false negative for empty or whitespace-only appsettings strings bound to non-nullable numeric, Boolean, enum, `Guid`, or `TimeSpan` targets, plus whitespace-only strings bound to their nullable forms. The runtime `TypeConverter` throws for those values, but the analyzer previously suppressed every empty scalar before inspecting the target type. Runtime-backed regressions now preserve only the exact empty-string nullable case and the empty/whitespace forms accepted by `char`/`DateTime`/`DateTimeOffset`. String/object, JSON null, object/array, and collection/dictionary element boundaries are unchanged.
+
 ## 0.7.7 - 2026-07-16
 
 - Fixed a `CFG009` false negative for direct configuration reads whose constant `GetSection(...)` path is expressed through conditional access, such as `configuration?.GetSection("Parent")?.GetSection("Chlid")?.Get<ServerOptions>()`. Roslyn represents each conditional member invocation with a detached member binding, so the existing receiver resolver lost the real configuration root and silently skipped the typo. The analyzer now reconstructs one or more signed framework `GetSection` links back to a provable host-configuration root before applying the existing suggestion-gated missing-path policy to `Get<T>()` and `Bind(...)`, including keyed `Bind` after a conditional prefix and chains that begin with an ordinary `GetSection`. A prior conditional read made only of verified read-only configuration calls no longer taints that receiver for a later direct read, including parenthesized/null-forgiven chains and compile-time `nameof`; unproven `Get`/`Bind` callbacks, unproven `Bind` targets, and binding back into the configuration receiver remain possible mutations and suppress stale diagnostics. Dynamic keys, stored sections, local/custom/mutated/escaped roots, other mixed or effectful conditional expressions, the configuration indexer, diagnostic severity, and unrelated inference boundaries are unchanged.

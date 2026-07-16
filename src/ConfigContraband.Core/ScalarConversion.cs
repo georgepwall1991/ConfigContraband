@@ -9,7 +9,7 @@ namespace ConfigContraband;
 /// Decides whether an appsettings scalar value provably cannot be bound to a target CLR property
 /// type by the runtime <c>ConfigurationBinder</c> (which converts every value through
 /// <c>TypeDescriptor.GetConverter(type).ConvertFromInvariantString(value)</c> under the invariant
-/// culture). Biased hard to the safe side: null/empty/non-scalar values, unsupported target types,
+/// culture). Biased hard to the safe side: null/non-scalar values, unsupported target types,
 /// and any parsing ambiguity all return <c>false</c> (do not report), so the rule only fires on a
 /// provable failure. Where the invariant <c>TryParse</c> is stricter than the runtime converter
 /// (hex integers, char padding, enum comma-lists, empty date strings) the check is deliberately
@@ -41,15 +41,24 @@ internal static class ScalarConversion
             return false;
         }
 
-        // Empty/whitespace strings convert to defaults (or MinValue) for several converters; skip
-        // them entirely rather than risk a false positive (accepted safe-side false negative).
-        if (string.IsNullOrWhiteSpace(rawValue))
+        if (rawValue is null)
         {
             return false;
         }
 
-        var value = rawValue!;
+        var value = rawValue;
+        var isNullableTarget = target is INamedTypeSymbol nullableTarget &&
+            nullableTarget.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
         var type = UnwrapNullable(target);
+        if ((isNullableTarget && value.Length == 0) ||
+            (string.IsNullOrWhiteSpace(value) &&
+             (type.SpecialType == SpecialType.System_Char ||
+              type.ToDisplayString() is "System.DateTime" or "System.DateTimeOffset")))
+        {
+            // NullableConverter maps exactly empty text to null but delegates whitespace to the
+            // underlying converter. CharConverter and the date/time converters accept both forms.
+            return false;
+        }
 
         if (type.TypeKind == TypeKind.Enum && type is INamedTypeSymbol enumType)
         {
