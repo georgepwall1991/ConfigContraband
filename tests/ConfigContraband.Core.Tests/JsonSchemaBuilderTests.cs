@@ -386,6 +386,245 @@ public sealed class JsonSchemaBuilderTests
     }
 
     [Fact]
+    public void Alias_declared_only_on_virtual_override_is_not_emitted()
+    {
+        var schema = BuildSchema(
+            """
+            using Microsoft.Extensions.Configuration;
+
+            public class BaseOptions
+            {
+                public virtual string ApiKey { get; set; } = "";
+            }
+
+            public sealed class DerivedOptions : BaseOptions
+            {
+                [ConfigurationKeyName("api-key")]
+                public override string ApiKey { get; set; } = "";
+            }
+            """,
+            "DerivedOptions");
+
+        Assert.Equal(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "ApiKey": {
+                  "type": "string"
+                }
+              }
+            }
+            """,
+            schema,
+            ignoreLineEndingDifferences: true);
+    }
+
+    [Fact]
+    public void Virtual_override_keeps_inherited_required_schema_metadata()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public class BaseOptions
+            {
+                [Required, MaxLength(5)]
+                public virtual string ApiKey { get; set; } = "";
+
+                [StringLength(5)]
+                public virtual string Token { get; set; } = "";
+            }
+
+            public sealed class DerivedOptions : BaseOptions
+            {
+                [StringLength(10)]
+                public override string ApiKey { get; set; } = "";
+
+                [StringLength(10)]
+                public override string Token { get; set; } = "";
+            }
+            """,
+            "DerivedOptions");
+
+        Assert.Equal(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "ApiKey": {
+                  "type": "string",
+                  "maxLength": 5
+                },
+                "Token": {
+                  "type": "string",
+                  "maxLength": 10
+                }
+              },
+              "required": [
+                "ApiKey"
+              ]
+            }
+            """,
+            schema,
+            ignoreLineEndingDifferences: true);
+
+        var customTypeIdSchema = BuildSchema(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ReplacingMetadataAttribute : Attribute
+            {
+                public override object TypeId => typeof(MaxLengthAttribute);
+            }
+
+            public class BaseOptions
+            {
+                [MaxLength(5)]
+                public virtual string ApiKey { get; set; } = "";
+            }
+
+            public sealed class DerivedOptions : BaseOptions
+            {
+                [ReplacingMetadata]
+                public override string ApiKey { get; set; } = "";
+            }
+            """,
+            "DerivedOptions");
+
+        Assert.DoesNotContain("\"maxLength\"", customTypeIdSchema);
+    }
+
+    [Fact]
+    public void Virtual_override_uses_effective_required_attribute_and_derived_default()
+    {
+        var allowsEmptySchema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public class BaseOptions
+            {
+                [Required]
+                public virtual string ApiKey { get; set; } = "";
+            }
+
+            public sealed class DerivedOptions : BaseOptions
+            {
+                [Required(AllowEmptyStrings = true)]
+                public override string ApiKey { get; set; } = "";
+            }
+            """,
+            "DerivedOptions");
+
+        Assert.DoesNotContain("\"required\"", allowsEmptySchema);
+
+        var derivedNullSchema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public class BaseOptions
+            {
+                [Required]
+                public virtual string ApiKey { get; set; } = "base-default";
+            }
+
+            public sealed class DerivedOptions : BaseOptions
+            {
+                public override string ApiKey { get; set; } = null!;
+            }
+            """,
+            "DerivedOptions");
+
+        Assert.Contains("\"required\": [\n    \"ApiKey\"\n  ]", derivedNullSchema);
+
+        var distinctRequiredTypesSchema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class AllowsEmptyRequiredAttribute : RequiredAttribute
+            {
+                public AllowsEmptyRequiredAttribute()
+                {
+                    AllowEmptyStrings = true;
+                }
+            }
+
+            public class BaseOptions
+            {
+                [Required]
+                public virtual string ApiKey { get; set; } = "";
+            }
+
+            public sealed class DerivedOptions : BaseOptions
+            {
+                [AllowsEmptyRequired]
+                public override string ApiKey { get; set; } = "";
+            }
+            """,
+            "DerivedOptions");
+
+        Assert.Contains("\"required\": [\n    \"ApiKey\"\n  ]", distinctRequiredTypesSchema);
+
+        var customTypeIdSchema = BuildSchema(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ReplacingRequiredAttribute : RequiredAttribute
+            {
+                public ReplacingRequiredAttribute()
+                {
+                    AllowEmptyStrings = true;
+                }
+
+                public override object TypeId => typeof(RequiredAttribute);
+            }
+
+            public class BaseOptions
+            {
+                [Required]
+                public virtual string ApiKey { get; set; } = "";
+            }
+
+            public sealed class DerivedOptions : BaseOptions
+            {
+                [ReplacingRequired]
+                public override string ApiKey { get; set; } = "";
+            }
+            """,
+            "DerivedOptions");
+
+        Assert.DoesNotContain("\"required\"", customTypeIdSchema);
+
+        var nonValidationTypeIdSchema = BuildSchema(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ReplacingMetadataAttribute : Attribute
+            {
+                public override object TypeId => typeof(RequiredAttribute);
+            }
+
+            public class BaseOptions
+            {
+                [Required]
+                public virtual string ApiKey { get; set; } = "";
+            }
+
+            public sealed class DerivedOptions : BaseOptions
+            {
+                [ReplacingMetadata]
+                public override string ApiKey { get; set; } = "";
+            }
+            """,
+            "DerivedOptions");
+
+        Assert.DoesNotContain("\"required\"", nonValidationTypeIdSchema);
+    }
+
+    [Fact]
     public void Nullable_value_types_unwrap_and_also_accept_null()
     {
         var schema = BuildSchema(

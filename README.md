@@ -43,7 +43,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-<PackageReference Include="ConfigContraband" Version="0.7.5" PrivateAssets="all" />
+<PackageReference Include="ConfigContraband" Version="0.7.6" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -425,7 +425,7 @@ For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumerat
 
 ### `CFG006`: Config Keys Should Match Options Properties
 
-Keys under a bound section should match public bindable properties. Public settable properties are bindable, constructor-bound records/classes are bindable when there is exactly one public parameterized constructor and its parameters map to public properties, including inherited public properties, and initialized get-only object or mutable collection properties are treated as bindable because the runtime binder can populate them. Public private-set properties are treated as bindable only when the registration explicitly sets `BindNonPublicProperties = true` on the actual binder-options lambda parameter. If a property-bound option uses `[ConfigurationKeyName]`, that configured name replaces the CLR property name for matching. Constructor-bound properties use constructor parameter keys, matching the runtime binder; if the property is also settable after construction, including a private setter enabled by `BindNonPublicProperties`, a `[ConfigurationKeyName]` alias is accepted when the constructor key is present or the constructor parameter has a default value. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
+Keys under a bound section should match public bindable properties. Public settable properties are bindable, constructor-bound records/classes are bindable when there is exactly one public parameterized constructor and its parameters map to public properties, including inherited public properties, and initialized get-only object or mutable collection properties are treated as bindable because the runtime binder can populate them. Public private-set properties are treated as bindable only when the registration explicitly sets `BindNonPublicProperties = true` on the actual binder-options lambda parameter. If a property-bound option uses `[ConfigurationKeyName]`, that configured name replaces the CLR property name for matching; for an overridden virtual setter, the base-most property declaration supplies the runtime name, matching `ConfigurationBinder`. Constructor-bound properties use constructor parameter keys, matching the runtime binder; if the property is also settable after construction, including a private setter enabled by `BindNonPublicProperties`, a `[ConfigurationKeyName]` alias is accepted when the constructor key is present or the constructor parameter has a default value. JSON string escapes are decoded before matching, so escaped property names are treated the same as their runtime configuration keys.
 
 Before:
 

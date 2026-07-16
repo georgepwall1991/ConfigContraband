@@ -58,7 +58,7 @@ internal static class JsonSchemaBuilder
         }
 
         // A type-level [Description]/[DisplayName] or XML <summary> documents the section as a whole. A
-        // property that binds this type can override it with its own doc (see AnnotateProperty).
+        // property that binds this type can override it with its own doc (see AnnotateDescription).
         var typeDescription = ResolveDescription(type);
         if (typeDescription is not null)
         {
@@ -70,8 +70,13 @@ internal static class JsonSchemaBuilder
         var required = JsonNode.Array();
         var hasRequired = false;
 
-        foreach (var property in metadata.BindableProperties)
+        var propertyGroups = metadata.BindableProperties.GroupBy(
+            static property => OptionsTypeMetadata.GetRuntimeBindingProperty(property.Symbol),
+            SymbolEqualityComparer.Default);
+        foreach (var propertyGroup in propertyGroups)
         {
+            var groupedProperties = propertyGroup.ToArray();
+            var property = groupedProperties[0];
             var key = property.ConfigurationNames.FirstOrDefault() ?? property.Symbol.Name;
 
             // A property declared as a base type but initialized with a derived type binds derived-only
@@ -81,19 +86,30 @@ internal static class JsonSchemaBuilder
 
             // Validation only walks into a child object/collection when the property opts in with a
             // recursive validation attribute, mirroring CFG002/CFG005.
-            var childValidates = validates && property.IsRecursiveValidationEnabled;
+            var childValidates = validates && groupedProperties.Any(candidate => candidate.IsRecursiveValidationEnabled);
             var valueSchema = BuildValueSchema(property.Symbol.Type, context, childStrict, childValidates, visited);
             if (valueSchema is JsonObject valueObject)
             {
+                var declarations = groupedProperties.AsEnumerable().Reverse().Select(candidate => candidate.Symbol).ToArray();
                 // `validates` (this object's flag), not `childValidates`: a property's own [Range]/length/
                 // pattern is enforced when THIS type's DataAnnotations validation runs, mirroring [Required].
-                AnnotateProperty(valueObject, property.Symbol, validates);
+                // Apply the base declaration first, then let a derived override replace matching
+                // inherited attributes just as TypeDescriptor does at runtime.
+                foreach (var declaration in declarations)
+                {
+                    AnnotateDescription(valueObject, declaration);
+                }
+
+                if (validates)
+                {
+                    ApplyConstraints(valueObject, declarations);
+                }
             }
 
             properties.Add(key, valueSchema);
 
             // [Required] is only enforced when DataAnnotations validation actually runs (CFG002).
-            if (validates && property.IsRequired)
+            if (validates && metadata.IsRequiredForSchema(groupedProperties))
             {
                 required.Add(JsonNode.Str(key));
                 hasRequired = true;
@@ -249,12 +265,9 @@ internal static class JsonSchemaBuilder
     }
 
     /// <summary>
-    /// Decorates a property's value node with a <c>description</c> (always, non-validating) and, when the
-    /// registration runs DataAnnotations validation, the JSON Schema validation keywords that mirror the
-    /// property's DataAnnotations. Every emitted keyword is 1:1 with a constraint the runtime actually
-    /// enforces, so the schema never rejects configuration the binder would accept.
+    /// Decorates a property's value node with its non-validating <c>description</c> metadata.
     /// </summary>
-    private static void AnnotateProperty(JsonObject schema, IPropertySymbol property, bool validates)
+    private static void AnnotateDescription(JsonObject schema, IPropertySymbol property)
     {
         var description = ResolveDescription(property);
         if (description is not null)
@@ -263,20 +276,26 @@ internal static class JsonSchemaBuilder
             // object node this overrides the type-level description with the property's more specific doc.
             schema.InsertAfter("type", "description", JsonNode.Str(description));
         }
-
-        if (validates)
-        {
-            ApplyConstraints(schema, property);
-        }
     }
 
-    private static void ApplyConstraints(JsonObject schema, IPropertySymbol property)
+    private static void ApplyConstraints(JsonObject schema, IReadOnlyList<IPropertySymbol> properties)
     {
-        var kind = ClassifyScalar(property.Type);
+        var kind = ClassifyScalar(properties[0].Type);
         if (kind == ScalarKind.Other)
         {
             // Constraints only apply to scalar string/number nodes; collections and objects are left
             // unconstrained so the schema never produces a false validation error.
+            return;
+        }
+
+        var declaredAttributes = properties
+            .SelectMany(static property => property.GetAttributes())
+            .ToArray();
+        if (declaredAttributes.Any(attribute => OptionsTypeMetadata.OverridesAttributeTypeId(attribute.AttributeClass)))
+        {
+            // Attribute.TypeId can make any custom attribute replace an inherited validation
+            // attribute. Without executing user code the effective set is unprovable, so omit
+            // constraints rather than emit a schema that rejects runtime-valid configuration.
             return;
         }
 
@@ -286,7 +305,24 @@ internal static class JsonSchemaBuilder
         var maximumExclusive = false;
         int? maxLength = null;
 
-        foreach (var attribute in property.GetAttributes())
+        // TypeDescriptor inherits property attributes across an override chain. A declaration
+        // replaces an inherited attribute with the same TypeId, while different validation
+        // attribute types remain cumulative. The supported attributes use their concrete type as
+        // TypeId, so retain the most-derived occurrence of each type before combining constraints.
+        var effectiveAttributes = new Dictionary<string, AttributeData>(StringComparer.Ordinal);
+        foreach (var attribute in declaredAttributes)
+        {
+            var attributeName = attribute.AttributeClass?.ToDisplayString();
+            if (attributeName is
+                "System.ComponentModel.DataAnnotations.RangeAttribute" or
+                "System.ComponentModel.DataAnnotations.MaxLengthAttribute" or
+                "System.ComponentModel.DataAnnotations.StringLengthAttribute")
+            {
+                effectiveAttributes[attributeName] = attribute;
+            }
+        }
+
+        foreach (var attribute in effectiveAttributes.Values)
         {
             switch (attribute.AttributeClass?.ToDisplayString())
             {
