@@ -2,6 +2,10 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.18 - 2026-07-16
+
+- Extended CFG008 to the signed framework's non-generic `ConfigurationBinder.GetValue(IConfiguration, Type, string[, object])` overloads when the target is a direct `typeof(...)` expression. Root and known-section chains, instance/static named calls, and boxed compile-time constant defaults now match generic `GetValue<T>` diagnostics; dynamic `Type` expressions, user-defined conversions, effectful defaults, and same-FQN shadows remain quiet.
+
 ## 0.7.17 - 2026-07-16
 
 - Corrected CFG001 documentation to match shipped semantics: section paths may be any compile-time constant string, including `const` and `nameof(...)`, while code fixes remain gated on safe expression rewriting. The health coverage inventories now also list both `GetSection(...)` and `GetRequiredSection(...)` for `Bind` and direct `Configure<T>` registrations. No diagnostic behaviour changed.

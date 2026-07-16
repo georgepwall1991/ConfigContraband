@@ -16086,6 +16086,208 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg008_reports_non_generic_get_value_conversion_failure()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetValue(typeof(int), "Server:Port");
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 13, 3, 21)
+            .WithArguments("Server:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_static_named_non_generic_get_value_default_overload_conversion_failure()
+    {
+        var source = DirectReadSource("""
+            _ = ConfigurationBinder.GetValue(
+                configuration: configuration,
+                type: typeof(int),
+                key: "Server:Port",
+                defaultValue: 8080);
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 13, 3, 21)
+            .WithArguments("Server:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_non_generic_get_value_when_type_is_dynamic()
+    {
+        var source = DirectReadSource("""
+            var type = typeof(int);
+            _ = configuration.GetValue(type, "Server:Port");
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_non_generic_get_value_through_user_defined_type_conversion()
+    {
+        var source = DirectReadSource(
+            """
+            _ = configuration.GetValue(
+                (System.Type)(TypeWrapper)typeof(int),
+                "Server:Port");
+            """,
+            extraTypes: """
+            public readonly struct TypeWrapper
+            {
+                private readonly System.Type _type;
+
+                private TypeWrapper(System.Type type)
+                {
+                    _type = type;
+                }
+
+                public static implicit operator TypeWrapper(System.Type type)
+                {
+                    RuntimeState.Configuration["Server:Port"] = "8080";
+                    return new TypeWrapper(type);
+                }
+
+                public static implicit operator System.Type(TypeWrapper wrapper) => wrapper._type;
+            }
+
+            public static class RuntimeState
+            {
+                public static IConfiguration Configuration { get; set; } = null!;
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_non_generic_get_value_when_default_argument_can_mutate_configuration()
+    {
+        var source = DirectReadSource(
+            """
+            _ = configuration.GetValue(
+                typeof(int),
+                "Server:Port",
+                SetValidValue(configuration));
+            """,
+            extraMembers: """
+            private static object SetValidValue(IConfiguration configuration)
+            {
+                configuration["Server:Port"] = "8080";
+                return 0;
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_non_generic_get_value_conversion_failure_on_known_section_chain()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetSection("Server").GetValue(typeof(int), "Port");
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 3, 13, 3, 21)
+            .WithArguments("Server:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_same_fully_qualified_name_non_generic_get_value_shadow()
+    {
+        var source = DirectReadSource(
+            """
+            _ = Microsoft.Extensions.Configuration.ConfigurationBinder.GetValue(
+                configuration,
+                typeof(int),
+                "Server:Port");
+            """,
+            extraTypes: """
+            #pragma warning disable CS0436
+            namespace Microsoft.Extensions.Configuration
+            {
+                public static class ConfigurationBinder
+                {
+                    public static object? GetValue(
+                        this IConfiguration configuration,
+                        System.Type type,
+                        string key) => null;
+                }
+            }
+            #pragma warning restore CS0436
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "eighty"
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg008_reports_static_named_get_value_default_overload_conversion_failure()
     {
         var source = DirectReadSource("""

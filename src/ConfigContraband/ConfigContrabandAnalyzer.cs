@@ -496,11 +496,24 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 kind = DirectConfigurationApiKind.GetValue;
                 keyParameterName = "key";
                 targetType = operation.TargetMethod.TypeArguments[0];
-                if (originalMethod.Parameters.Length == 3)
+                if (originalMethod.Parameters.Any(parameter =>
+                        string.Equals(parameter.Name, "defaultValue", StringComparison.Ordinal)))
                 {
                     argumentsAreProvablySafe = operation.Arguments.Any(argument =>
                         string.Equals(argument.Parameter?.Name, "defaultValue", StringComparison.Ordinal) &&
-                        argument.Value.ConstantValue.HasValue);
+                        HasCompileTimeConstantValue(argument.Value));
+                }
+            }
+            else if (TryGetFrameworkNonGenericGetValueTargetType(originalMethod, operation, out targetType))
+            {
+                kind = DirectConfigurationApiKind.GetValue;
+                keyParameterName = "key";
+                if (originalMethod.Parameters.Any(parameter =>
+                        string.Equals(parameter.Name, "defaultValue", StringComparison.Ordinal)))
+                {
+                    argumentsAreProvablySafe = operation.Arguments.Any(argument =>
+                        string.Equals(argument.Parameter?.Name, "defaultValue", StringComparison.Ordinal) &&
+                        HasCompileTimeConstantValue(argument.Value));
                 }
             }
             else if (string.Equals(originalMethod.Name, "Bind", StringComparison.Ordinal))
@@ -587,6 +600,16 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             argumentsAreProvablySafe,
             syntax);
         return true;
+    }
+
+    private static bool HasCompileTimeConstantValue(IOperation operation)
+    {
+        while (operation is IConversionOperation { OperatorMethod: null } conversion)
+        {
+            operation = conversion.Operand;
+        }
+
+        return operation.ConstantValue.HasValue;
     }
 
     private static bool IsProvablySafeBinderInstanceArgument(IOperation operation)
@@ -779,6 +802,57 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                    StringComparison.Ordinal) &&
                string.Equals(keyParameter.Name, "key", StringComparison.Ordinal) &&
                keyParameter.Type.SpecialType == SpecialType.System_String;
+    }
+
+    private static bool TryGetFrameworkNonGenericGetValueTargetType(
+        IMethodSymbol originalMethod,
+        IInvocationOperation operation,
+        out ITypeSymbol? targetType)
+    {
+        targetType = null;
+        if (!IsFrameworkConfigurationBinderMethod(originalMethod) ||
+            !string.Equals(originalMethod.Name, "GetValue", StringComparison.Ordinal) ||
+            originalMethod.Arity != 0 ||
+            originalMethod.Parameters.Length is < 3 or > 4)
+        {
+            return false;
+        }
+
+        var configurationParameter = originalMethod.Parameters[0];
+        var typeParameter = originalMethod.Parameters[1];
+        var keyParameter = originalMethod.Parameters[2];
+        if (!string.Equals(
+                configurationParameter.Type.ToDisplayString(),
+                "Microsoft.Extensions.Configuration.IConfiguration",
+                StringComparison.Ordinal) ||
+            !string.Equals(typeParameter.Name, "type", StringComparison.Ordinal) ||
+            !string.Equals(typeParameter.Type.ToDisplayString(), "System.Type", StringComparison.Ordinal) ||
+            !string.Equals(keyParameter.Name, "key", StringComparison.Ordinal) ||
+            keyParameter.Type.SpecialType != SpecialType.System_String)
+        {
+            return false;
+        }
+
+        var typeArgument = operation.Arguments.FirstOrDefault(argument =>
+            string.Equals(argument.Parameter?.Name, "type", StringComparison.Ordinal));
+        if (typeArgument is null)
+        {
+            return false;
+        }
+
+        IOperation typeValue = typeArgument.Value;
+        while (typeValue is IConversionOperation { OperatorMethod: null } conversion)
+        {
+            typeValue = conversion.Operand;
+        }
+
+        if (typeValue is not ITypeOfOperation typeOfOperation)
+        {
+            return false;
+        }
+
+        targetType = typeOfOperation.TypeOperand;
+        return true;
     }
 
     private static bool IsFrameworkConfigurationExtensionsMethod(IMethodSymbol method)

@@ -43,7 +43,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.7.17" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.7.18" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -121,7 +121,7 @@ When the analyzer cannot prove a configuration shape statically, it stays quiet.
 | `CFG005` | Nested options validation is not recursive | Warning | Nested objects or item types with annotations or `IValidatableObject`, but no recursive validation attribute. |
 | `CFG006` | Unknown configuration key under bound section | Info | JSON keys that do not match bindable options properties or aliases. |
 | `CFG007` | Unknown configuration key will throw during binding | Warning | JSON keys that do not match bindable options properties while `ErrorOnUnknownConfiguration` is enabled. |
-| `CFG008` | Configuration value cannot be bound to the target type | Warning | Scalar values that provably cannot convert to a bound property or direct `GetValue<T>` target type, e.g. `"Port": "eighty"` for an `int`. |
+| `CFG008` | Configuration value cannot be bound to the target type | Warning | Scalar values that provably cannot convert to a bound property or direct generic/non-generic `GetValue` target type, e.g. `"Port": "eighty"` for an `int`. |
 | `CFG009` | Direct configuration path is unavailable from visible appsettings files | Warning | `configuration.GetRequiredSection("Strpie")` (throws at runtime), near-miss `GetSection("Strpie").Get<T>()`/`.Bind(instance)` typos (bind nothing), and provable `GetConnectionString` typos. |
 
 ## appsettings IntelliSense (schema generation)
@@ -506,14 +506,15 @@ After:
 
 The runtime `ConfigurationBinder` stores every configuration value as a string and converts it through `TypeDescriptor.GetConverter(type).ConvertFromInvariantString(value)` under the invariant culture. When that conversion can't succeed — `"Port": "eighty"` for an `int`, `"Level": "Verbos"` for an enum, `"Enabled": "yes"` for a `bool` — the binder throws `InvalidOperationException` while binding or reading the value, before your options ever validate. `CFG008` catches that at build time and points at the offending value in the `appsettings` file. What matters is the value's **string content, not its JSON kind**: `"Port": 8080` and `"Port": "8080"` both bind fine, while `"Port": true` (stored as the string `"True"`) does not.
 
-In addition to options bindings, the rule checks direct calls to the framework `ConfigurationBinder.GetValue<T>` API when the receiver can be proven to be the host configuration contract and the path is statically known:
+In addition to options bindings, the rule checks direct calls to the framework generic `ConfigurationBinder.GetValue<T>` API and non-generic `GetValue(Type, ...)` overloads whose target is a direct `typeof(...)` expression when the receiver can be proven to be the host configuration contract and the path is statically known:
 
 ```csharp
 var port = configuration.GetValue<int>("Server:Port");
 var chainedPort = configuration.GetSection("Server").GetValue<int>("Port");
+var legacyPort = configuration.GetValue(typeof(int), "Server:Port");
 ```
 
-Instance and static calls are supported, including named arguments and the default-value overload when its default is a compile-time constant. Repeated reads and a matching options-binding diagnostic are deduplicated. The method must come from the real signed Microsoft binder assembly; same-FQN source shadows and unsigned replacement assemblies stay quiet. The same conservative direct-read boundaries as `CFG009` apply: non-constant paths, effectful or otherwise unprovable default expressions, stored `IConfigurationSection` receivers, fields/properties whose configuration origin is not visible (including a `null!` placeholder overwritten in a constructor), locally constructed or mutated configuration, and concrete custom providers. Missing paths, JSON `null`, and object/array values also stay quiet because no scalar conversion failure is statically proven.
+Instance and static calls are supported, including named arguments and the default-value overload when its default is a compile-time constant. Non-generic calls whose `Type` flows through a variable, user-defined conversion, or other dynamic expression stay quiet because evaluating it may have side effects and the target is not directly provable. Repeated reads and a matching options-binding diagnostic are deduplicated. The method must come from the real signed Microsoft binder assembly; same-FQN source shadows and unsigned replacement assemblies stay quiet. The same conservative direct-read boundaries as `CFG009` apply: non-constant paths, effectful or otherwise unprovable default expressions, stored `IConfigurationSection` receivers, fields/properties whose configuration origin is not visible (including a `null!` placeholder overwritten in a constructor), locally constructed or mutated configuration, and concrete custom providers. Missing paths, JSON `null`, and object/array values also stay quiet because no scalar conversion failure is statically proven.
 
 The rule fires only on a **provable** conversion failure and is deliberately conservative everywhere the invariant `TryParse` is stricter than the runtime converter:
 
@@ -549,7 +550,7 @@ ConfigContraband currently focuses on:
 - `AddOptions<T>().BindConfiguration("Section")` registrations.
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
 - Direct `Configure<T>(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations for section and JSON-key drift.
-- Direct framework `ConfigurationBinder.GetValue<T>` reads for provable scalar conversion failures (`CFG008`).
+- Direct framework generic `ConfigurationBinder.GetValue<T>` and non-generic `GetValue(typeof(T), ...)` reads for provable scalar conversion failures (`CFG008`).
 - Direct configuration reads: standalone `GetRequiredSection(...)`, suggestion-gated `GetSection(...).Get<T>()`/`.Bind(instance)`, keyed `Bind("key", instance)`, and suggestion-gated `GetConnectionString(...)` (`CFG009`).
 - Strict `ErrorOnUnknownConfiguration` binder options for unknown-key failures.
 - Compile-time constant section names, including literals, `const` values, and `nameof` expressions.
