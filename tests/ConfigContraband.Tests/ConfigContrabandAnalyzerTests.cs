@@ -739,11 +739,258 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
-    public async Task Cfg001_ignores_get_section_chained_off_stored_configuration_section_variable()
+    public async Task Cfg001_reports_get_section_chained_off_origin_visible_stored_section_variable()
+    {
+        // The stored section's own path is statically visible ("Features"), so the chained
+        // literal resolves to the provable full path Features:Strpie instead of staying quiet.
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            var section = configuration.GetSection("Features");
+            services.AddOptions<StripeOptions>()
+                .Bind(section.GetSection({|#0:"Strpie"|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_reports_conditional_access_get_section_chained_off_origin_visible_stored_section_variable()
+    {
+        var source = OptionsSource("""
+            #nullable enable
+            IConfiguration configuration = null!;
+            IConfigurationSection? section = configuration.GetSection("Features");
+            services.AddOptions<StripeOptions>()
+                .Bind(section?.GetSection({|#0:"Strpie"|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_reports_get_section_chained_off_stored_section_alias()
     {
         var source = OptionsSource("""
             IConfiguration configuration = null!;
             var section = configuration.GetSection("Features");
+            var alias = section;
+            services.AddOptions<StripeOptions>()
+                .Bind(alias.GetSection({|#0:"Strpie"|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_reports_get_section_chained_off_reassigned_stored_section()
+    {
+        // The last same-block simple reassignment before the bind supplies the origin.
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            var section = configuration.GetSection("Logging");
+            section = configuration.GetSection("Features");
+            services.AddOptions<StripeOptions>()
+                .Bind(section.GetSection({|#0:"Strpie"|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_reports_get_section_chained_off_stored_required_section_origin()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            var section = configuration.GetRequiredSection("Features");
+            services.AddOptions<StripeOptions>()
+                .Bind(section.GetSection({|#0:"Strpie"|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_reports_get_required_section_chained_off_origin_visible_stored_section()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            var section = configuration.GetSection("Features");
+            services.AddOptions<StripeOptions>()
+                .Bind(section.GetRequiredSection({|#0:"Strpie"|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_reports_get_section_chained_off_origin_visible_stored_section_configure_registration()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            var section = configuration.GetSection("Features");
+            services.Configure<StripeOptions>(section.GetSection({|#0:"Strpie"|}));
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_ignores_get_section_chained_off_section_parameter_receiver()
+    {
+        // A parameter's origin lives at the call site and is not statically visible.
+        var source = OptionsSource("""
+            Register(services, null!);
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", extraMembers: """
+            private static void Register(IServiceCollection services, IConfigurationSection section)
+            {
+                services.AddOptions<StripeOptions>()
+                    .Bind(section.GetSection("Strpie"))
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg001_ignores_get_section_chained_off_conditionally_reassigned_stored_section()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            var section = configuration.GetSection("Features");
+            if (configuration.GetValue<bool>("UseOther"))
+            {
+                section = configuration.GetSection("Other");
+            }
+
             services.AddOptions<StripeOptions>()
                 .Bind(section.GetSection("Strpie"))
                 .ValidateDataAnnotations()
@@ -764,16 +1011,108 @@ public sealed class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
-    public async Task Cfg001_ignores_conditional_access_get_section_chained_off_stored_configuration_section_variable()
+    public async Task Cfg001_ignores_get_section_chained_off_mutated_stored_section()
     {
+        // The indexer write can create the key at runtime, so the missing-section
+        // diagnostic would be a false positive.
         var source = OptionsSource("""
-            #nullable enable
             IConfiguration configuration = null!;
-            IConfigurationSection? section = configuration.GetSection("Features");
+            var section = configuration.GetSection("Features");
+            section["Strpie"] = "x";
             services.AddOptions<StripeOptions>()
-                .Bind(section?.GetSection("Strpie"))
+                .Bind(section.GetSection("Strpie"))
                 .ValidateDataAnnotations()
                 .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg001_ignores_get_section_chained_off_escaped_stored_section()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            var section = configuration.GetSection("Features");
+            Use(section);
+            services.AddOptions<StripeOptions>()
+                .Bind(section.GetSection("Strpie"))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", extraMembers: """
+            private static void Use(IConfigurationSection section)
+            {
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg001_ignores_get_section_chained_off_method_return_stored_section()
+    {
+        var source = OptionsSource("""
+            var section = GetFeaturesSection();
+            services.AddOptions<StripeOptions>()
+                .Bind(section.GetSection("Strpie"))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", extraMembers: """
+            private static IConfigurationSection GetFeaturesSection()
+            {
+                IConfiguration configuration = null!;
+                return configuration.GetSection("Features");
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg001_ignores_get_section_chained_off_cross_block_stored_section()
+    {
+        // The declaration lives in the outer block while the bind executes in a nested
+        // block, so the same-block origin proof stays conservative.
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            var section = configuration.GetSection("Features");
+            if (configuration.GetValue<bool>("Enabled"))
+            {
+                services.AddOptions<StripeOptions>()
+                    .Bind(section.GetSection("Strpie"))
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+            }
             """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
 
         await Verifier.VerifyAnalyzerAsync(

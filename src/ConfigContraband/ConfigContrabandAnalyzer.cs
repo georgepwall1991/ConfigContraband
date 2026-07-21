@@ -58,11 +58,25 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     {
                         if (configuration.HasFiles)
                         {
-                            AnalyzeDirectConfigurationRead(
-                                syntaxContext,
-                                configuration,
-                                providerSemantics,
-                                unknownKeysReported);
+                            if (TryCreateStoredSectionOriginRegistration(
+                                    invocation,
+                                    syntaxContext.SemanticModel,
+                                    out var storedSectionRegistration))
+                            {
+                                AnalyzeConfigurationSection(
+                                    syntaxContext.ReportDiagnostic,
+                                    storedSectionRegistration,
+                                    configuration,
+                                    providerSemantics);
+                            }
+                            else
+                            {
+                                AnalyzeDirectConfigurationRead(
+                                    syntaxContext,
+                                    configuration,
+                                    providerSemantics,
+                                    unknownKeysReported);
+                            }
                         }
 
                         return;
@@ -3117,6 +3131,100 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                directInvocation.Kind == DirectConfigurationApiKind.GetRequiredSection;
     }
 
+    /// <summary>
+    /// Recognizes an options binding whose section argument is a <c>GetSection</c>/
+    /// <c>GetRequiredSection</c> call chained off a stored <c>IConfigurationSection</c> local with
+    /// a statically visible origin, and builds a CFG001-only registration for it. The shared
+    /// registration factories intentionally stay quiet for stored sections because every options
+    /// rule consumes the resolved path; this fallback feeds only the missing-section check, so
+    /// validation, unknown-key, strict-binding, and conversion analysis keep their existing
+    /// boundary for this shape.
+    /// </summary>
+    private static bool TryCreateStoredSectionOriginRegistration(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        out OptionsRegistration registration)
+    {
+        registration = null!;
+
+        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
+            invocation.ArgumentList.Arguments.Count == 0)
+        {
+            return false;
+        }
+
+        var methodName = memberAccess.Name.Identifier.ValueText;
+        INamedTypeSymbol? optionsType = null;
+        ImmutableArray<ExpressionSyntax> candidateSectionExpressions = [];
+
+        if (string.Equals(methodName, "Bind", StringComparison.Ordinal) &&
+            semanticModel.GetTypeInfo(memberAccess.Expression).Type is INamedTypeSymbol
+            {
+                Name: "OptionsBuilder",
+                TypeArguments.Length: 1,
+            } receiverType &&
+            string.Equals(
+                receiverType.ContainingNamespace.ToDisplayString(),
+                "Microsoft.Extensions.Options",
+                StringComparison.Ordinal) &&
+            receiverType.TypeArguments[0] is INamedTypeSymbol bindOptionsType &&
+            IsOptionsBuilderConfigurationMethod(invocation, semanticModel, methodName))
+        {
+            optionsType = bindOptionsType;
+            candidateSectionExpressions = [invocation.ArgumentList.Arguments[0].Expression];
+        }
+        else if (string.Equals(methodName, "Configure", StringComparison.Ordinal) &&
+                 semanticModel.GetSymbolInfo(invocation).Symbol is IMethodSymbol
+                 {
+                     TypeArguments.Length: 1,
+                 } symbol &&
+                 symbol.TypeArguments[0] is INamedTypeSymbol configureOptionsType &&
+                 IsOptionsConfigurationConfigureMethod(symbol))
+        {
+            optionsType = configureOptionsType;
+            candidateSectionExpressions =
+                [.. invocation.ArgumentList.Arguments.Select(argument => argument.Expression)];
+        }
+
+        if (optionsType is null)
+        {
+            return false;
+        }
+
+        foreach (var candidateExpression in candidateSectionExpressions)
+        {
+            if (!TryGetConfigurationSectionPath(
+                    candidateExpression,
+                    semanticModel,
+                    out var sectionPath,
+                    out var sectionExpression,
+                    out var sectionExpressionContainsFullPath,
+                    resolveStoredSectionOrigins: true))
+            {
+                continue;
+            }
+
+            registration = new OptionsRegistration(
+                optionsType,
+                sectionPath,
+                sectionExpression,
+                invocation,
+                supportsValidationRules: false,
+                sectionExpressionContainsFullPath: sectionExpressionContainsFullPath,
+                hasValidateDataAnnotations: false,
+                hasValidateOnStart: false,
+                hasValidation: false,
+                bindsNonPublicProperties: false,
+                errorsOnUnknownConfiguration: false,
+                isDataAnnotationsEnabled: false,
+                bindLocation: sectionExpression.GetLocation(),
+                requiresRuntimeSection: RequiresRuntimeSection(sectionExpression, semanticModel));
+            return true;
+        }
+
+        return false;
+    }
+
     private static bool TryGetConfigureOptionsName(
         InvocationExpressionSyntax configureInvocation,
         ArgumentSyntax sectionArgument,
@@ -4616,7 +4724,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         SemanticModel semanticModel,
         out string sectionPath,
         out ExpressionSyntax sectionExpression,
-        out bool sectionExpressionContainsFullPath)
+        out bool sectionExpressionContainsFullPath,
+        bool resolveStoredSectionOrigins = false)
     {
         sectionPath = null!;
         sectionExpression = null!;
@@ -4632,7 +4741,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 semanticModel,
                 out var parentSectionPath,
                 out _,
-                out _))
+                out _,
+                resolveStoredSectionOrigins))
         {
             sectionPath = parentSectionPath + ":" + currentSectionPath;
             sectionExpression = keyExpression;
@@ -4640,7 +4750,20 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         }
 
         var receiverType = semanticModel.GetTypeInfo(receiver).Type;
-        if (IsConfigurationSectionType(receiverType) || !IsConfigurationType(receiverType))
+        if (IsConfigurationSectionType(receiverType))
+        {
+            return resolveStoredSectionOrigins &&
+                   TryResolveStoredSectionChainedPath(
+                       receiver,
+                       currentSectionPath,
+                       keyExpression,
+                       semanticModel,
+                       out sectionPath,
+                       out sectionExpression,
+                       out sectionExpressionContainsFullPath);
+        }
+
+        if (!IsConfigurationType(receiverType))
         {
             return false;
         }
@@ -4656,7 +4779,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         SemanticModel semanticModel,
         out string sectionPath,
         out ExpressionSyntax sectionExpression,
-        out bool sectionExpressionContainsFullPath)
+        out bool sectionExpressionContainsFullPath,
+        bool resolveStoredSectionOrigins = false)
     {
         sectionPath = null!;
         sectionExpression = null!;
@@ -4672,7 +4796,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 semanticModel,
                 out sectionPath,
                 out sectionExpression,
-                out sectionExpressionContainsFullPath);
+                out sectionExpressionContainsFullPath,
+                resolveStoredSectionOrigins);
         }
 
         if (expression is not InvocationExpressionSyntax invocation)
@@ -4691,7 +4816,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 semanticModel,
                 out sectionPath,
                 out sectionExpression,
-                out sectionExpressionContainsFullPath);
+                out sectionExpressionContainsFullPath,
+                resolveStoredSectionOrigins);
         }
 
         if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess ||
@@ -4713,7 +4839,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 semanticModel,
                 out var parentSectionPath,
                 out _,
-                out _))
+                out _,
+                resolveStoredSectionOrigins))
         {
             sectionPath = parentSectionPath + ":" + currentSectionPath;
             sectionExpression = argumentExpression;
@@ -4730,9 +4857,17 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             // here, so treating the chained literal as a root-anchored path would
             // both false-positive (the key may exist under the real nested path) and
             // false-negative (a typo could be checked against the wrong namespace).
-            // Stay quiet, matching the existing "ignore a directly-passed stored
-            // IConfigurationSection" behavior.
-            return false;
+            // Stay quiet unless the caller opted into origin resolution and the stored
+            // section's own path is statically visible.
+            return resolveStoredSectionOrigins &&
+                   TryResolveStoredSectionChainedPath(
+                       memberAccess.Expression,
+                       currentSectionPath,
+                       argumentExpression,
+                       semanticModel,
+                       out sectionPath,
+                       out sectionExpression,
+                       out sectionExpressionContainsFullPath);
         }
 
         if (!IsConfigurationType(receiverType))
@@ -4744,6 +4879,130 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         sectionExpression = argumentExpression;
         sectionExpressionContainsFullPath = true;
         return true;
+    }
+
+    /// <summary>
+    /// Composes the full chained path for a <c>GetSection</c>/<c>GetRequiredSection</c> call whose
+    /// receiver is a stored <c>IConfigurationSection</c> local with a statically visible origin.
+    /// The anchored literal carries only the chained key, so the replacement stays a leaf rewrite.
+    /// </summary>
+    private static bool TryResolveStoredSectionChainedPath(
+        ExpressionSyntax receiver,
+        string currentSectionPath,
+        ExpressionSyntax keyExpression,
+        SemanticModel semanticModel,
+        out string sectionPath,
+        out ExpressionSyntax sectionExpression,
+        out bool sectionExpressionContainsFullPath)
+    {
+        sectionPath = null!;
+        sectionExpression = null!;
+        sectionExpressionContainsFullPath = false;
+
+        if (!TryGetStoredSectionOriginPath(receiver, semanticModel, out var storedSectionPath))
+        {
+            return false;
+        }
+
+        sectionPath = storedSectionPath + ":" + currentSectionPath;
+        sectionExpression = keyExpression;
+        sectionExpressionContainsFullPath = false;
+        return true;
+    }
+
+    /// <summary>
+    /// Resolves the constant section path of a stored <c>IConfigurationSection</c> receiver when
+    /// its origin is statically visible: a same-block local whose value — including the last
+    /// same-block simple reassignment before the use — is a provable constant section chain, with
+    /// no conditional reassignment, mutation, capture, or escape between that definition and the
+    /// use. Parameters, method returns, fields, and conditionally reassigned or escaped locals
+    /// stay quiet because the stored section's real path cannot be proven.
+    /// </summary>
+    private static bool TryGetStoredSectionOriginPath(
+        ExpressionSyntax receiver,
+        SemanticModel semanticModel,
+        out string originPath)
+    {
+        return TryGetStoredSectionOriginPath(
+            receiver,
+            semanticModel,
+            new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default),
+            out originPath);
+    }
+
+    private static bool TryGetStoredSectionOriginPath(
+        ExpressionSyntax receiver,
+        SemanticModel semanticModel,
+        HashSet<ILocalSymbol> visitedLocals,
+        out string originPath)
+    {
+        originPath = null!;
+
+        var expression = UnwrapConfigurationInterfaceConversions(receiver, semanticModel);
+        if (semanticModel.GetSymbolInfo(expression).Symbol is not ILocalSymbol local ||
+            !visitedLocals.Add(local))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (local.DeclaringSyntaxReferences.Length != 1 ||
+                local.DeclaringSyntaxReferences[0].GetSyntax() is not VariableDeclaratorSyntax declarator ||
+                declarator.SyntaxTree != expression.SyntaxTree ||
+                declarator.FirstAncestorOrSelf<BlockSyntax>() is not { } declarationBlock ||
+                expression.FirstAncestorOrSelf<BlockSyntax>() != declarationBlock)
+            {
+                return false;
+            }
+
+            ExpressionSyntax? definition = declarator.Initializer?.Value;
+            var definitionEnd = declarator.Span.End;
+            foreach (var statement in declarationBlock.Statements)
+            {
+                if (statement.SpanStart >= expression.SpanStart)
+                {
+                    break;
+                }
+
+                if (TryGetDirectLocalAssignment(statement, local, semanticModel, out var assignment))
+                {
+                    definition = assignment.Right;
+                    definitionEnd = statement.Span.End;
+                }
+            }
+
+            if (definition is null ||
+                definitionEnd > expression.SpanStart ||
+                HasUnsafeConfigurationUse(
+                    local,
+                    declarationBlock,
+                    semanticModel,
+                    definitionEnd,
+                    expression.SpanStart,
+                    expression.SpanStart))
+            {
+                return false;
+            }
+
+            definition = UnwrapConfigurationInterfaceConversions(definition, semanticModel);
+            if (definition is InvocationExpressionSyntax or ConditionalAccessExpressionSyntax)
+            {
+                return TryGetConfigurationSectionPath(
+                    definition,
+                    semanticModel,
+                    out originPath,
+                    out _,
+                    out _,
+                    resolveStoredSectionOrigins: true);
+            }
+
+            return TryGetStoredSectionOriginPath(definition, semanticModel, visitedLocals, out originPath);
+        }
+        finally
+        {
+            visitedLocals.Remove(local);
+        }
     }
 
     private static ExpressionSyntax UnwrapForSectionChainResolution(ExpressionSyntax expression)
@@ -4780,7 +5039,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         SemanticModel semanticModel,
         out string sectionPath,
         out ExpressionSyntax sectionExpression,
-        out bool sectionExpressionContainsFullPath)
+        out bool sectionExpressionContainsFullPath,
+        bool resolveStoredSectionOrigins = false)
     {
         sectionPath = null!;
         sectionExpression = null!;
@@ -4840,7 +5100,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     semanticModel,
                     out var parentSectionPath,
                     out _,
-                    out _))
+                    out _,
+                    resolveStoredSectionOrigins))
             {
                 sectionPath = parentSectionPath + ":" + currentSectionPath;
                 sectionExpression = argumentExpression;
@@ -4853,9 +5114,17 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             {
                 // See the matching comment in TryGetConfigurationSectionPath: the receiver is
                 // itself a stored/received IConfigurationSection, so its own path isn't a
-                // constant we can see here. Stay quiet rather than checking against the wrong
-                // namespace.
-                return false;
+                // constant we can see here. Stay quiet unless the caller opted into origin
+                // resolution and the stored section's own path is statically visible.
+                return resolveStoredSectionOrigins &&
+                       TryResolveStoredSectionChainedPath(
+                           conditionalReceiver,
+                           currentSectionPath,
+                           argumentExpression,
+                           semanticModel,
+                           out sectionPath,
+                           out sectionExpression,
+                           out sectionExpressionContainsFullPath);
             }
 
             if (!IsConfigurationType(receiverType))
@@ -4876,7 +5145,8 @@ public sealed class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 semanticModel,
                 out var innerParentSectionPath,
                 out _,
-                out _))
+                out _,
+                resolveStoredSectionOrigins))
         {
             sectionPath = innerParentSectionPath + ":" + currentSectionPath;
             sectionExpression = argumentExpression;
