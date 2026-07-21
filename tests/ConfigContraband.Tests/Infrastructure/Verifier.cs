@@ -58,6 +58,18 @@ internal static class Verifier
         await test.RunAsync();
     }
 
+    public static async Task VerifyAnalyzerAllowingCompilerErrorsAsync(
+        string source,
+        (string filename, string content) additionalFile,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateAnalyzerTest(source);
+        test.CompilerDiagnostics = CompilerDiagnostics.None;
+        test.TestState.AdditionalFiles.Add(additionalFile);
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
     public static async Task VerifyAnalyzerWithReferencesAsync(
         string source,
         (string filename, string content) additionalFile,

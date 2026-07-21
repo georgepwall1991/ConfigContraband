@@ -14,7 +14,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.21</Version>
+    <Version>0.7.22</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -25,7 +25,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Hardening release: fixed a potential AD0001 analyzer crash in BindConfiguration registration parsing, enabled the CI analyzer gate and triaged every build warning, memoized per-compilation options metadata, bounded appsettings JSON nesting depth, removed dead code, and completed the showcase to cover all nine rules. No diagnostic behavior changes.</PackageReleaseNotes>
+    <PackageReleaseNotes>Robustness release: fixed an infinite-loop analyzer hang in the CFG002 constructor-overwrite proof triggered by a self-cycling parameterless constructor (a zero-argument :this() initializer, CS0516 broken-compilation input), which now resolves as an unprovable constructor chain and reports conservatively instead of spinning. No diagnostic IDs, severities, messages, or code fixes changed.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
