@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 
 namespace ConfigContraband;
@@ -73,7 +74,7 @@ internal abstract class JsonNode
                     if (ch < ' ')
                     {
                         builder.Append("\\u");
-                        builder.Append(((int)ch).ToString("x4"));
+                        builder.Append(((int)ch).ToString("x4", CultureInfo.InvariantCulture));
                     }
                     else
                     {

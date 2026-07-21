@@ -78,7 +78,7 @@ internal sealed partial class OptionsTypeMetadata
             }
 
             foreach (var assignment in constructor.Body
-                         .DescendantNodes(ShouldDescendIntoConstructorInitializerNode)
+                         .DescendantNodes(ExecutionScope.ShouldDescend)
                          .OfType<AssignmentExpressionSyntax>())
             {
                 if (IsPotentialPolymorphicAssignmentToProperty(assignment, property, compilation))
@@ -268,7 +268,7 @@ internal sealed partial class OptionsTypeMetadata
             }
 
             foreach (var assignment in constructor.Body
-                         .DescendantNodes(ShouldDescendIntoConstructorInitializerNode)
+                         .DescendantNodes(ExecutionScope.ShouldDescend)
                          .OfType<AssignmentExpressionSyntax>())
             {
                 if (IsAssignmentToProperty(assignment, property, compilation))
@@ -291,7 +291,7 @@ internal sealed partial class OptionsTypeMetadata
             }
 
             foreach (var invocation in constructor.Body
-                         .DescendantNodes(ShouldDescendIntoConstructorInitializerNode)
+                         .DescendantNodes(ExecutionScope.ShouldDescend)
                          .OfType<InvocationExpressionSyntax>())
             {
                 AddPotentialPolymorphicDictionaryAddInvocationKey(
@@ -686,22 +686,6 @@ internal sealed partial class OptionsTypeMetadata
 
         var builder = ImmutableArray.CreateBuilder<string>(path.Length - 1);
         for (var i = 1; i < path.Length; i++)
-        {
-            builder.Add(path[i]);
-        }
-
-        return builder.ToImmutable();
-    }
-
-    private static ImmutableArray<string> RemoveLastPathSegment(ImmutableArray<string> path)
-    {
-        if (path.Length <= 1)
-        {
-            return ImmutableArray<string>.Empty;
-        }
-
-        var builder = ImmutableArray.CreateBuilder<string>(path.Length - 1);
-        for (var i = 0; i < path.Length - 1; i++)
         {
             builder.Add(path[i]);
         }

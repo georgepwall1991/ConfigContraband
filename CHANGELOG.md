@@ -2,8 +2,32 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
-## Unreleased
+## 0.7.21 - 2026-07-21
 
+- Fixed a potential `AD0001` analyzer crash: `BindConfiguration(...)` registration
+  parsing now handles error-tolerant operations defensively and resolves the
+  `configSectionPath` argument with a guarded named lookup instead of an unchecked
+  cast and `.First()`, so the analyzer stays quiet while typing broken code in the IDE.
+- Enabled the CI analyzer gate. The CI, publish, and CodeQL workflows now build with
+  `ContinuousIntegrationBuild=true`, so the .NET analyzers actually run in CI as
+  `Directory.Build.props` always claimed. Triaged every resulting warning: fixed
+  CA1305/CA1822/CA1826/CA1859/CA1861 in `src`, enabled `GenerateDocumentationFile`
+  (activating IDE0005 on build) and corrected the latent XML-doc issues (CS1734/CS0419)
+  it surfaced, and suppressed CA1707/IDE0005 for idiomatic underscore test naming.
+  CI-mode builds are now genuinely zero-warning.
+- Performance: memoized `OptionsTypeMetadata` per compilation through a
+  `ConditionalWeakTable`, so one registration requesting the same options graph across
+  the validation, nested-validation, and unknown-key passes builds it once; the cache is
+  collected with its compilation and never leaks. Also collapsed CFG009's provenance
+  scan from seven full block traversals into a single document-order walk.
+- Robustness: bounded the appsettings JSON parser nesting depth (64, matching
+  `System.Text.Json`) so a pathologically nested additional file is treated as malformed
+  instead of causing an uncatchable `StackOverflowException` in the compiler host.
+- Cleanup: removed dead code (an empty partial file, three unused helpers, a vestigial
+  local and duplicated receiver-chain walk) and unified four byte-identical traversal
+  predicates into one shared `ExecutionScope.ShouldDescend` guard.
+- Completed the showcase to cover all nine rules: added the missing `CFG002`, `CFG008`,
+  and `CFG009` examples and regenerated the bundled `appsettings.schema.json`.
 - Internal maintainability refactor with no diagnostic behavior change. The
   5740-line `ConfigContrabandAnalyzer` and 3666-line `OptionsTypeMetadata`
   god-objects were split into concern-focused partial files (direct reads,

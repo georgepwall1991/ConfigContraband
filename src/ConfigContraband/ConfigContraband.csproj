@@ -8,12 +8,13 @@
     <IsRoslynComponent>true</IsRoslynComponent>
     <RootNamespace>ConfigContraband</RootNamespace>
     <AssemblyName>ConfigContraband</AssemblyName>
-    <NoWarn>$(NoWarn);RS1038;RS1037</NoWarn>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);RS1038;RS1037;CS1591</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.20</Version>
+    <Version>0.7.21</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -24,7 +25,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Pinned CFG008 SingleConverter and DoubleConverter thousands-separator parity with runtime-backed regression coverage.</PackageReleaseNotes>
+    <PackageReleaseNotes>Hardening release: fixed a potential AD0001 analyzer crash in BindConfiguration registration parsing, enabled the CI analyzer gate and triaged every build warning, memoized per-compilation options metadata, bounded appsettings JSON nesting depth, removed dead code, and completed the showcase to cover all nine rules. No diagnostic behavior changes.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

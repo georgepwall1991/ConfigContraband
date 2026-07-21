@@ -76,18 +76,12 @@ internal sealed partial class OptionsTypeMetadata
 
     private static bool ContainsConstructorExit(SyntaxNode node)
     {
-        return node.DescendantNodesAndSelf(ShouldDescendIntoConstructorInitializerNode).Any(static descendant =>
+        return node.DescendantNodesAndSelf(ExecutionScope.ShouldDescend).Any(static descendant =>
             descendant.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ReturnStatement) ||
             descendant.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.GotoStatement) ||
             descendant.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.GotoCaseStatement) ||
             descendant.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.GotoDefaultStatement) ||
             descendant.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ThrowStatement));
-    }
-
-    private static bool ShouldDescendIntoConstructorInitializerNode(SyntaxNode node)
-    {
-        return node is not AnonymousFunctionExpressionSyntax and
-               not LocalFunctionStatementSyntax;
     }
 
     private static IEnumerable<ConstructorDeclarationSyntax> GetRuntimeConstructorDeclarations(

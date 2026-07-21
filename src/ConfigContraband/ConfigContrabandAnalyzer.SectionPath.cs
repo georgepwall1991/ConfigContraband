@@ -336,7 +336,7 @@ public sealed partial class ConfigContrabandAnalyzer
 
     /// <summary>
     /// Resolves a conditional-access `WhenNotNull` expression (the part after `?.`) the same way
-    /// <see cref="TryGetConfigurationSectionPath"/> resolves a normal invocation chain, without
+    /// <c>TryGetConfigurationSectionPath</c> resolves a normal invocation chain, without
     /// constructing any new syntax nodes: a `?.`-bound <see cref="MemberBindingExpressionSyntax"/>
     /// implicitly receives <paramref name="conditionalReceiver"/> (the expression before `?.`),
     /// so it is resolved against that receiver directly instead of being treated as a detached

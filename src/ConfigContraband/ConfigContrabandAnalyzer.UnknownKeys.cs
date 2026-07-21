@@ -207,7 +207,7 @@ public sealed partial class ConfigContrabandAnalyzer
                 if (metadata.TryGetSettableConstructorBoundAlias(property.Key, section, out var constructorAliasProperty))
                 {
                     if (reportStrictUnknownKeys &&
-                        metadata.IsConfigurationAlias(constructorAliasProperty, property.Key))
+                        OptionsTypeMetadata.IsConfigurationAlias(constructorAliasProperty, property.Key))
                     {
                         ReportUnknownConfigurationKey(
                             reportDiagnostic,
@@ -262,7 +262,7 @@ public sealed partial class ConfigContrabandAnalyzer
             }
 
             if (reportStrictUnknownKeys &&
-                metadata.IsConfigurationAlias(bindableProperty, property.Key))
+                OptionsTypeMetadata.IsConfigurationAlias(bindableProperty, property.Key))
             {
                 ReportUnknownConfigurationKey(
                     reportDiagnostic,
@@ -775,19 +775,6 @@ public sealed partial class ConfigContrabandAnalyzer
         var namespaceName = type.ContainingNamespace.ToDisplayString();
         return !string.Equals(namespaceName, "System", StringComparison.Ordinal) &&
                !namespaceName.StartsWith("System.", StringComparison.Ordinal);
-    }
-
-    private static bool ContainsName(ImmutableArray<string> names, string key)
-    {
-        foreach (var name in names)
-        {
-            if (string.Equals(name, key, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static void ReportUnknownConfigurationKey(

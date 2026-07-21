@@ -351,9 +351,11 @@ internal sealed class ConfigurationSnapshot
         }
     }
 
+    private static readonly char[] PathSeparator = { ':' };
+
     private static string[] SplitPath(string sectionPath)
     {
-        return sectionPath.Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
+        return sectionPath.Split(PathSeparator, StringSplitOptions.RemoveEmptyEntries);
     }
 
     private static bool IsAppSettingsFile(string path)
@@ -507,6 +509,11 @@ internal static class JsonConfigurationParser
 
     private sealed class Parser
     {
+        // Guards against an uncatchable StackOverflowException on a pathologically
+        // nested appsettings file: appsettings arrives as arbitrary AdditionalText, so
+        // the parser must survive any input. Matches System.Text.Json's default ceiling.
+        private const int MaxDepth = 64;
+
         private readonly string _path;
         private readonly SourceText _text;
         private readonly bool _strictUnknownConfigurationKeySuppressedByAnalyzerConfig;
@@ -526,10 +533,10 @@ internal static class JsonConfigurationParser
         public ConfigurationNode? ParseRoot()
         {
             SkipWhitespace();
-            return Current == '{' ? ParseObject(parentPath: string.Empty) : null;
+            return Current == '{' ? ParseObject(parentPath: string.Empty, depth: 0) : null;
         }
 
-        private ConfigurationNode ParseObject(string parentPath)
+        private ConfigurationNode ParseObject(string parentPath, int depth)
         {
             var properties = ImmutableArray.CreateBuilder<ConfigurationProperty>();
             Read('{');
@@ -556,7 +563,7 @@ internal static class JsonConfigurationParser
                 }
 
                 SkipWhitespace();
-                var parsed = ParseValue(fullPath);
+                var parsed = ParseValue(fullPath, depth);
                 properties.Add(new ConfigurationProperty(
                     key,
                     fullPath,
@@ -602,17 +609,29 @@ internal static class JsonConfigurationParser
             public TextSpan ValueSpan { get; }
         }
 
-        private ParsedValue ParseValue(string path)
+        private ParsedValue ParseValue(string path, int depth)
         {
             SkipWhitespace();
             if (Current == '{')
             {
-                return new ParsedValue(ParseObject(path), ScalarKind.None, raw: null, default);
+                if (depth >= MaxDepth)
+                {
+                    SkipMalformedValue();
+                    return new ParsedValue(ConfigurationNode.Empty, ScalarKind.None, raw: null, default);
+                }
+
+                return new ParsedValue(ParseObject(path, depth + 1), ScalarKind.None, raw: null, default);
             }
 
             if (Current == '[')
             {
-                return new ParsedValue(ParseArray(path), ScalarKind.None, raw: null, default);
+                if (depth >= MaxDepth)
+                {
+                    SkipMalformedValue();
+                    return new ParsedValue(ConfigurationNode.Empty, ScalarKind.None, raw: null, default);
+                }
+
+                return new ParsedValue(ParseArray(path, depth + 1), ScalarKind.None, raw: null, default);
             }
 
             if (Current == '"')
@@ -658,7 +677,7 @@ internal static class JsonConfigurationParser
             return ScalarKind.Number;
         }
 
-        private ConfigurationNode ParseArray(string path)
+        private ConfigurationNode ParseArray(string path, int depth)
         {
             var properties = ImmutableArray.CreateBuilder<ConfigurationProperty>();
             var index = 0;
@@ -670,7 +689,7 @@ internal static class JsonConfigurationParser
                 var itemStart = _position;
                 var itemKey = index.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 var itemPath = path + ":" + itemKey;
-                var parsed = ParseValue(itemPath);
+                var parsed = ParseValue(itemPath, depth);
                 properties.Add(new ConfigurationProperty(
                     itemKey,
                     itemPath,

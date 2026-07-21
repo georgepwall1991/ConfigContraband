@@ -8,7 +8,8 @@
     <RootNamespace>ConfigContraband</RootNamespace>
     <AssemblyName>ConfigContraband.Core</AssemblyName>
     <IsPackable>false</IsPackable>
-    <NoWarn>$(NoWarn);RS1038;RS1037</NoWarn>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);RS1038;RS1037;CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
