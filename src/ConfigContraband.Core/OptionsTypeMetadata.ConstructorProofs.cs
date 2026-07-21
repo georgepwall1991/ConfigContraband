@@ -90,7 +90,16 @@ internal sealed partial class OptionsTypeMetadata
 
                 if (declaration.Initializer?.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ThisConstructorInitializer) == true)
                 {
-                    constructor = SelectParameterlessConstructor(constructor.ContainingType);
+                    var chainedConstructor = SelectParameterlessConstructor(constructor.ContainingType);
+                    if (SymbolEqualityComparer.Default.Equals(chainedConstructor, constructor))
+                    {
+                        // A parameterless constructor's `: this()` can only target itself (CS0516,
+                        // a self-cycle); treat it as unprovable instead of re-selecting the same
+                        // constructor and looping forever.
+                        return false;
+                    }
+
+                    constructor = chainedConstructor;
                     continue;
                 }
             }

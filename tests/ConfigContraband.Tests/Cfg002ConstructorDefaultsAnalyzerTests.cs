@@ -679,4 +679,125 @@ public sealed partial class ConfigContrabandAnalyzerTests
             """),
             expected);
     }
+
+    [Fact]
+    public async Task Cfg002_reports_required_with_satisfying_initializer_when_parameterless_constructor_chains_to_itself()
+    {
+        // A parameterless constructor that calls itself (`: this()`, CS0516) is broken code the
+        // analyzer must survive without hanging. The self-cycling constructor chain is unprovable,
+        // so the satisfying initializer is treated conservatively and the missing required key is
+        // reported.
+        var source = OptionsSource(
+            registration: """
+                services.AddOptions<RequiredDefaultOptions>()
+                    .BindConfiguration({|#0:"Required"|})
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+                """,
+            optionsTypes: """
+                public sealed class RequiredDefaultOptions
+                {
+                    public RequiredDefaultOptions() : this()
+                    {
+                    }
+
+                    [Required]
+                    public string ApiKey { get; set; } = "sk_default";
+                }
+                """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithLocation(0)
+            .WithArguments("ApiKey", "Required");
+
+        await Verifier.VerifyAnalyzerAllowingCompilerErrorsAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Required": {
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg002_stays_quiet_for_required_when_parameterized_constructor_chains_to_parameterless()
+    {
+        // A compiling zero-argument `: this()` delegation (a parameterized constructor chaining to
+        // a parameterless one) must keep working: the runtime-selected parameterless constructor
+        // has a clean empty body, so the satisfying initializer survives and no diagnostic fires.
+        var source = OptionsSource(
+            registration: """
+                services.AddOptions<RequiredDefaultOptions>()
+                    .BindConfiguration("Required")
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+                """,
+            optionsTypes: """
+                public sealed class RequiredDefaultOptions
+                {
+                    public RequiredDefaultOptions()
+                    {
+                    }
+
+                    public RequiredDefaultOptions(int port) : this()
+                    {
+                    }
+
+                    [Required]
+                    public string ApiKey { get; set; } = "sk_default";
+                }
+                """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Required": {
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg002_reports_required_when_parameterized_constructor_chains_to_this_without_parameterless_target()
+    {
+        // A parameterized constructor whose `: this()` has no parameterless target (CS1729) is
+        // broken code the analyzer must survive. The chain resolves to a null parameterless
+        // constructor and falls through to the base walk, which returns unprovable, so the
+        // satisfying initializer is conservatively rejected and the missing required key reported.
+        var source = OptionsSource(
+            registration: """
+                services.AddOptions<RequiredDefaultOptions>()
+                    .BindConfiguration({|#0:"Required"|})
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+                """,
+            optionsTypes: """
+                public sealed class RequiredDefaultOptions
+                {
+                    public RequiredDefaultOptions(int port) : this()
+                    {
+                    }
+
+                    [Required]
+                    public string ApiKey { get; set; } = "sk_default";
+                }
+                """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingRequiredConfigurationKey)
+            .WithLocation(0)
+            .WithArguments("ApiKey", "Required");
+
+        await Verifier.VerifyAnalyzerAllowingCompilerErrorsAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Required": {
+              }
+            }
+            """),
+            expected);
+    }
 }

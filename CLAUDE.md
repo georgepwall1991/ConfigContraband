@@ -1,6 +1,6 @@
 # ConfigContraband (aka ConfiContraband / LinqContraband)
 
-Roslyn analyzer for .NET configuration/Options validation. Rule IDs are `CFG0xx` (CFG001–CFG007) —
+Roslyn analyzer for .NET configuration/Options validation. Rule IDs are `CFG0xx` (CFG001–CFG009) —
 not `DI0xx`; that prefix belongs to a different project/skill template.
 
 - Source of truth for current rule health, precision/recall scores, and known gaps:

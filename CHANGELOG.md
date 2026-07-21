@@ -2,6 +2,18 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.22 - 2026-07-21
+
+- Fixed an infinite-loop analyzer hang in the `CFG002` constructor-overwrite proof. A public
+  parameterless constructor whose initializer is a zero-argument `: this()` (a self-cycle that is a
+  `CS0516` compile error, but well-formed broken-compilation input the analyzer must survive) made
+  the runtime-constructor walk re-select the same constructor forever, hanging the analyzer for any
+  `OptionsBuilder<T>` registration of such a type. The self-targeting zero-argument `: this()` is now
+  treated as an unprovable constructor chain — the satisfying default is conservatively rejected and
+  the missing required key reported — instead of spinning. No valid compiling program is affected
+  because self-delegating constructors are illegal. No diagnostic IDs, severities, messages, or code
+  fixes changed.
+
 ## 0.7.21 - 2026-07-21
 
 - Fixed a potential `AD0001` analyzer crash: `BindConfiguration(...)` registration

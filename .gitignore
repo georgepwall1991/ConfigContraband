@@ -10,3 +10,8 @@ TestResults/
 .complexity-log.md
 .codex/
 docs/superpowers/plans/
+.mcp.json
+.grok/
+.pi/analyzer-health/
+.claude/settings.local.json
+.superpowers/

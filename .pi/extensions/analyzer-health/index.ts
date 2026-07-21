@@ -75,7 +75,7 @@ interface AuditReport {
 interface HealthWorkItem {
 	rank: number;
 	title: string;
-	source: "current-shortlist" | "health-baseline";
+	source: "current-shortlist";
 	rules: string[];
 }
 
@@ -176,6 +176,14 @@ export default function analyzerHealthExtension(pi: ExtensionAPI) {
 
 			const options = parseIterationArgs(args);
 			const workItem = await selectHighestPriorityWork(ctx.cwd);
+			if (!workItem) {
+				ctx.ui.notify(
+					"Monitor-only: the Current Shortlist has no numbered work item, so there is nothing to iterate. Add a reproducible runtime or documentation mismatch to the shortlist first.",
+					"warning",
+				);
+				return;
+			}
+
 			const branchName = createBranchName(workItem);
 			const prompt = buildIterationPrompt(workItem, branchName, options);
 
@@ -205,7 +213,7 @@ export default function analyzerHealthExtension(pi: ExtensionAPI) {
 	});
 }
 
-async function selectHighestPriorityWork(cwd: string): Promise<HealthWorkItem> {
+async function selectHighestPriorityWork(cwd: string): Promise<HealthWorkItem | undefined> {
 	const text = await readFile(join(cwd, "analyzer-health.md"), "utf8");
 	const shortlist = extractSection(text, "Current Shortlist");
 	const first = shortlist.split(/\r?\n/).map((line) => /^\s*(\d+)\.\s+(.+)$/.exec(line)).find(Boolean);
@@ -218,16 +226,10 @@ async function selectHighestPriorityWork(cwd: string): Promise<HealthWorkItem> {
 		};
 	}
 
-	const health = await parseHealth(cwd, "analyzer-health.md");
-	const priorityOrder: Record<string, number> = { P1: 1, P2: 2, P3: 3 };
-	const sorted = [...health.rules].sort((a, b) => {
-		const priority = (priorityOrder[a.priority] ?? 99) - (priorityOrder[b.priority] ?? 99);
-		if (priority !== 0) return priority;
-		return a.score - b.score;
-	});
-	const top = sorted[0];
-	if (!top) throw new Error("No Current Shortlist item or Health Baseline rows found in analyzer-health.md.");
-	return { rank: 1, title: `${top.rule} (${top.priority}, score ${top.score.toFixed(2)})`, source: "health-baseline", rules: [top.rule.split(" ")[0]] };
+	// Monitor-only: when the Current Shortlist has no numbered work item there is no actionable
+	// hardening target. Do not fabricate one from the lowest-scored Health Baseline rule — future
+	// work must be driven by a reproducible runtime or documentation mismatch.
+	return undefined;
 }
 
 async function prepareIterationBranch(pi: ExtensionAPI, cwd: string, baseBranch: string, branchName: string): Promise<string | undefined> {
@@ -253,18 +255,19 @@ async function prepareIterationBranch(pi: ExtensionAPI, cwd: string, baseBranch:
 }
 
 function parseIterationArgs(args: string): IterationArgs {
-	const options: IterationArgs = {
-		dryRun: false,
-		baseBranch: "main",
-		verification: "full",
-		autoMerge: false,
-		tagRelease: true,
-		pushPr: true,
-	};
-	for (const part of args.trim().split(/\s+/).filter(Boolean)) {
-		if (part === "--dry-run") options.dryRun = true;
-		else if (part === "--auto-merge") options.autoMerge = true;
-		else if (part === "--no-release") options.tagRelease = false;
+		const options: IterationArgs = {
+			dryRun: false,
+			baseBranch: "main",
+			verification: "full",
+			autoMerge: false,
+			tagRelease: false,
+			pushPr: true,
+		};
+		for (const part of args.trim().split(/\s+/).filter(Boolean)) {
+			if (part === "--dry-run") options.dryRun = true;
+			else if (part === "--auto-merge") options.autoMerge = true;
+			else if (part === "--release") options.tagRelease = true;
+			else if (part === "--no-release") options.tagRelease = false;
 		else if (part === "--no-pr") options.pushPr = false;
 		else if (part.startsWith("--base=")) options.baseBranch = part.slice("--base=".length) || options.baseBranch;
 		else if (part.startsWith("--verification=")) {
@@ -278,10 +281,10 @@ function parseIterationArgs(args: string): IterationArgs {
 function buildIterationPrompt(workItem: HealthWorkItem, branchName: string, options: IterationArgs): string {
 	const releaseStep = options.tagRelease
 		? "After merge, tag the GitHub release version prepared in the PR. Do not tag if verification, release metadata, or PR checks fail."
-		: "Do not create a release tag for this run because --no-release was supplied.";
+		: "Do not create a release tag for this run because release tagging was not requested (pass --release to opt in).";
 	const releasePrepPolicy = options.tagRelease
 		? "Before opening the PR, prepare release metadata for the next semantic version inferred from project metadata/CHANGELOG: update package versions, CHANGELOG.md, package release notes, and analyzer-health.md package/version notes when those files exist. Then rerun full verification."
-		: "Do not change package versions, changelog, package release notes, or release-specific analyzer-health metadata because --no-release was supplied.";
+		: "Do not change package versions, changelog, package release notes, or release-specific analyzer-health metadata because release tagging was not requested (pass --release to opt in).";
 	const mergePolicy = options.autoMerge
 		? "If review and checks pass, merge the PR using gh without asking another confirmation."
 		: "Before merging the PR or creating any release tag, pause and ask the user for explicit confirmation with the PR URL, checks status, release version, and verification evidence.";
