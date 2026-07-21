@@ -2,6 +2,18 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## Unreleased
+
+- Internal maintainability refactor with no diagnostic behavior change. The
+  5740-line `ConfigContrabandAnalyzer` and 3666-line `OptionsTypeMetadata`
+  god-objects were split into concern-focused partial files (direct reads,
+  receiver semantics, unknown-key walk, registration extraction, binder-options
+  escape analysis, section-path resolution, suggestions; and required-default,
+  polymorphic-dictionary, constructor-default, and type-shape metadata), and the
+  17k-line `ConfigContrabandAnalyzerTests` class was split into per-rule partial
+  files. No diagnostic IDs, severities, messages, code fixes, or public
+  signatures changed; the full 930-test suite and formatter gate remain green.
+
 ## 0.7.20 - 2026-07-16
 
 - Added runtime-backed CFG008 regression coverage for floating-point text containing thousands separators. The shared scalar-conversion matrix and end-to-end analyzer tests now pin that both `SingleConverter` and `DoubleConverter` reject `"1,000"`, matching the existing `NumberStyles.Float` implementation and protecting the boundary from a permissive parsing regression. No diagnostic behavior changed.
