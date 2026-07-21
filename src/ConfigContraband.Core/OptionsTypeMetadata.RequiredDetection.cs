@@ -153,39 +153,10 @@ internal sealed partial class OptionsTypeMetadata
         return false;
     }
 
-    private static IEnumerable<IPropertySymbol> GetProperties(INamedTypeSymbol type)
-    {
-        for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
-        {
-            foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
-            {
-                yield return property;
-            }
-        }
-    }
-
     private static bool HasAttribute(ISymbol symbol, string metadataName)
     {
         return symbol.GetAttributes().Any(attribute =>
             string.Equals(attribute.AttributeClass?.ToDisplayString(), metadataName, StringComparison.Ordinal));
     }
 
-    private static bool InheritsFrom(INamedTypeSymbol? type, string metadataName)
-    {
-        for (var current = type; current is not null; current = current.BaseType)
-        {
-            if (string.Equals(current.ToDisplayString(), metadataName, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool ImplementsInterface(INamedTypeSymbol type, string metadataName)
-    {
-        return type.AllInterfaces.Any(iface =>
-            string.Equals(iface.ToDisplayString(), metadataName, StringComparison.Ordinal));
-    }
 }

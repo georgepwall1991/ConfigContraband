@@ -84,38 +84,6 @@ internal sealed partial class OptionsTypeMetadata
             descendant.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ThrowStatement));
     }
 
-    private static bool HasPotentialPolymorphicConstructorAssignment(
-        IPropertySymbol property,
-        INamedTypeSymbol rootType,
-        Compilation? compilation)
-    {
-        foreach (var constructor in GetRuntimeConstructorDeclarations(rootType, property, compilation))
-        {
-            if (constructor.ExpressionBody?.Expression is AssignmentExpressionSyntax expressionBodyAssignment &&
-                IsPotentialPolymorphicAssignmentToProperty(expressionBodyAssignment, property, compilation))
-            {
-                return true;
-            }
-
-            if (constructor.Body is null)
-            {
-                continue;
-            }
-
-            foreach (var assignment in constructor.Body
-                         .DescendantNodes(ShouldDescendIntoConstructorInitializerNode)
-                         .OfType<AssignmentExpressionSyntax>())
-            {
-                if (IsPotentialPolymorphicAssignmentToProperty(assignment, property, compilation))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
     private static bool ShouldDescendIntoConstructorInitializerNode(SyntaxNode node)
     {
         return node is not AnonymousFunctionExpressionSyntax and
@@ -216,15 +184,6 @@ internal sealed partial class OptionsTypeMetadata
         return baseType.InstanceConstructors.FirstOrDefault(static candidate => candidate.Parameters.Length == 0);
     }
 
-    private static bool IsPotentialPolymorphicAssignmentToProperty(
-        AssignmentExpressionSyntax assignment,
-        IPropertySymbol property,
-        Compilation? compilation)
-    {
-        return IsAssignmentToProperty(assignment, property, compilation) &&
-               !IsInitializerDefinitelyDeclaredType(assignment.Right, property.Type, compilation);
-    }
-
     private static bool IsAssignmentToProperty(
         AssignmentExpressionSyntax assignment,
         IPropertySymbol property,
@@ -263,127 +222,6 @@ internal sealed partial class OptionsTypeMetadata
         return SymbolEqualityComparer.Default.Equals(
             semanticModel.GetSymbolInfo(expression).Symbol,
             property);
-    }
-
-    private static bool IsInitializerDefinitelyDeclaredType(
-        ExpressionSyntax initializer,
-        ITypeSymbol declaredType,
-        Compilation? compilation)
-    {
-        initializer = StripInitializerWrappers(initializer);
-        if (IsInitializerDefinitelyNullOrDefault(initializer))
-        {
-            return true;
-        }
-
-        return initializer switch
-        {
-            ImplicitObjectCreationExpressionSyntax => true,
-            ObjectCreationExpressionSyntax objectCreation => IsTypeSyntaxDeclaredType(objectCreation.Type, declaredType, compilation),
-            _ => false
-        };
-    }
-
-    private static bool IsInitializerDefinitelyNullOrDefault(ExpressionSyntax initializer)
-    {
-        initializer = StripInitializerWrappers(initializer);
-        if (initializer is CastExpressionSyntax cast)
-        {
-            return IsInitializerDefinitelyNullOrDefault(cast.Expression);
-        }
-
-        return initializer.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.NullLiteralExpression) ||
-               initializer.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.DefaultLiteralExpression) ||
-               initializer is DefaultExpressionSyntax;
-    }
-
-    private static ExpressionSyntax StripInitializerWrappers(ExpressionSyntax expression)
-    {
-        while (true)
-        {
-            expression = StripNullableSuppressions(expression);
-            if (expression is ParenthesizedExpressionSyntax parenthesized)
-            {
-                expression = parenthesized.Expression;
-                continue;
-            }
-
-            return expression;
-        }
-    }
-
-    private static ExpressionSyntax StripNullableSuppressions(ExpressionSyntax expression)
-    {
-        while (expression is PostfixUnaryExpressionSyntax postfix &&
-               postfix.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.SuppressNullableWarningExpression))
-        {
-            expression = postfix.Operand;
-        }
-
-        return expression;
-    }
-
-    private static bool IsTypeSyntaxDeclaredType(
-        TypeSyntax typeSyntax,
-        ITypeSymbol declaredType,
-        Compilation? compilation)
-    {
-        if (compilation is not null)
-        {
-            var semanticModel = compilation.GetSemanticModel(typeSyntax.SyntaxTree);
-            var type = semanticModel.GetTypeInfo(typeSyntax).Type;
-            if (type is null && typeSyntax is NameSyntax nameSyntax)
-            {
-                type = semanticModel.GetAliasInfo(nameSyntax)?.Target as ITypeSymbol;
-            }
-
-            if (type is not null)
-            {
-                return IsSameType(type, declaredType);
-            }
-
-            return IsQualifiedTypeSyntaxDeclaredType(typeSyntax, declaredType);
-        }
-
-        return typeSyntax switch
-        {
-            IdentifierNameSyntax identifier => string.Equals(identifier.Identifier.ValueText, declaredType.Name, StringComparison.Ordinal),
-            GenericNameSyntax generic => string.Equals(generic.Identifier.ValueText, declaredType.Name, StringComparison.Ordinal),
-            QualifiedNameSyntax or AliasQualifiedNameSyntax => IsQualifiedTypeSyntaxDeclaredType(typeSyntax, declaredType),
-            NullableTypeSyntax nullable => IsTypeSyntaxDeclaredType(nullable.ElementType, declaredType, compilation),
-            _ => false
-        };
-    }
-
-    private static bool IsQualifiedTypeSyntaxDeclaredType(TypeSyntax typeSyntax, ITypeSymbol declaredType)
-    {
-        var syntaxName = NormalizeTypeSyntaxName(typeSyntax.ToString());
-        var displayName = NormalizeTypeSyntaxName(declaredType.ToDisplayString());
-        var fullyQualifiedName = NormalizeTypeSyntaxName(declaredType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
-
-        return string.Equals(syntaxName, displayName, StringComparison.Ordinal) ||
-               string.Equals(syntaxName, fullyQualifiedName, StringComparison.Ordinal);
-    }
-
-    private static bool IsSameType(ITypeSymbol type, ITypeSymbol declaredType)
-    {
-        if (SymbolEqualityComparer.Default.Equals(type, declaredType))
-        {
-            return true;
-        }
-
-        return string.Equals(
-            NormalizeTypeSyntaxName(type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)),
-            NormalizeTypeSyntaxName(declaredType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)),
-            StringComparison.Ordinal);
-    }
-
-    private static string NormalizeTypeSyntaxName(string name)
-    {
-        const string globalPrefix = "global::";
-        return name.StartsWith(globalPrefix, StringComparison.Ordinal)
-            ? name.Substring(globalPrefix.Length)
-            : name;
     }
 
 }

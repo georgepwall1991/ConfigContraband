@@ -59,6 +59,47 @@ internal sealed partial class OptionsTypeMetadata
         return HasPotentialPolymorphicConstructorAssignment(property, rootType, compilation);
     }
 
+    private static bool HasPotentialPolymorphicConstructorAssignment(
+        IPropertySymbol property,
+        INamedTypeSymbol rootType,
+        Compilation? compilation)
+    {
+        foreach (var constructor in GetRuntimeConstructorDeclarations(rootType, property, compilation))
+        {
+            if (constructor.ExpressionBody?.Expression is AssignmentExpressionSyntax expressionBodyAssignment &&
+                IsPotentialPolymorphicAssignmentToProperty(expressionBodyAssignment, property, compilation))
+            {
+                return true;
+            }
+
+            if (constructor.Body is null)
+            {
+                continue;
+            }
+
+            foreach (var assignment in constructor.Body
+                         .DescendantNodes(ShouldDescendIntoConstructorInitializerNode)
+                         .OfType<AssignmentExpressionSyntax>())
+            {
+                if (IsPotentialPolymorphicAssignmentToProperty(assignment, property, compilation))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsPotentialPolymorphicAssignmentToProperty(
+        AssignmentExpressionSyntax assignment,
+        IPropertySymbol property,
+        Compilation? compilation)
+    {
+        return IsAssignmentToProperty(assignment, property, compilation) &&
+               !IsInitializerDefinitelyDeclaredType(assignment.Right, property.Type, compilation);
+    }
+
     private static ImmutableHashSet<string> GetPotentialPolymorphicDictionaryValueInitializerKeys(
         IPropertySymbol property,
         INamedTypeSymbol rootType,
