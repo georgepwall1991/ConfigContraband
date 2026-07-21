@@ -8,3 +8,5 @@ TestResults/
 *.suo
 .DS_Store
 .complexity-log.md
+.codex/
+docs/superpowers/plans/
