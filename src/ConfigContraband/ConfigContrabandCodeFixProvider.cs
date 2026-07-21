@@ -26,6 +26,8 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
+    private static readonly string[] ValidateOnStartInvocation = { "ValidateOnStart" };
+
     public override Task RegisterCodeFixesAsync(CodeFixContext context)
     {
         foreach (var diagnostic in context.Diagnostics)
@@ -41,7 +43,7 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
                     context.RegisterCodeFix(
                         CodeAction.Create(
                             "Add ValidateOnStart()",
-                            cancellationToken => AppendInvocationsAsync(context.Document, diagnostic.Location.SourceSpan, new[] { "ValidateOnStart" }, cancellationToken),
+                            cancellationToken => AppendInvocationsAsync(context.Document, diagnostic.Location.SourceSpan, ValidateOnStartInvocation, cancellationToken),
                             equivalenceKey: "AddValidateOnStart"),
                         diagnostic);
                     break;
@@ -269,7 +271,9 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         string attributeName,
         CancellationToken cancellationToken)
     {
-        var location = diagnostic.AdditionalLocations.FirstOrDefault() ?? diagnostic.Location;
+        var location = diagnostic.AdditionalLocations.Count > 0
+            ? diagnostic.AdditionalLocations[0]
+            : diagnostic.Location;
         var targetDocument = location.SourceTree is null
             ? document
             : document.Project.Solution.GetDocument(location.SourceTree) ?? document;

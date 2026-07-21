@@ -8,6 +8,13 @@ indent_style = space
 indent_size = 4
 dotnet_diagnostic.IDE0005.severity = warning
 
+# Test methods are named with underscores by convention (method_scenario_expected).
+# IDE0005 (unused usings) is kept out of the build for tests so it does not require
+# GenerateDocumentationFile there; the IDE still tidies usings interactively.
+[tests/**/*.cs]
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.IDE0005.severity = none
+
 [*.{csproj,props,targets,slnx,yml,json,md}]
 charset = utf-8
 end_of_line = lf

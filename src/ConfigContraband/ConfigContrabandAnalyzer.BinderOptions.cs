@@ -435,7 +435,7 @@ public sealed partial class ConfigContrabandAnalyzer
         string propertyName)
     {
         foreach (var assignment in node
-                     .DescendantNodes(ShouldDescendIntoBinderOptionsNode)
+                     .DescendantNodes(ExecutionScope.ShouldDescend)
                      .OfType<AssignmentExpressionSyntax>())
         {
             if (IsBinderOptionsBooleanAssignmentTarget(
@@ -510,7 +510,7 @@ public sealed partial class ConfigContrabandAnalyzer
         bool parameterStillTargetsRuntimeOptions)
     {
         foreach (var localDeclaration in node
-                     .DescendantNodes(ShouldDescendIntoBinderOptionsNode)
+                     .DescendantNodes(ExecutionScope.ShouldDescend)
                      .OfType<LocalDeclarationStatementSyntax>())
         {
             foreach (var variable in localDeclaration.Declaration.Variables)
@@ -629,7 +629,7 @@ public sealed partial class ConfigContrabandAnalyzer
         IParameterSymbol binderOptionsParameter)
     {
         foreach (var assignment in node
-                     .DescendantNodes(ShouldDescendIntoBinderOptionsNode)
+                     .DescendantNodes(ExecutionScope.ShouldDescend)
                      .OfType<AssignmentExpressionSyntax>())
         {
             if (AssignmentTargetsBinderOptionsParameter(assignment.Left, semanticModel, binderOptionsParameter))
@@ -653,7 +653,7 @@ public sealed partial class ConfigContrabandAnalyzer
 
     private static bool ContainsNonLinearControlFlow(SyntaxNode node)
     {
-        foreach (var descendant in node.DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode))
+        foreach (var descendant in node.DescendantNodesAndSelf(ExecutionScope.ShouldDescend))
         {
             if (descendant.IsKind(SyntaxKind.ReturnStatement) ||
                 descendant.IsKind(SyntaxKind.GotoStatement) ||
@@ -669,12 +669,6 @@ public sealed partial class ConfigContrabandAnalyzer
         }
 
         return false;
-    }
-
-    private static bool ShouldDescendIntoBinderOptionsNode(SyntaxNode node)
-    {
-        return node is not AnonymousFunctionExpressionSyntax and
-               not LocalFunctionStatementSyntax;
     }
 
     private static bool IsBinderOptionsBooleanAssignmentTarget(

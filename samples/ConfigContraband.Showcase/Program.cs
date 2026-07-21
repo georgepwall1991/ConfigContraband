@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 var services = new ServiceCollection();
@@ -6,6 +7,12 @@ var services = new ServiceCollection();
 // CFG001: "Strpie" is a typo. appsettings.json contains "Stripe".
 services.AddOptions<MissingSectionOptions>()
     .BindConfiguration("Strpie");
+
+// CFG002: the "RequiredKey" section exists but is missing the [Required] ApiKey key.
+services.AddOptions<RequiredKeyOptions>()
+    .BindConfiguration("RequiredKey")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 // CFG003: custom validation is registered, but startup validation is missing.
 services.AddOptions<StartupValidationOptions>()
@@ -34,10 +41,29 @@ services.AddOptions<StrictUnknownKeyOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+// CFG008: "eighty" cannot be converted to the int Port property; the binder throws at bind time.
+services.AddOptions<ConversionOptions>()
+    .BindConfiguration("Conversion");
+
 _ = services;
+
+// CFG009: a direct read of a section path that is not in appsettings.json throws at runtime.
+public sealed class DirectReader
+{
+    public void Read(IConfiguration configuration)
+    {
+        _ = configuration.GetRequiredSection("Strpie");
+    }
+}
 
 public sealed class MissingSectionOptions
 {
+    public string ApiKey { get; set; } = "";
+}
+
+public sealed class RequiredKeyOptions
+{
+    [Required]
     public string ApiKey { get; set; } = "";
 }
 
@@ -77,4 +103,9 @@ public sealed class StrictUnknownKeyOptions
     public string ApiKey { get; set; } = "";
 
     public string WebhookSecret { get; set; } = "";
+}
+
+public sealed class ConversionOptions
+{
+    public int Port { get; set; }
 }

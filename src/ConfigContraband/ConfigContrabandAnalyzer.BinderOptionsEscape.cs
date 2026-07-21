@@ -17,7 +17,7 @@ public sealed partial class ConfigContrabandAnalyzer
         bool parameterStillTargetsRuntimeOptions)
     {
         foreach (var assignment in node
-                     .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
+                     .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
                      .OfType<AssignmentExpressionSyntax>())
         {
             if (IsRuntimeBinderOptionsReference(
@@ -33,7 +33,7 @@ public sealed partial class ConfigContrabandAnalyzer
         }
 
         foreach (var invocation in node
-                     .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
+                     .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
                      .OfType<InvocationExpressionSyntax>())
         {
             if (InvocationMayRunLocalBinderOptionsHelper(
@@ -79,7 +79,7 @@ public sealed partial class ConfigContrabandAnalyzer
         }
 
         foreach (var objectCreation in node
-                     .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
+                     .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
                      .OfType<ObjectCreationExpressionSyntax>())
         {
             if (ContainsRuntimeBinderOptionsArgument(
@@ -94,7 +94,7 @@ public sealed partial class ConfigContrabandAnalyzer
         }
 
         foreach (var implicitObjectCreation in node
-                     .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
+                     .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
                      .OfType<ImplicitObjectCreationExpressionSyntax>())
         {
             if (ContainsRuntimeBinderOptionsArgument(
@@ -339,7 +339,7 @@ public sealed partial class ConfigContrabandAnalyzer
         }
 
         foreach (var assignment in containingBlock
-                     .DescendantNodes(ShouldDescendIntoBinderOptionsNode)
+                     .DescendantNodes(ExecutionScope.ShouldDescend)
                      .OfType<AssignmentExpressionSyntax>())
         {
             if (assignment.Left.SpanStart <= declaration.SpanStart)
@@ -394,7 +394,7 @@ public sealed partial class ConfigContrabandAnalyzer
         bool parameterStillTargetsRuntimeOptions)
     {
         foreach (var expression in node
-                     .DescendantNodesAndSelf(ShouldDescendIntoBinderOptionsNode)
+                     .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
                      .OfType<ExpressionSyntax>())
         {
             if (IsRuntimeBinderOptionsReference(

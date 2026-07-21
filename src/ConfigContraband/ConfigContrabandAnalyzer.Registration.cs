@@ -60,10 +60,19 @@ public sealed partial class ConfigContrabandAnalyzer
         bool sectionExpressionContainsFullPath;
         if (string.Equals(methodName, "BindConfiguration", StringComparison.Ordinal))
         {
-            var operation = (IInvocationOperation)semanticModel.GetOperation(invocation)!;
-            var sectionArgument = operation.Arguments.First(argument =>
-                string.Equals(argument.Parameter!.Name, "configSectionPath", StringComparison.Ordinal));
-            sectionExpression = (ExpressionSyntax)sectionArgument.Value.Syntax;
+            if (semanticModel.GetOperation(invocation) is not IInvocationOperation operation)
+            {
+                return false;
+            }
+
+            var sectionArgument = operation.Arguments.FirstOrDefault(argument =>
+                string.Equals(argument.Parameter?.Name, "configSectionPath", StringComparison.Ordinal));
+            if (sectionArgument?.Value.Syntax is not ExpressionSyntax argumentExpression)
+            {
+                return false;
+            }
+
+            sectionExpression = argumentExpression;
             if (!TryGetConstantSectionPath(sectionExpression, semanticModel, out sectionPath))
             {
                 return false;
@@ -89,8 +98,9 @@ public sealed partial class ConfigContrabandAnalyzer
         }
 
         var chain = InvocationChain.Create(invocation, semanticModel, methodName);
-        var hasValidateOnStart = chain.MethodNames.Contains("ValidateOnStart") ||
-            HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel);
+        var hasAddOptionsWithValidateOnStart = HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel);
+        var hasValidateOnStart = chain.MethodNames.Contains("ValidateOnStart") || hasAddOptionsWithValidateOnStart;
+        var hasValidation = chain.MethodNames.Any(IsValidationMethod) || hasAddOptionsWithValidateOnStart;
         var bindsNonPublicProperties = HasBindNonPublicPropertiesEnabled(invocation, semanticModel);
         var errorsOnUnknownConfiguration = HasErrorOnUnknownConfigurationEnabled(invocation, semanticModel);
         var supportsValidationRules = true;
@@ -103,11 +113,11 @@ public sealed partial class ConfigContrabandAnalyzer
             supportsValidationRules,
             sectionExpressionContainsFullPath,
             chain.MethodNames.Contains("ValidateDataAnnotations"),
-            chain.MethodNames.Contains("ValidateOnStart") || HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel),
-            chain.MethodNames.Any(IsValidationMethod) || HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel),
+            hasValidateOnStart,
+            hasValidation,
             bindsNonPublicProperties,
             errorsOnUnknownConfiguration,
-            !supportsValidationRules || chain.MethodNames.Contains("ValidateDataAnnotations"),
+            chain.MethodNames.Contains("ValidateDataAnnotations"),
             sectionExpression.GetLocation(),
             RequiresRuntimeSection(sectionExpression, semanticModel));
         return true;
@@ -422,7 +432,7 @@ public sealed partial class ConfigContrabandAnalyzer
         if (expressionBody is not null)
         {
             foreach (var invocation in expressionBody
-                         .DescendantNodesAndSelf(ShouldDescendIntoSameExecutableScope)
+                         .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
                          .OfType<InvocationExpressionSyntax>())
             {
                 yield return invocation;
@@ -449,17 +459,11 @@ public sealed partial class ConfigContrabandAnalyzer
         }
 
         foreach (var invocation in scanRoot
-                     .DescendantNodesAndSelf(ShouldDescendIntoSameExecutableScope)
+                     .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
                      .OfType<InvocationExpressionSyntax>())
         {
             yield return invocation;
         }
-    }
-
-    private static bool ShouldDescendIntoSameExecutableScope(SyntaxNode node)
-    {
-        return node is not LocalFunctionStatementSyntax &&
-               node is not AnonymousFunctionExpressionSyntax;
     }
 
     private static bool TryGetOptionsBuilderFactoryTarget(

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using Microsoft.CodeAnalysis;
 
 namespace ConfigContraband;
@@ -37,10 +38,38 @@ internal sealed partial class OptionsTypeMetadata
     public bool ImplementsValidatableObject { get; }
     public bool BindsNonPublicProperties => _bindsNonPublicProperties;
 
+    private static readonly ConditionalWeakTable<Compilation, OptionsMetadataCache> MetadataCaches = new();
+
     public static OptionsTypeMetadata Create(
         INamedTypeSymbol type,
         bool bindsNonPublicProperties = false,
         Compilation? compilation = null)
+    {
+        // Metadata is an immutable pure function of (type, bindsNonPublicProperties, compilation), so
+        // it is memoized per compilation: one registration requests the same metadata several times
+        // across the validation, nested-validation, and unknown-key passes. The ConditionalWeakTable
+        // ties each cache to its compilation so it is collected with it and never leaks; concurrent
+        // builds of the same key are harmless because the metadata is immutable (TryAdd keeps one).
+        if (compilation is null)
+        {
+            return Build(type, bindsNonPublicProperties, compilation: null);
+        }
+
+        var cache = MetadataCaches.GetValue(compilation, static _ => new OptionsMetadataCache());
+        if (cache.TryGet(type, bindsNonPublicProperties, out var cached))
+        {
+            return cached;
+        }
+
+        var metadata = Build(type, bindsNonPublicProperties, compilation);
+        cache.Add(type, bindsNonPublicProperties, metadata);
+        return metadata;
+    }
+
+    private static OptionsTypeMetadata Build(
+        INamedTypeSymbol type,
+        bool bindsNonPublicProperties,
+        Compilation? compilation)
     {
         var properties = ImmutableArray.CreateBuilder<BindableProperty>();
 
@@ -350,7 +379,7 @@ internal sealed partial class OptionsTypeMetadata
                 !HasPotentialPolymorphicInitializer(property, TypeSymbol, _compilation));
     }
 
-    public bool IsConfigurationAlias(BindableProperty property, string key)
+    public static bool IsConfigurationAlias(BindableProperty property, string key)
     {
         return !string.Equals(property.Symbol.Name, key, StringComparison.OrdinalIgnoreCase) &&
                HasConfigurationAlias(property.Symbol, key);

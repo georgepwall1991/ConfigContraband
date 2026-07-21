@@ -207,7 +207,7 @@ public sealed partial class ConfigContrabandAnalyzer
 
             foreach (var constructor in typeDeclaration.Members.OfType<ConstructorDeclarationSyntax>())
             {
-                foreach (var assignment in constructor.DescendantNodes(ShouldDescendIntoConfigurationOriginNode)
+                foreach (var assignment in constructor.DescendantNodes(ExecutionScope.ShouldDescend)
                              .OfType<AssignmentExpressionSyntax>())
                 {
                     foreach (var identifier in assignment.Left.DescendantNodesAndSelf()
@@ -231,11 +231,6 @@ public sealed partial class ConfigContrabandAnalyzer
         }
 
         return false;
-    }
-
-    private static bool ShouldDescendIntoConfigurationOriginNode(SyntaxNode node)
-    {
-        return node is not AnonymousFunctionExpressionSyntax and not LocalFunctionStatementSyntax;
     }
 
     private static ConfigurationReceiverProvenance ClassifyLocalConfiguration(
@@ -339,128 +334,111 @@ public sealed partial class ConfigContrabandAnalyzer
             return false;
         }
 
-        foreach (var assignment in block.DescendantNodes()
-                     .OfType<AssignmentExpressionSyntax>()
-                     .Where(candidate => candidate.SpanStart >= startPosition &&
-                                         candidate.Span.End <= safetyUntilPosition))
+        // One traversal instead of seven: each node kind below was previously scanned in its own
+        // full DescendantNodes pass over the block. The checks are a pure OR with no shared state,
+        // so folding them into a single document-order walk yields the same result while visiting
+        // the tree once — the dominant cost when a minimal-hosting Program.cs is one large block.
+        foreach (var node in block.DescendantNodes())
         {
-            if (SymbolEqualityComparer.Default.Equals(
-                    semanticModel.GetSymbolInfo(assignment.Left).Symbol,
-                    symbol))
-            {
-                if (assignment.SpanStart >= resolutionPosition ||
-                    symbol is ILocalSymbol &&
-                    assignment.Parent is ExpressionStatementSyntax { Parent: BlockSyntax parentBlock } &&
-                    parentBlock == block &&
-                    assignment.IsKind(SyntaxKind.SimpleAssignmentExpression))
-                {
-                    continue;
-                }
-
-                return true;
-            }
-
-            if (IsExpressionRootedInSymbol(assignment.Left, symbol, semanticModel) ||
-                assignment.Right.SpanStart != resolutionPosition &&
-                ReferencesSymbol(assignment.Right, symbol, semanticModel))
-            {
-                if (assignment.Left is IdentifierNameSyntax { Identifier.ValueText: "_" } &&
-                    semanticModel.GetSymbolInfo(assignment.Left).Symbol is null or IDiscardSymbol &&
-                    IsReadOnlyFrameworkConfigurationExpression(assignment.Right, semanticModel))
-                {
-                    continue;
-                }
-
-                return true;
-            }
-        }
-
-        foreach (var invocation in block.DescendantNodes()
-                     .OfType<InvocationExpressionSyntax>()
-                     .Where(candidate => candidate.SpanStart >= startPosition &&
-                                         candidate.Span.End <= safetyUntilPosition))
-        {
-            if (IsReadOnlyFrameworkConfigurationInvocation(invocation, semanticModel))
+            if (node.SpanStart < startPosition || node.Span.End > safetyUntilPosition)
             {
                 continue;
             }
 
-            if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
-                IsExpressionRootedInSymbol(memberAccess.Expression, symbol, semanticModel))
+            switch (node)
             {
-                return true;
-            }
-
-            if (invocation.Ancestors().OfType<ConditionalAccessExpressionSyntax>()
-                .Any(conditionalAccess =>
-                    IsExpressionRootedInSymbol(
-                        GetConfigurationChainRoot(conditionalAccess.Expression, semanticModel),
-                        symbol,
-                        semanticModel)))
-            {
-                return true;
-            }
-
-            if (invocation.ArgumentList.Arguments.Any(argument =>
-                    ReferencesSymbol(argument.Expression, symbol, semanticModel)))
-            {
-                return true;
+                case AssignmentExpressionSyntax assignment
+                    when IsUnsafeConfigurationAssignment(assignment, symbol, semanticModel, block, resolutionPosition):
+                case InvocationExpressionSyntax invocation
+                    when IsUnsafeConfigurationInvocation(invocation, symbol, semanticModel):
+                case ObjectCreationExpressionSyntax creation
+                    when creation.ArgumentList?.Arguments.Any(argument =>
+                        ReferencesSymbol(argument.Expression, symbol, semanticModel)) == true:
+                case VariableDeclaratorSyntax declarator
+                    when declarator.Initializer?.Value is { } initializer &&
+                        initializer.SpanStart != resolutionPosition &&
+                        ReferencesSymbol(initializer, symbol, semanticModel):
+                case AnonymousFunctionExpressionSyntax anonymousFunction
+                    when ReferencesSymbol(anonymousFunction, symbol, semanticModel):
+                case LocalFunctionStatementSyntax localFunction
+                    when ReferencesSymbol(localFunction, symbol, semanticModel):
+                case ReturnStatementSyntax { Expression: { } returned }
+                    when ReferencesSymbol(returned, symbol, semanticModel):
+                    return true;
             }
         }
 
-        foreach (var creation in block.DescendantNodes()
-                     .OfType<ObjectCreationExpressionSyntax>()
-                     .Where(candidate => candidate.SpanStart >= startPosition &&
-                                         candidate.Span.End <= safetyUntilPosition))
+        return false;
+    }
+
+    private static bool IsUnsafeConfigurationAssignment(
+        AssignmentExpressionSyntax assignment,
+        ISymbol symbol,
+        SemanticModel semanticModel,
+        BlockSyntax block,
+        int resolutionPosition)
+    {
+        if (SymbolEqualityComparer.Default.Equals(
+                semanticModel.GetSymbolInfo(assignment.Left).Symbol,
+                symbol))
         {
-            if (creation.ArgumentList?.Arguments.Any(argument =>
-                    ReferencesSymbol(argument.Expression, symbol, semanticModel)) == true)
+            if (assignment.SpanStart >= resolutionPosition ||
+                symbol is ILocalSymbol &&
+                assignment.Parent is ExpressionStatementSyntax { Parent: BlockSyntax parentBlock } &&
+                parentBlock == block &&
+                assignment.IsKind(SyntaxKind.SimpleAssignmentExpression))
             {
-                return true;
+                return false;
             }
+
+            return true;
         }
 
-        foreach (var declarator in block.DescendantNodes()
-                     .OfType<VariableDeclaratorSyntax>()
-                     .Where(candidate => candidate.SpanStart >= startPosition &&
-                                         candidate.Span.End <= safetyUntilPosition))
+        if (IsExpressionRootedInSymbol(assignment.Left, symbol, semanticModel) ||
+            assignment.Right.SpanStart != resolutionPosition &&
+            ReferencesSymbol(assignment.Right, symbol, semanticModel))
         {
-            if (declarator.Initializer?.Value is { } initializer &&
-                initializer.SpanStart != resolutionPosition &&
-                ReferencesSymbol(initializer, symbol, semanticModel))
+            if (assignment.Left is IdentifierNameSyntax { Identifier.ValueText: "_" } &&
+                semanticModel.GetSymbolInfo(assignment.Left).Symbol is null or IDiscardSymbol &&
+                IsReadOnlyFrameworkConfigurationExpression(assignment.Right, semanticModel))
             {
-                return true;
+                return false;
             }
+
+            return true;
         }
 
-        foreach (var anonymousFunction in block.DescendantNodes()
-                     .OfType<AnonymousFunctionExpressionSyntax>()
-                     .Where(candidate => candidate.SpanStart >= startPosition &&
-                                         candidate.Span.End <= safetyUntilPosition))
+        return false;
+    }
+
+    private static bool IsUnsafeConfigurationInvocation(
+        InvocationExpressionSyntax invocation,
+        ISymbol symbol,
+        SemanticModel semanticModel)
+    {
+        if (IsReadOnlyFrameworkConfigurationInvocation(invocation, semanticModel))
         {
-            if (ReferencesSymbol(anonymousFunction, symbol, semanticModel))
-            {
-                return true;
-            }
+            return false;
         }
 
-        foreach (var localFunction in block.DescendantNodes()
-                     .OfType<LocalFunctionStatementSyntax>()
-                     .Where(candidate => candidate.SpanStart >= startPosition &&
-                                         candidate.Span.End <= safetyUntilPosition))
+        if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
+            IsExpressionRootedInSymbol(memberAccess.Expression, symbol, semanticModel))
         {
-            if (ReferencesSymbol(localFunction, symbol, semanticModel))
-            {
-                return true;
-            }
+            return true;
         }
 
-        return block.DescendantNodes()
-            .OfType<ReturnStatementSyntax>()
-            .Where(candidate => candidate.SpanStart >= startPosition &&
-                                candidate.Span.End <= safetyUntilPosition)
-            .Any(candidate => candidate.Expression is { } returned &&
-                              ReferencesSymbol(returned, symbol, semanticModel));
+        if (invocation.Ancestors().OfType<ConditionalAccessExpressionSyntax>()
+            .Any(conditionalAccess =>
+                IsExpressionRootedInSymbol(
+                    GetConfigurationChainRoot(conditionalAccess.Expression, semanticModel),
+                    symbol,
+                    semanticModel)))
+        {
+            return true;
+        }
+
+        return invocation.ArgumentList.Arguments.Any(argument =>
+            ReferencesSymbol(argument.Expression, symbol, semanticModel));
     }
 
     private static bool IsExpressionRootedInSymbol(

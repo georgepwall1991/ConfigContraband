@@ -16,7 +16,7 @@ namespace ConfigContraband;
 internal static class JsonSchemaBuilder
 {
     /// <summary>
-    /// Builds the JSON Schema node describing how <paramref name="type"/> binds from configuration.
+    /// Builds the JSON Schema node describing how the options type of <paramref name="section"/> binds from configuration.
     /// </summary>
     public static JsonNode BuildObjectSchema(SchemaSection section, Compilation compilation)
     {
@@ -39,7 +39,7 @@ internal static class JsonSchemaBuilder
         return BuildObjectSchema(type, context, strict, validatesDataAnnotations, new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default));
     }
 
-    private static JsonNode BuildObjectSchema(
+    private static JsonObject BuildObjectSchema(
         INamedTypeSymbol type,
         SchemaBuildContext context,
         bool strict,
@@ -87,26 +87,23 @@ internal static class JsonSchemaBuilder
             // Validation only walks into a child object/collection when the property opts in with a
             // recursive validation attribute, mirroring CFG002/CFG005.
             var childValidates = validates && groupedProperties.Any(candidate => candidate.IsRecursiveValidationEnabled);
-            var valueSchema = BuildValueSchema(property.Symbol.Type, context, childStrict, childValidates, visited);
-            if (valueSchema is JsonObject valueObject)
+            var valueObject = BuildValueSchema(property.Symbol.Type, context, childStrict, childValidates, visited);
+            var declarations = groupedProperties.AsEnumerable().Reverse().Select(candidate => candidate.Symbol).ToArray();
+            // `validates` (this object's flag), not `childValidates`: a property's own [Range]/length/
+            // pattern is enforced when THIS type's DataAnnotations validation runs, mirroring [Required].
+            // Apply the base declaration first, then let a derived override replace matching
+            // inherited attributes just as TypeDescriptor does at runtime.
+            foreach (var declaration in declarations)
             {
-                var declarations = groupedProperties.AsEnumerable().Reverse().Select(candidate => candidate.Symbol).ToArray();
-                // `validates` (this object's flag), not `childValidates`: a property's own [Range]/length/
-                // pattern is enforced when THIS type's DataAnnotations validation runs, mirroring [Required].
-                // Apply the base declaration first, then let a derived override replace matching
-                // inherited attributes just as TypeDescriptor does at runtime.
-                foreach (var declaration in declarations)
-                {
-                    AnnotateDescription(valueObject, declaration);
-                }
-
-                if (validates)
-                {
-                    ApplyConstraints(valueObject, declarations);
-                }
+                AnnotateDescription(valueObject, declaration);
             }
 
-            properties.Add(key, valueSchema);
+            if (validates)
+            {
+                ApplyConstraints(valueObject, declarations);
+            }
+
+            properties.Add(key, valueObject);
 
             // [Required] is only enforced when DataAnnotations validation actually runs (CFG002).
             if (validates && metadata.IsRequiredForSchema(groupedProperties))
@@ -138,7 +135,7 @@ internal static class JsonSchemaBuilder
         return schema;
     }
 
-    private static JsonNode BuildValueSchema(
+    private static JsonObject BuildValueSchema(
         ITypeSymbol type,
         SchemaBuildContext context,
         bool strict,
@@ -172,7 +169,7 @@ internal static class JsonSchemaBuilder
         return BuildScalarSchema(type);
     }
 
-    private static JsonNode BuildScalarSchema(ITypeSymbol type)
+    private static JsonObject BuildScalarSchema(ITypeSymbol type)
     {
         var nullable = type is INamedTypeSymbol nullableType &&
                        nullableType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
@@ -278,7 +275,7 @@ internal static class JsonSchemaBuilder
         }
     }
 
-    private static void ApplyConstraints(JsonObject schema, IReadOnlyList<IPropertySymbol> properties)
+    private static void ApplyConstraints(JsonObject schema, IPropertySymbol[] properties)
     {
         var kind = ClassifyScalar(properties[0].Type);
         if (kind == ScalarKind.Other)

@@ -36,7 +36,7 @@ jobs:
         run: dotnet restore ConfigContraband.slnx
 
       - name: Build
-        run: dotnet build ConfigContraband.slnx --configuration Release --no-restore
+        run: dotnet build ConfigContraband.slnx --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
 
       - name: Verify formatting
         run: dotnet format ConfigContraband.slnx --verify-no-changes --no-restore --verbosity minimal

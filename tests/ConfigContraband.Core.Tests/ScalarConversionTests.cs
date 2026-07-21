@@ -344,7 +344,7 @@ public sealed class ScalarConversionTests
         };
     }
 
-    private static Compilation CreateCompilation()
+    private static CSharpCompilation CreateCompilation()
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)

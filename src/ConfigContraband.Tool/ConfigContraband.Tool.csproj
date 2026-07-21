@@ -10,14 +10,15 @@
     <AssemblyName>ConfigContraband.Tool</AssemblyName>
     <!-- MSBuildWorkspace.WorkspaceFailed is the documented load-diagnostics hook; its replacement is not
          available across the Roslyn versions we target. Matches the test project's CS0618 suppression. -->
-    <NoWarn>$(NoWarn);CS0618</NoWarn>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS0618;CS1591</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>configcontraband</ToolCommandName>
     <PackageId>ConfigContraband.Tool</PackageId>
-    <Version>0.7.20</Version>
+    <Version>0.7.21</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband.Tool</Title>
     <Description>Generates appsettings.schema.json from your .NET Options types so editors give live autocomplete, type checking, and required-key hints while editing appsettings.json.</Description>
