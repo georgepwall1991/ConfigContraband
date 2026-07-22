@@ -7,10 +7,13 @@
 [![CI](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/ci.yml/badge.svg)](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/codeql.yml/badge.svg)](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/codeql.yml)
 [![codecov](https://codecov.io/gh/georgepwall1991/ConfigContraband/branch/main/graph/badge.svg)](https://codecov.io/gh/georgepwall1991/ConfigContraband)
+[![NuGet](https://img.shields.io/nuget/v/ConfigContraband.svg)](https://www.nuget.org/packages/ConfigContraband)
+[![NuGet downloads](https://img.shields.io/nuget/dt/ConfigContraband.svg)](https://www.nuget.org/packages/ConfigContraband)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 
 Stop smuggling broken `appsettings` into production.
 
-ConfigContraband is a high-signal Roslyn analyzer for .NET configuration, ASP.NET Core Options, `appsettings.json`, `ValidateOnStart()`, and `ValidateDataAnnotations()`. It catches the configuration mistakes that compile cleanly, pass code review, and then fail at startup or, worse, on first use.
+ConfigContraband is a high-signal Roslyn analyser for .NET configuration, ASP.NET Core Options, `appsettings.json`, `ValidateOnStart()`, and `ValidateDataAnnotations()`. It catches the configuration mistakes that compile cleanly, pass code review, and then fail at startup or, worse, on first use.
 
 It focuses on the boring production failures:
 
@@ -46,9 +49,13 @@ Use it when your app relies on strongly typed options and you want configuration
   <PackageReference Include="ConfigContraband" Version="0.7.22" PrivateAssets="all" />
 ```
 
-The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
+The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyser automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
 
-No runtime dependency is added to your app. ConfigContraband runs as an analyzer during build and in supported IDEs.
+No runtime dependency is added to your app. ConfigContraband runs as an analyser during build and in supported IDEs.
+
+## Compatibility
+
+ConfigContraband targets `netstandard2.0`, so it can run in current .NET SDKs and supported Visual Studio versions. The package is intended for modern SDK-style projects; use the latest stable .NET SDK and IDE servicing release for the best analyser experience.
 
 ## What It Looks At
 
