@@ -5,6 +5,7 @@ using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace ConfigContraband;
 
@@ -60,9 +61,9 @@ internal static class RegistrationExtractor
         switch (method.Name)
         {
             case "BindConfiguration":
-                return TryExtractBindConfiguration(invocation, model, out section);
+                return TryExtractBindConfiguration(invocation, method, model, out section);
             case "Bind":
-                return TryExtractBind(invocation, model, out section);
+                return TryExtractBind(invocation, method, model, out section);
             case "Configure":
                 return TryExtractConfigure(invocation, method, model, out section);
             default:
@@ -72,19 +73,21 @@ internal static class RegistrationExtractor
 
     private static bool TryExtractBindConfiguration(
         InvocationExpressionSyntax invocation,
+        IMethodSymbol method,
         SemanticModel model,
         out SchemaSection section)
     {
         section = null!;
 
-        if (GetOptionsBuilderTypeArgument(invocation, model) is not { } optionsType)
+        if (!IsFrameworkOptionsBuilderConfigurationMethod(method) ||
+            GetOptionsBuilderTypeArgument(invocation, model) is not { } optionsType)
         {
             return false;
         }
 
-        var arguments = invocation.ArgumentList.Arguments;
-        if (arguments.Count == 0 ||
-            model.GetConstantValue(arguments[0].Expression).Value is not string sectionPath ||
+        var sectionExpression = TryGetArgumentExpression(invocation, model, "configSectionPath");
+        if (sectionExpression is null ||
+            model.GetConstantValue(sectionExpression).Value is not string sectionPath ||
             sectionPath.Length == 0)
         {
             return false;
@@ -98,19 +101,21 @@ internal static class RegistrationExtractor
 
     private static bool TryExtractBind(
         InvocationExpressionSyntax invocation,
+        IMethodSymbol method,
         SemanticModel model,
         out SchemaSection section)
     {
         section = null!;
 
-        if (GetOptionsBuilderTypeArgument(invocation, model) is not { } optionsType)
+        if (!IsFrameworkOptionsBuilderConfigurationMethod(method) ||
+            GetOptionsBuilderTypeArgument(invocation, model) is not { } optionsType)
         {
             return false;
         }
 
-        var arguments = invocation.ArgumentList.Arguments;
-        if (arguments.Count == 0 ||
-            !TryGetSectionPath(arguments[0].Expression, model, out var sectionPath))
+        var configurationExpression = TryGetArgumentExpression(invocation, model, "config");
+        if (configurationExpression is null ||
+            !TryGetSectionPath(configurationExpression, model, out var sectionPath))
         {
             return false;
         }
@@ -137,7 +142,10 @@ internal static class RegistrationExtractor
         }
 
         // Only the framework Configure<T> overload binds configuration; ignore unrelated Configure<T> helpers.
-        if (method.ContainingType?.ToDisplayString() != "Microsoft.Extensions.DependencyInjection.OptionsConfigurationServiceCollectionExtensions")
+        if (!IsFrameworkMethod(
+                method,
+                "Microsoft.Extensions.DependencyInjection.OptionsConfigurationServiceCollectionExtensions",
+                "Microsoft.Extensions.Options.ConfigurationExtensions"))
         {
             return false;
         }
@@ -185,6 +193,35 @@ internal static class RegistrationExtractor
         return null;
     }
 
+    private static bool IsFrameworkOptionsBuilderConfigurationMethod(IMethodSymbol method)
+    {
+        return IsFrameworkMethod(
+            method,
+            "Microsoft.Extensions.DependencyInjection.OptionsBuilderConfigurationExtensions",
+            "Microsoft.Extensions.Options.ConfigurationExtensions");
+    }
+
+    private static bool IsFrameworkMethod(
+        IMethodSymbol method,
+        string containingType,
+        string containingAssembly)
+    {
+        method = method.ReducedFrom ?? method;
+        return method.ContainingType?.ToDisplayString() == containingType &&
+               method.ContainingAssembly?.Name == containingAssembly;
+    }
+
+    private static ExpressionSyntax? TryGetArgumentExpression(
+        InvocationExpressionSyntax invocation,
+        SemanticModel model,
+        string parameterName)
+    {
+        return (model.GetOperation(invocation) as IInvocationOperation)?
+            .Arguments
+            .FirstOrDefault(argument => argument.Parameter?.Name == parameterName)?
+            .Value.Syntax as ExpressionSyntax;
+    }
+
     private static bool TryGetSectionPath(ExpressionSyntax expression, SemanticModel model, out string sectionPath)
     {
         sectionPath = string.Empty;
@@ -201,6 +238,12 @@ internal static class RegistrationExtractor
             return false;
         }
 
+        if (model.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method ||
+            !IsFrameworkConfigurationSectionMethod(method, methodName))
+        {
+            return false;
+        }
+
         var arguments = invocation.ArgumentList.Arguments;
         if (arguments.Count != 1 ||
             model.GetConstantValue(arguments[0].Expression).Value is not string segment ||
@@ -213,6 +256,23 @@ internal static class RegistrationExtractor
             ? prefix + ":" + segment
             : segment;
         return true;
+    }
+
+    private static bool IsFrameworkConfigurationSectionMethod(IMethodSymbol method, string methodName)
+    {
+        if (methodName == "GetSection")
+        {
+            return IsFrameworkMethod(
+                method,
+                "Microsoft.Extensions.Configuration.IConfiguration",
+                "Microsoft.Extensions.Configuration.Abstractions");
+        }
+
+        return methodName == "GetRequiredSection" &&
+               IsFrameworkMethod(
+                   method,
+                   "Microsoft.Extensions.Configuration.ConfigurationExtensions",
+                   "Microsoft.Extensions.Configuration.Abstractions");
     }
 
     private static bool OptionsInstanceIsValidatedInScope(

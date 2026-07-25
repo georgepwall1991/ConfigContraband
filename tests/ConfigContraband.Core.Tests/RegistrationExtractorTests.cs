@@ -48,6 +48,67 @@ public sealed class RegistrationExtractorTests
     }
 
     [Fact]
+    public void Discovers_bind_configuration_with_reordered_named_arguments()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration(
+                            configureBinder: options => options.ErrorOnUnknownConfiguration = true,
+                            configSectionPath: "Stripe");
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.Equal("Stripe", section.SectionPath);
+        Assert.True(section.Strict);
+    }
+
+    [Fact]
+    public void Ignores_custom_bind_configuration_extension()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Bogus", 42);
+                }
+            }
+
+            namespace Microsoft.Extensions.DependencyInjection
+            {
+                public static class OptionsBuilderConfigurationExtensions
+                {
+                    public static OptionsBuilder<T> BindConfiguration<T>(
+                        this OptionsBuilder<T> builder,
+                        string section,
+                        int marker)
+                        where T : class
+                    {
+                        return builder;
+                    }
+                }
+            }
+            """);
+
+        Assert.Empty(sections);
+    }
+
+    [Fact]
     public void Discovers_bind_with_nested_get_section_chain()
     {
         var sections = Extract(
@@ -94,6 +155,100 @@ public sealed class RegistrationExtractorTests
         var section = Assert.Single(sections);
         Assert.Equal("Stripe", section.SectionPath);
         Assert.Equal("StripeOptions", section.Type.Name);
+    }
+
+    [Fact]
+    public void Ignores_custom_bind_extension()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .Bind(configuration.GetSection("Bogus"), 42);
+                }
+            }
+
+            public static class CustomBindingExtensions
+            {
+                public static OptionsBuilder<T> Bind<T>(
+                    this OptionsBuilder<T> builder,
+                    IConfiguration configuration,
+                    int marker)
+                    where T : class
+                {
+                    return builder;
+                }
+            }
+            """);
+
+        Assert.Empty(sections);
+    }
+
+    [Fact]
+    public void Ignores_custom_get_section_helper()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .Bind(FakeConfiguration.GetSection("Bogus"));
+                }
+            }
+
+            public static class FakeConfiguration
+            {
+                public static IConfiguration GetSection(string name)
+                {
+                    return null!;
+                }
+            }
+            """);
+
+        Assert.Empty(sections);
+    }
+
+    [Fact]
+    public void Ignores_custom_get_required_section_helper()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .Bind(FakeConfiguration.GetRequiredSection("Bogus"));
+                }
+            }
+
+            public static class FakeConfiguration
+            {
+                public static IConfiguration GetRequiredSection(string name)
+                {
+                    return null!;
+                }
+            }
+            """);
+
+        Assert.Empty(sections);
     }
 
     [Fact]
