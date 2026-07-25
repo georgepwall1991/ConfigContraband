@@ -85,7 +85,7 @@ internal static class RegistrationExtractor
             return false;
         }
 
-        var sectionExpression = GetArgumentExpression(invocation, model, "configSectionPath");
+        var sectionExpression = TryGetArgumentExpression(invocation, model, "configSectionPath");
         if (sectionExpression is null ||
             model.GetConstantValue(sectionExpression).Value is not string sectionPath ||
             sectionPath.Length == 0)
@@ -113,7 +113,7 @@ internal static class RegistrationExtractor
             return false;
         }
 
-        var configurationExpression = GetArgumentExpression(invocation, model, "config");
+        var configurationExpression = TryGetArgumentExpression(invocation, model, "config");
         if (configurationExpression is null ||
             !TryGetSectionPath(configurationExpression, model, out var sectionPath))
         {
@@ -211,19 +211,15 @@ internal static class RegistrationExtractor
                method.ContainingAssembly?.Name == containingAssembly;
     }
 
-    private static ExpressionSyntax? GetArgumentExpression(
+    private static ExpressionSyntax? TryGetArgumentExpression(
         InvocationExpressionSyntax invocation,
         SemanticModel model,
         string parameterName)
     {
-        if (model.GetOperation(invocation) is not IInvocationOperation operation)
-        {
-            return null;
-        }
-
-        return operation.Arguments
-            .FirstOrDefault(argument => argument.Parameter?.Name == parameterName)
-            ?.Value.Syntax as ExpressionSyntax;
+        return (model.GetOperation(invocation) as IInvocationOperation)?
+            .Arguments
+            .FirstOrDefault(argument => argument.Parameter?.Name == parameterName)?
+            .Value.Syntax as ExpressionSyntax;
     }
 
     private static bool TryGetSectionPath(ExpressionSyntax expression, SemanticModel model, out string sectionPath)
@@ -264,18 +260,19 @@ internal static class RegistrationExtractor
 
     private static bool IsFrameworkConfigurationSectionMethod(IMethodSymbol method, string methodName)
     {
-        return methodName switch
+        if (methodName == "GetSection")
         {
-            "GetSection" => IsFrameworkMethod(
+            return IsFrameworkMethod(
                 method,
                 "Microsoft.Extensions.Configuration.IConfiguration",
-                "Microsoft.Extensions.Configuration.Abstractions"),
-            "GetRequiredSection" => IsFrameworkMethod(
-                method,
-                "Microsoft.Extensions.Configuration.ConfigurationExtensions",
-                "Microsoft.Extensions.Configuration.Abstractions"),
-            _ => false,
-        };
+                "Microsoft.Extensions.Configuration.Abstractions");
+        }
+
+        return methodName == "GetRequiredSection" &&
+               IsFrameworkMethod(
+                   method,
+                   "Microsoft.Extensions.Configuration.ConfigurationExtensions",
+                   "Microsoft.Extensions.Configuration.Abstractions");
     }
 
     private static bool OptionsInstanceIsValidatedInScope(

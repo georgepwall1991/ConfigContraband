@@ -89,15 +89,18 @@ public sealed class RegistrationExtractorTests
                 }
             }
 
-            public static class CustomBindingExtensions
+            namespace Microsoft.Extensions.DependencyInjection
             {
-                public static OptionsBuilder<T> BindConfiguration<T>(
-                    this OptionsBuilder<T> builder,
-                    string section,
-                    int marker)
-                    where T : class
+                public static class OptionsBuilderConfigurationExtensions
                 {
-                    return builder;
+                    public static OptionsBuilder<T> BindConfiguration<T>(
+                        this OptionsBuilder<T> builder,
+                        string section,
+                        int marker)
+                        where T : class
+                    {
+                        return builder;
+                    }
                 }
             }
             """);
