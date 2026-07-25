@@ -376,13 +376,256 @@ public sealed class RegistrationExtractorTests
                         .BindConfiguration("Stripe", options =>
                         {
                             options.ErrorOnUnknownConfiguration = true;
-                            Reset((object)options);
+                            Reset((object)(options!));
+                            Reset(options as object);
                         });
                 }
 
                 private static void Reset(object value)
                 {
                     ((BinderOptions)value).ErrorOnUnknownConfiguration = false;
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.False(section.Strict);
+    }
+
+    [Fact]
+    public void Detects_strict_binding_after_a_local_is_assigned_as_an_alias()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe", options =>
+                        {
+                            BinderOptions alias = new();
+                            alias = options;
+                            alias.ErrorOnUnknownConfiguration = true;
+                        });
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.True(section.Strict);
+    }
+
+    [Fact]
+    public void Does_not_trust_an_alias_declared_in_conditional_control_flow()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, bool reset)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe", options =>
+                        {
+                            options.ErrorOnUnknownConfiguration = true;
+                            if (reset)
+                            {
+                                var alias = options;
+                                alias.ErrorOnUnknownConfiguration = false;
+                            }
+                        });
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.False(section.Strict);
+    }
+
+    [Fact]
+    public void Does_not_trust_the_parameter_after_conditional_reassignment()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, bool replace)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe", options =>
+                        {
+                            options.ErrorOnUnknownConfiguration = true;
+                            if (replace)
+                            {
+                                options = new BinderOptions();
+                            }
+                        });
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.False(section.Strict);
+    }
+
+    [Fact]
+    public void Parenthesized_callback_keeps_conditional_non_public_binding_conservative()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, bool enable)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe", (BinderOptions options) =>
+                        {
+                            if (enable)
+                            {
+                                options.BindNonPublicProperties = true;
+                            }
+                        });
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.False(section.BindsNonPublicProperties);
+    }
+
+    [Fact]
+    public void Detects_strict_binding_in_an_unconditional_try_block()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe", options =>
+                        {
+                            try
+                            {
+                                options.ErrorOnUnknownConfiguration = true;
+                            }
+                            finally
+                            {
+                            }
+                        });
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.True(section.Strict);
+    }
+
+    [Fact]
+    public void Nested_conditional_inside_an_unconditional_block_remains_conservative()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, bool enable)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe", options =>
+                        {
+                            {
+                                if (enable)
+                                {
+                                    options.ErrorOnUnknownConfiguration = true;
+                                }
+                            }
+                        });
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.False(section.Strict);
+    }
+
+    [Fact]
+    public void Does_not_mark_binding_strict_when_options_are_stored_outside_the_callback()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                private static BinderOptions? stored;
+
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe", options =>
+                        {
+                            options.ErrorOnUnknownConfiguration = true;
+                            stored = options;
+                        });
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.False(section.Strict);
+    }
+
+    [Fact]
+    public void Does_not_mark_binding_strict_when_an_extension_receiver_can_mutate_options()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe", options =>
+                        {
+                            options.ErrorOnUnknownConfiguration = true;
+                            options.Reset();
+                        });
+                }
+            }
+
+            public static class BinderOptionsExtensions
+            {
+                public static void Reset(this BinderOptions options)
+                {
+                    options.ErrorOnUnknownConfiguration = false;
                 }
             }
             """);
@@ -1012,6 +1255,34 @@ public sealed class RegistrationExtractorTests
                     _ = validate
                         ? services.AddOptions<BillingOptions>().ValidateDataAnnotations()
                         : services.AddOptions<BillingOptions>();
+
+                    services.Configure<BillingOptions>(configuration.GetSection("Billing"));
+                }
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.False(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
+    public void Binding_is_not_validated_by_coalesced_registrations()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(
+                    IServiceCollection services,
+                    IConfiguration configuration)
+                {
+                    OptionsBuilder<BillingOptions>? builder = null;
+                    builder ??= services.AddOptions<BillingOptions>().ValidateDataAnnotations();
+                    _ = builder ?? services.AddOptions<BillingOptions>().ValidateDataAnnotations();
 
                     services.Configure<BillingOptions>(configuration.GetSection("Billing"));
                 }
