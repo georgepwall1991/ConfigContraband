@@ -18,12 +18,13 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>configcontraband</ToolCommandName>
     <PackageId>ConfigContraband.Tool</PackageId>
-    <Version>0.7.22</Version>
+    <Version>0.7.23</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband.Tool</Title>
     <Description>Generates appsettings.schema.json from your .NET Options types so editors give live autocomplete, type checking, and required-key hints while editing appsettings.json.</Description>
     <PackageTags>configuration;options;appsettings;json-schema;dotnet;csharp;aspnetcore;intellisense;tool</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -39,6 +40,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ConfigContraband.Core\ConfigContraband.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>
