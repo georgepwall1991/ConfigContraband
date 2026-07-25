@@ -72,6 +72,75 @@ internal sealed partial class OptionsTypeMetadata
         return false;
     }
 
+    /// <summary>
+    /// Gets an element type only for collection shapes that ConfigurationBinder can populate.
+    /// This is intentionally narrower than <see cref="TryGetCollectionElementType"/>, which also
+    /// recognizes arbitrary <c>IEnumerable&lt;T&gt;</c> implementations that the binder cannot add to.
+    /// Set interfaces are excluded because their runtime element support has a separate, narrower
+    /// string/enum boundary that CFG008 does not currently model.
+    /// </summary>
+    public static bool TryGetSupportedCollectionElementType(
+        ITypeSymbol type,
+        out ITypeSymbol elementType)
+    {
+        if (type is IArrayTypeSymbol arrayType)
+        {
+            elementType = arrayType.ElementType;
+            return true;
+        }
+
+        if (type.SpecialType == SpecialType.System_String ||
+            type is not INamedTypeSymbol namedType)
+        {
+            elementType = null!;
+            return false;
+        }
+
+        if (IsSetShape(namedType))
+        {
+            elementType = null!;
+            return false;
+        }
+
+        var declaredDefinition = namedType.OriginalDefinition.ToDisplayString();
+        if (declaredDefinition is
+            "System.Collections.Generic.IEnumerable<T>" or
+            "System.Collections.Generic.ICollection<T>" or
+            "System.Collections.Generic.IList<T>" or
+            "System.Collections.Generic.IReadOnlyCollection<T>" or
+            "System.Collections.Generic.IReadOnlyList<T>")
+        {
+            elementType = namedType.TypeArguments[0];
+            return true;
+        }
+
+        foreach (var iface in namedType.AllInterfaces)
+        {
+            if (iface.IsGenericType &&
+                iface.OriginalDefinition.ToDisplayString() is
+                    "System.Collections.Generic.ICollection<T>" or
+                    "System.Collections.Generic.IList<T>")
+            {
+                elementType = iface.TypeArguments[0];
+                return true;
+            }
+        }
+
+        elementType = null!;
+        return false;
+    }
+
+    private static bool IsSetShape(INamedTypeSymbol type)
+    {
+        return type.AllInterfaces
+            .Concat(new[] { type })
+            .Any(static candidate =>
+                candidate.IsGenericType &&
+                candidate.OriginalDefinition.ToDisplayString() is
+                    "System.Collections.Generic.ISet<T>" or
+                    "System.Collections.Generic.IReadOnlySet<T>");
+    }
+
     public static bool TryGetDictionaryValueType(ITypeSymbol type, out ITypeSymbol valueType)
     {
         return TryGetDictionaryTypeArguments(type, out _, out valueType);

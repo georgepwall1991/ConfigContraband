@@ -136,6 +136,48 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg009_ignores_configuration_indexer_typo_even_with_close_sibling()
+    {
+        var source = DirectReadSource("""
+            _ = configuration["Strpie"];
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_optional_configuration_indexer_probe_and_fallback()
+    {
+        var source = DirectReadSource("""
+            if (configuration["Missing"] is null)
+            {
+            }
+
+            _ = configuration["Missing"] ?? "fallback";
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppSettings);
+    }
+
+    [Fact]
+    public async Task Cfg009_ignores_section_relative_configuration_indexer_typo()
+    {
+        var source = DirectReadSource("""
+            _ = configuration.GetSection("Parent")["Chlid"];
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Parent": {
+                "Child": "value"
+              }
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg009_reports_missing_chained_child_section_with_suggestion()
     {
         var source = DirectReadSource("""

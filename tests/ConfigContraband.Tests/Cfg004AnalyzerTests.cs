@@ -667,6 +667,38 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_keeps_invoked_local_function_retarget_outside_supported_dataflow()
+    {
+        // The invoked local function retargets the builder between validation and binding. The
+        // straight-line scanner deliberately does not infer local-function invocation effects,
+        // so this accepted false negative remains quiet rather than guessing across captures.
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.ValidateDataAnnotations();
+            void Reset() => optionsBuilder = services.AddOptions<StripeOptions>();
+            Reset();
+            optionsBuilder.BindConfiguration("Stripe");
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg004_does_not_treat_uninvoked_local_function_capture_as_retarget()
+    {
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.ValidateDataAnnotations();
+            void Reset() => optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.BindConfiguration("Stripe");
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg004_honors_prior_local_validation_across_unrelated_statement()
     {
         // ValidateDataAnnotations() is genuinely called on the builder before the bind, separated

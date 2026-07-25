@@ -1120,4 +1120,556 @@ public sealed partial class ConfigContrabandAnalyzerTests
             }
             """));
     }
+
+    [Theory]
+    [InlineData("int[]")]
+    [InlineData("System.Collections.Generic.List<int>")]
+    public async Task Cfg008_reports_malformed_scalar_collection_element_when_strict_binding_throws(
+        string collectionType)
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration(
+                    "Server",
+                    binderOptions => binderOptions.ErrorOnUnknownConfiguration = true);
+            """,
+            optionsTypes: $$"""
+            public sealed class ServerOptions
+            {
+                public {{collectionType}} Values { get; set; } = [];
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 4, 7, 4, 15)
+            .WithArguments("Server:Values:0", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Values": [
+                  "eighty"
+                ]
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_malformed_scalar_dictionary_value_when_strict_binding_throws()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration(
+                    "Server",
+                    binderOptions => binderOptions.ErrorOnUnknownConfiguration = true);
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public System.Collections.Generic.Dictionary<string, int> Values { get; set; } = [];
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 4, 16, 4, 24)
+            .WithArguments("Server:Values:first", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Values": {
+                  "first": "eighty"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_malformed_dictionary_collection_element_when_strict_binding_throws()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration(
+                    "Server",
+                    binderOptions => binderOptions.ErrorOnUnknownConfiguration = true);
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<int>> Values { get; set; } = [];
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 5, 9, 5, 17)
+            .WithArguments("Server:Values:first:0", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Values": {
+                  "first": [
+                    "eighty"
+                  ]
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_each_malformed_strict_collection_element_at_its_value()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration(
+                    "Server",
+                    binderOptions => binderOptions.ErrorOnUnknownConfiguration = true);
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public int[] Values { get; set; } = [];
+            }
+            """);
+
+        var first = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 4, 7, 4, 15)
+            .WithArguments("Server:Values:0", "int");
+        var second = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 5, 7, 5, 15)
+            .WithArguments("Server:Values:1", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Values": [
+                  "eighty",
+                  "ninety"
+                ]
+              }
+            }
+            """),
+            first,
+            second);
+    }
+
+    [Fact]
+    public async Task Cfg008_keeps_loose_scalar_collection_and_dictionary_failures_quiet()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration("Server");
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public System.Collections.Generic.List<int> Values { get; set; } = [];
+
+                public System.Collections.Generic.Dictionary<string, int> Lookup { get; set; } = [];
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Values": [
+                  "eighty"
+                ],
+                "Lookup": {
+                  "first": "ninety"
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_keeps_loose_nested_object_collection_failure_quiet()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration("Server");
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public System.Collections.Generic.List<ServerItem> Items { get; set; } = [];
+            }
+
+            public sealed class ServerItem
+            {
+                public int Port { get; set; }
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Items": [
+                  {
+                    "Port": "eighty"
+                  }
+                ]
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_nested_object_collection_failure_when_strict_binding_throws()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration(
+                    "Server",
+                    binderOptions => binderOptions.ErrorOnUnknownConfiguration = true);
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public System.Collections.Generic.List<ServerItem> Items { get; set; } = [];
+            }
+
+            public sealed class ServerItem
+            {
+                public int Port { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 5, 17, 5, 25)
+            .WithArguments("Server:Items:0:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Items": [
+                  {
+                    "Port": "eighty"
+                  }
+                ]
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_keeps_strict_unsupported_key_dictionary_values_quiet()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration(
+                    "Server",
+                    binderOptions => binderOptions.ErrorOnUnknownConfiguration = true);
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public System.Collections.Generic.Dictionary<System.Guid, int> Values { get; set; } = [];
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Values": {
+                  "not-a-guid": "eighty"
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_once_across_strict_collection_binding_and_direct_element_read()
+    {
+        var source = """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    services.AddOptions<ServerOptions>()
+                        .BindConfiguration(
+                            "Server",
+                            binderOptions => binderOptions.ErrorOnUnknownConfiguration = true);
+                    _ = configuration.GetValue<int>("Server:Values:0");
+                }
+            }
+
+            public sealed class ServerOptions
+            {
+                public int[] Values { get; set; } = [];
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 4, 7, 4, 15)
+            .WithArguments("Server:Values:0", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Values": [
+                  "eighty"
+                ]
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_keeps_strict_set_shapes_outside_the_supported_collection_boundary()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration(
+                    "Server",
+                    binderOptions => binderOptions.ErrorOnUnknownConfiguration = true);
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public System.Collections.Generic.HashSet<int> Values { get; set; } = [];
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Values": [
+                  "eighty"
+                ]
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_keeps_loose_polymorphic_dictionary_value_conversion_failure_quiet()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration("Server");
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public System.Collections.Generic.Dictionary<string, ServerItem> Items { get; set; } =
+                    new()
+                    {
+                        ["first"] = new DerivedServerItem(),
+                    };
+            }
+
+            public class ServerItem
+            {
+                public int Port { get; set; }
+            }
+
+            public sealed class DerivedServerItem : ServerItem
+            {
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Items": {
+                  "first": {
+                    "Port": "eighty"
+                  }
+                }
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_strict_polymorphic_dictionary_value_conversion_failure()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration(
+                    "Server",
+                    binderOptions => binderOptions.ErrorOnUnknownConfiguration = true);
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public System.Collections.Generic.Dictionary<string, ServerItem> Items { get; set; } =
+                    new()
+                    {
+                        ["first"] = new DerivedServerItem(),
+                    };
+            }
+
+            public class ServerItem
+            {
+                public int Port { get; set; }
+            }
+
+            public sealed class DerivedServerItem : ServerItem
+            {
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 5, 17, 5, 25)
+            .WithArguments("Server:Items:first:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Items": {
+                  "first": {
+                    "Port": "eighty"
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_polymorphic_nested_hidden_scalar_using_declared_type()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration(
+                    "Server",
+                    binderOptions => binderOptions.ErrorOnUnknownConfiguration = true);
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public ServerItem Item { get; set; } = new DerivedServerItem();
+            }
+
+            public class ServerItem
+            {
+                public int Port { get; set; }
+            }
+
+            public sealed class DerivedServerItem : ServerItem
+            {
+                public new string Port { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 4, 15, 4, 23)
+            .WithArguments("Server:Item:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Item": {
+                  "Port": "eighty"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg008_reports_polymorphic_dictionary_hidden_scalar_using_declared_type()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration(
+                    "Server",
+                    binderOptions => binderOptions.ErrorOnUnknownConfiguration = true);
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                public System.Collections.Generic.Dictionary<string, ServerItem> Items { get; set; } =
+                    new()
+                    {
+                        ["first"] = new DerivedServerItem(),
+                    };
+            }
+
+            public class ServerItem
+            {
+                public int Port { get; set; }
+            }
+
+            public sealed class DerivedServerItem : ServerItem
+            {
+                public new string Port { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueTypeMismatch)
+            .WithSpan("appsettings.json", 5, 17, 5, 25)
+            .WithArguments("Server:Items:first:Port", "int");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Items": {
+                  "first": {
+                    "Port": "eighty"
+                  }
+                }
+              }
+            }
+            """),
+            expected);
+    }
 }

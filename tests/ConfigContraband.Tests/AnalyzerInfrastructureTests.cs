@@ -5,6 +5,26 @@ namespace ConfigContraband.Tests;
 public sealed partial class ConfigContrabandAnalyzerTests
 {
     [Fact]
+    public void CI_enforces_the_showcase_diagnostic_contract()
+    {
+        var repositoryRoot = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var workflow = File.ReadAllText(
+            Path.Combine(repositoryRoot, ".github", "workflows", "ci.yml"));
+        var verifier = Path.Combine(repositoryRoot, "scripts", "verify-showcase.sh");
+
+        Assert.Contains("bash scripts/verify-showcase.sh", workflow, StringComparison.Ordinal);
+        Assert.True(File.Exists(verifier), "The CI showcase verifier script must exist.");
+
+        var verifierContents = File.ReadAllText(verifier);
+        Assert.Contains("-tl:off", verifierContents, StringComparison.Ordinal);
+        foreach (var ruleId in Enumerable.Range(1, 9).Select(number => $"CFG{number:000}"))
+        {
+            Assert.Contains(ruleId, verifierContents, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void Packaged_analyzer_references_net8_compatible_roslyn()
     {
         var supportedRoslynVersion = new Version(4, 8, 0, 0);
@@ -121,4 +141,38 @@ public sealed partial class ConfigContrabandAnalyzerTests
         Assert.False(isValid);
         Assert.Null(value.ConnectionString);
     }
+
+    [Fact]
+    public void Required_attribute_accepts_every_non_null_array_initializer_shape()
+    {
+        var defaults = new RuntimeRequiredArrayDefaults();
+        var required = new System.ComponentModel.DataAnnotations.RequiredAttribute();
+
+        Assert.All(
+            new[]
+            {
+                defaults.CollectionExpression,
+                defaults.ImplicitArray,
+                defaults.ExplicitSizedArray,
+                defaults.ExplicitArray,
+            },
+            value =>
+            {
+                Assert.NotNull(value);
+                Assert.True(required.IsValid(value));
+            });
+    }
+
+#pragma warning disable CA1825 // Exact new string[0] syntax is part of the runtime-parity matrix.
+    private sealed class RuntimeRequiredArrayDefaults
+    {
+        public string[] CollectionExpression { get; } = [];
+
+        public string[] ImplicitArray { get; } = new[] { "configured" };
+
+        public string[] ExplicitSizedArray { get; } = new string[0];
+
+        public string[] ExplicitArray { get; } = new string[] { "configured" };
+    }
+#pragma warning restore CA1825
 }

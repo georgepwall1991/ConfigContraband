@@ -2,6 +2,26 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.24 - 2026-07-25
+
+- Fixed four `CFG002` false positives for `[Required]` array properties initialized with a
+  collection expression, implicit array creation, sized array creation, or explicit array creation.
+  These values are intrinsically non-null and therefore satisfy `RequiredAttribute`; custom
+  collection builders, factories, constructor overwrites, and custom getters remain conservative.
+- Aligned `CFG008` collection and dictionary diagnostics with the runtime binder. Loose binding
+  catches element conversion failures and skips the bad item or entry, so nested object-container
+  false positives are now suppressed. Strict bindings that set `ErrorOnUnknownConfiguration = true`
+  now report malformed scalar elements in supported arrays, collections, dictionaries, and
+  dictionary collection values at their exact JSON value locations, with options/direct-read
+  deduplication preserved.
+- Added runtime parity coverage for loose-skip versus strict-throw list, array, and dictionary
+  behavior; proved that initialized polymorphic object and dictionary values still bind known
+  members through the declared property type; pinned the supported set boundary and loose/strict
+  polymorphic-dictionary behavior; pinned the accepted CFG003/CFG004 capture-and-invoke and CFG009
+  indexer boundaries; and added a CI showcase contract that disables the terminal logger and fails
+  unless the standalone sample emits exactly one diagnostic for each ID from `CFG001` through
+  `CFG009`.
+
 ## 0.7.23 - 2026-07-25
 
 - Restored analyzer compatibility with supported .NET 8 and newer SDKs and Visual Studio 2022

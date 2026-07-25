@@ -14,7 +14,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.23</Version>
+    <Version>0.7.24</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -25,7 +25,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Compatibility release: lowered the shipped Roslyn API baseline from 5.3 to 4.8 so ConfigContraband loads under .NET 8 and newer SDKs and Visual Studio 2022 17.8 and newer. Added a package-reference regression guard and retained current-host coverage. No diagnostic IDs, severities, messages, or code fixes changed.</PackageReleaseNotes>
+    <PackageReleaseNotes>Precision release: CFG002 now recognizes non-null array initializer forms that already satisfy RequiredAttribute. CFG008 now follows ConfigurationBinder container semantics by suppressing loose collection/dictionary conversion failures that the runtime skips and reporting supported malformed elements only when strict binding rethrows. CI now enforces exactly one CFG001-CFG009 showcase diagnostic. No diagnostic IDs, severities, messages, or code fixes changed.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

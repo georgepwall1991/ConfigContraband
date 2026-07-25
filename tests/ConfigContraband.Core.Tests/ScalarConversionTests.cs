@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.Extensions.Configuration;
 
 namespace ConfigContraband.Core.Tests;
 
@@ -260,6 +261,122 @@ public sealed class ScalarConversionTests
     }
 
     [Fact]
+    public void Loose_collection_binding_skips_a_malformed_scalar_element()
+    {
+        var configuration = BuildConfiguration(("Server:Values:0", "eighty"));
+        var options = new RuntimeScalarCollectionOptions();
+
+        configuration.GetSection("Server").Bind(options);
+
+        Assert.Empty(options.Values);
+    }
+
+    [Fact]
+    public void Strict_collection_binding_throws_for_a_malformed_scalar_element()
+    {
+        var configuration = BuildConfiguration(("Server:Values:0", "eighty"));
+        var options = new RuntimeScalarCollectionOptions();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            configuration.GetSection("Server").Bind(
+                options,
+                binderOptions => binderOptions.ErrorOnUnknownConfiguration = true));
+    }
+
+    [Fact]
+    public void Loose_array_binding_skips_a_malformed_scalar_element()
+    {
+        var configuration = BuildConfiguration(("Server:Values:0", "eighty"));
+        var options = new RuntimeScalarArrayOptions();
+
+        configuration.GetSection("Server").Bind(options);
+
+        Assert.Empty(options.Values);
+    }
+
+    [Fact]
+    public void Strict_array_binding_throws_for_a_malformed_scalar_element()
+    {
+        var configuration = BuildConfiguration(("Server:Values:0", "eighty"));
+        var options = new RuntimeScalarArrayOptions();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            configuration.GetSection("Server").Bind(
+                options,
+                binderOptions => binderOptions.ErrorOnUnknownConfiguration = true));
+    }
+
+    [Fact]
+    public void Loose_collection_binding_skips_an_object_with_a_malformed_scalar_member()
+    {
+        var configuration = BuildConfiguration(("Server:Items:0:Port", "eighty"));
+        var options = new RuntimeObjectCollectionOptions();
+
+        configuration.GetSection("Server").Bind(options);
+
+        Assert.Empty(options.Items);
+    }
+
+    [Fact]
+    public void Strict_collection_binding_throws_for_an_object_with_a_malformed_scalar_member()
+    {
+        var configuration = BuildConfiguration(("Server:Items:0:Port", "eighty"));
+        var options = new RuntimeObjectCollectionOptions();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            configuration.GetSection("Server").Bind(
+                options,
+                binderOptions => binderOptions.ErrorOnUnknownConfiguration = true));
+    }
+
+    [Fact]
+    public void Loose_dictionary_binding_skips_a_malformed_scalar_value()
+    {
+        var configuration = BuildConfiguration(("Server:Values:first", "eighty"));
+        var options = new RuntimeScalarDictionaryOptions();
+
+        configuration.GetSection("Server").Bind(options);
+
+        Assert.Empty(options.Values);
+    }
+
+    [Fact]
+    public void Strict_dictionary_binding_throws_for_a_malformed_scalar_value()
+    {
+        var configuration = BuildConfiguration(("Server:Values:first", "eighty"));
+        var options = new RuntimeScalarDictionaryOptions();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            configuration.GetSection("Server").Bind(
+                options,
+                binderOptions => binderOptions.ErrorOnUnknownConfiguration = true));
+    }
+
+    [Fact]
+    public void Strict_binding_uses_the_declared_type_of_an_initialized_polymorphic_object_property()
+    {
+        var configuration = BuildConfiguration(("Server:Item:Port", "eighty"));
+        var options = new RuntimePolymorphicObjectOptions();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            configuration.GetSection("Server").Bind(
+                options,
+                binderOptions => binderOptions.ErrorOnUnknownConfiguration = true));
+    }
+
+    [Fact]
+    public void Strict_binding_uses_the_declared_type_of_an_initialized_polymorphic_dictionary_value()
+    {
+        var configuration = BuildConfiguration(("Server:Items:first:Port", "eighty"));
+        var options = new RuntimePolymorphicDictionaryOptions();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            configuration.GetSection("Server").Bind(
+                options,
+                binderOptions => binderOptions.ErrorOnUnknownConfiguration = true));
+    }
+
+    [Fact]
     public void IsIntegerLiteral_returns_false_when_no_enum_underlying_type_is_available()
     {
         var method = typeof(ScalarConversion).GetMethod(
@@ -290,6 +407,49 @@ public sealed class ScalarConversionTests
     private enum RuntimeUIntColor : uint { Zero }
     private enum RuntimeLongColor : long { Zero }
     private enum RuntimeULongColor : ulong { Zero }
+
+    private sealed class RuntimeScalarCollectionOptions
+    {
+        public List<int> Values { get; set; } = [];
+    }
+
+    private sealed class RuntimeScalarArrayOptions
+    {
+        public int[] Values { get; set; } = [];
+    }
+
+    private sealed class RuntimeObjectCollectionOptions
+    {
+        public List<RuntimeCollectionItem> Items { get; set; } = [];
+    }
+
+    private class RuntimeCollectionItem
+    {
+        public int Port { get; set; }
+    }
+
+    private sealed class RuntimeScalarDictionaryOptions
+    {
+        public Dictionary<string, int> Values { get; set; } = [];
+    }
+
+    private sealed class RuntimePolymorphicObjectOptions
+    {
+        public RuntimeCollectionItem Item { get; set; } = new RuntimeDerivedCollectionItem();
+    }
+
+    private sealed class RuntimePolymorphicDictionaryOptions
+    {
+        public Dictionary<string, RuntimeCollectionItem> Items { get; set; } = new()
+        {
+            ["first"] = new RuntimeDerivedCollectionItem(),
+        };
+    }
+
+    private sealed class RuntimeDerivedCollectionItem : RuntimeCollectionItem
+    {
+        public new string Port { get; set; } = "";
+    }
 
     [Flags]
     private enum RuntimeByteAccess : byte
@@ -342,6 +502,14 @@ public sealed class ScalarConversionTests
             "class" => Compilation.GetTypeByMetadataName("Nested")!,
             _ => throw new System.ArgumentOutOfRangeException(nameof(key), key, "Unknown type key"),
         };
+    }
+
+    private static IConfigurationRoot BuildConfiguration(
+        params (string Key, string? Value)[] values)
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(values.ToDictionary(entry => entry.Key, entry => entry.Value))
+            .Build();
     }
 
     private static CSharpCompilation CreateCompilation()

@@ -602,6 +602,39 @@ public sealed partial class ConfigContrabandAnalyzerTests
             """));
     }
 
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("new[] { \"configured\" }")]
+    [InlineData("new string[0]")]
+    [InlineData("new string[] { \"configured\" }")]
+    public async Task Cfg002_stays_quiet_for_required_array_with_non_null_initializer(
+        string initializer)
+    {
+        var source = OptionsSource(
+            registration: """
+                services.AddOptions<RequiredDefaultOptions>()
+                    .BindConfiguration("Required")
+                    .ValidateDataAnnotations()
+                    .ValidateOnStart();
+                """,
+            optionsTypes: $$"""
+                public sealed class RequiredDefaultOptions
+                {
+                    [Required]
+                    public string[] Items { get; set; } = {{initializer}};
+                }
+                """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Required": {
+              }
+            }
+            """));
+    }
+
     [Fact]
     public async Task Cfg002_stays_quiet_for_required_initialized_property_with_private_factory_constructor()
     {

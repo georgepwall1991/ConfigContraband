@@ -296,6 +296,24 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_keeps_invoked_delegate_retarget_outside_supported_dataflow()
+    {
+        // The invoked delegate retargets the local after binding, but recognizing that requires
+        // capture-and-invocation dataflow. This accepted false negative stays quiet until that
+        // wider analysis can be justified without breaking the deferred-lambda guard above.
+        var source = OptionsSource("""
+            var optionsBuilder = services.AddOptions<StripeOptions>();
+            optionsBuilder.BindConfiguration("Stripe");
+            optionsBuilder.ValidateDataAnnotations();
+            System.Action reset = () => optionsBuilder = services.AddOptions<StripeOptions>();
+            reset();
+            optionsBuilder.ValidateOnStart();
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_when_builder_local_passed_by_ref_before_validate_on_start()
     {
         // Passing the builder local by ref lets the callee repoint it, so a later
