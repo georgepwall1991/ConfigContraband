@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace ConfigContraband;
@@ -225,16 +226,20 @@ internal static class RegistrationExtractor
         // marking a "B" registration validated just because "A" of the same type is validated, while
         // still covering the split "Configure<T>(...); AddOptions<T>().ValidateDataAnnotations();" pattern.
         SyntaxNode? scope = invocation.FirstAncestorOrSelf<BlockSyntax>();
-        scope ??= invocation.FirstAncestorOrSelf<CompilationUnitSyntax>();
+        scope ??= invocation.FirstAncestorOrSelf<GlobalStatementSyntax>()?.Parent;
+        scope ??= invocation.FirstAncestorOrSelf<ArrowExpressionClauseSyntax>();
+        scope ??= invocation.FirstAncestorOrSelf<EqualsValueClauseSyntax>();
         if (scope is null)
         {
             return false;
         }
 
-        foreach (var candidate in scope.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        foreach (var candidate in scope.DescendantNodes(ExecutionScope.ShouldDescend).OfType<InvocationExpressionSyntax>())
         {
             if (candidate.Expression is MemberAccessExpressionSyntax memberAccess &&
                 memberAccess.Name.Identifier.Text == "ValidateDataAnnotations" &&
+                IsDirectlyExecutedInScope(candidate, scope) &&
+                IsFrameworkDataAnnotationsValidation(candidate, model) &&
                 GetOptionsBuilderTypeArgument(candidate, model) is { } validatedType &&
                 SymbolEqualityComparer.Default.Equals(validatedType, optionsType) &&
                 string.Equals(GetOptionsBuilderName(candidate, model), optionsName, StringComparison.Ordinal))
@@ -244,6 +249,86 @@ internal static class RegistrationExtractor
         }
 
         return false;
+    }
+
+    private static bool IsDirectlyExecutedInScope(InvocationExpressionSyntax invocation, SyntaxNode scope)
+    {
+        if (scope is BlockSyntax block)
+        {
+            return invocation.FirstAncestorOrSelf<StatementSyntax>() is { } statement &&
+                   statement.Parent is BlockSyntax parentBlock &&
+                   parentBlock.Span == block.Span &&
+                   IsUnconditionallyEvaluatedWithin(invocation, statement);
+        }
+
+        if (scope is ArrowExpressionClauseSyntax arrowExpression)
+        {
+            return invocation.FirstAncestorOrSelf<ArrowExpressionClauseSyntax>()?.Span ==
+                   arrowExpression.Span &&
+                   IsUnconditionallyEvaluatedWithin(invocation, arrowExpression);
+        }
+
+        if (scope is EqualsValueClauseSyntax equalsValue)
+        {
+            return invocation.FirstAncestorOrSelf<EqualsValueClauseSyntax>()?.Span ==
+                   equalsValue.Span &&
+                   IsUnconditionallyEvaluatedWithin(invocation, equalsValue);
+        }
+
+        return invocation.FirstAncestorOrSelf<StatementSyntax>() is { } topLevelStatement &&
+               topLevelStatement.Parent is GlobalStatementSyntax globalStatement &&
+               globalStatement.Parent?.RawKind == scope.RawKind &&
+               globalStatement.Parent.Span == scope.Span &&
+               IsUnconditionallyEvaluatedWithin(invocation, topLevelStatement);
+    }
+
+    private static bool IsUnconditionallyEvaluatedWithin(SyntaxNode candidate, SyntaxNode boundary)
+    {
+        foreach (var ancestor in candidate.Ancestors())
+        {
+            if (ancestor.Span == boundary.Span && ancestor.RawKind == boundary.RawKind)
+            {
+                return true;
+            }
+
+            if (ancestor is ConditionalExpressionSyntax or
+                ConditionalAccessExpressionSyntax or
+                SwitchExpressionSyntax)
+            {
+                return false;
+            }
+
+            if (ancestor is BinaryExpressionSyntax binary &&
+                (binary.IsKind(SyntaxKind.LogicalAndExpression) ||
+                 binary.IsKind(SyntaxKind.LogicalOrExpression) ||
+                 binary.IsKind(SyntaxKind.CoalesceExpression)))
+            {
+                return false;
+            }
+
+            if (ancestor is AssignmentExpressionSyntax assignment &&
+                assignment.IsKind(SyntaxKind.CoalesceAssignmentExpression))
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsFrameworkDataAnnotationsValidation(
+        InvocationExpressionSyntax invocation,
+        SemanticModel model)
+    {
+        var symbolInfo = model.GetSymbolInfo(invocation);
+        if (symbolInfo.Symbol is not IMethodSymbol method)
+        {
+            return false;
+        }
+
+        method = method.ReducedFrom ?? method;
+        return method.ContainingType?.Name == "OptionsBuilderDataAnnotationsExtensions" &&
+               method.ContainingAssembly?.Name == "Microsoft.Extensions.Options.DataAnnotations";
     }
 
     private static string GetOptionsBuilderName(InvocationExpressionSyntax invocation, SemanticModel model)
@@ -304,29 +389,560 @@ internal static class RegistrationExtractor
 
         foreach (var argument in invocation.ArgumentList.Arguments)
         {
-            if (argument.Expression is not (SimpleLambdaExpressionSyntax or ParenthesizedLambdaExpressionSyntax or AnonymousMethodExpressionSyntax))
+            if (!TryGetBinderOptionsParameter(argument.Expression, model, out var parameter))
             {
                 continue;
             }
 
-            foreach (var assignment in argument.Expression.DescendantNodesAndSelf().OfType<AssignmentExpressionSyntax>())
+            AnalyzeBinderOptionsCallback(
+                argument.Expression,
+                model,
+                parameter,
+                out var callbackStrict,
+                out var callbackBindsNonPublicProperties);
+            strict |= callbackStrict;
+            bindsNonPublicProperties |= callbackBindsNonPublicProperties;
+        }
+    }
+
+    private static void AnalyzeBinderOptionsCallback(
+        ExpressionSyntax expression,
+        SemanticModel model,
+        IParameterSymbol parameter,
+        out bool strict,
+        out bool bindsNonPublicProperties)
+    {
+        strict = false;
+        bindsNonPublicProperties = false;
+
+        var aliases = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
+        var parameterTargetsRuntimeOptions = true;
+        var runtimeOptionsEscaped = false;
+        if (GetCallbackBody(expression) is not { } body)
+        {
+            return;
+        }
+
+        if (body is ExpressionSyntax expressionBody)
+        {
+            ApplyDirectBinderOptionsAssignment(
+                expressionBody,
+                model,
+                parameter,
+                aliases,
+                parameterTargetsRuntimeOptions,
+                ref strict,
+                ref bindsNonPublicProperties);
+            return;
+        }
+
+        foreach (var statement in ((BlockSyntax)body).Statements)
+        {
+            var statementEscapes = ContainsRuntimeBinderOptionsEscape(
+                statement,
+                model,
+                parameter,
+                aliases,
+                parameterTargetsRuntimeOptions);
+            if (statementEscapes)
             {
-                if (assignment.Left is not MemberAccessExpressionSyntax target)
+                runtimeOptionsEscaped = true;
+                aliases.Clear();
+                strict = false;
+                bindsNonPublicProperties = false;
+            }
+
+            if (statement is LocalDeclarationStatementSyntax localDeclaration)
+            {
+                foreach (var variable in localDeclaration.Declaration.Variables)
                 {
+                    if (model.GetDeclaredSymbol(variable) is not ILocalSymbol local)
+                    {
+                        continue;
+                    }
+
+                    if (variable.Initializer?.Value is { } initializer &&
+                        IsRuntimeBinderOptionsReference(
+                            initializer,
+                            model,
+                            parameter,
+                            aliases,
+                            parameterTargetsRuntimeOptions && !runtimeOptionsEscaped))
+                    {
+                        aliases.Add(local);
+                    }
+                    else
+                    {
+                        aliases.Remove(local);
+                    }
+                }
+
+                continue;
+            }
+
+            if (statement is ExpressionStatementSyntax { Expression: AssignmentExpressionSyntax assignment })
+            {
+                var assignmentTarget = model.GetSymbolInfo(assignment.Left).Symbol;
+                if (SymbolEqualityComparer.Default.Equals(assignmentTarget, parameter))
+                {
+                    parameterTargetsRuntimeOptions = false;
                     continue;
                 }
 
-                var isTrue = model.GetConstantValue(assignment.Right) is { HasValue: true, Value: true };
-                switch (target.Name.Identifier.Text)
+                if (assignmentTarget is ILocalSymbol local)
                 {
-                    case "ErrorOnUnknownConfiguration":
-                        strict = isTrue;
-                        break;
-                    case "BindNonPublicProperties":
-                        bindsNonPublicProperties = isTrue;
-                        break;
+                    if (IsRuntimeBinderOptionsReference(
+                            assignment.Right,
+                            model,
+                            parameter,
+                            aliases,
+                            parameterTargetsRuntimeOptions && !runtimeOptionsEscaped))
+                    {
+                        aliases.Add(local);
+                    }
+                    else
+                    {
+                        aliases.Remove(local);
+                    }
+
+                    continue;
                 }
+
+                if (ApplyDirectBinderOptionsAssignment(
+                        assignment,
+                        model,
+                        parameter,
+                        aliases,
+                        parameterTargetsRuntimeOptions && !runtimeOptionsEscaped,
+                        ref strict,
+                        ref bindsNonPublicProperties))
+                {
+                    continue;
+                }
+            }
+
+            if (ContainsRuntimeBinderOptionsAliasDeclaration(
+                    statement,
+                    model,
+                    parameter,
+                    aliases,
+                    parameterTargetsRuntimeOptions))
+            {
+                runtimeOptionsEscaped = true;
+                aliases.Clear();
+                strict = false;
+                bindsNonPublicProperties = false;
+            }
+
+            if (!runtimeOptionsEscaped)
+            {
+                ApplyUnconditionalNestedBinderOptionsAssignments(
+                    statement,
+                    model,
+                    parameter,
+                    aliases,
+                    parameterTargetsRuntimeOptions,
+                    ref strict,
+                    ref bindsNonPublicProperties);
+            }
+
+            InvalidateConditionalBinderOptionsAssignments(
+                statement,
+                model,
+                parameter,
+                aliases,
+                parameterTargetsRuntimeOptions,
+                ref strict,
+                ref bindsNonPublicProperties);
+
+            InvalidateConditionallyAssignedAliases(statement, model, aliases);
+
+            if (ContainsBinderOptionsParameterAssignment(statement, model, parameter))
+            {
+                parameterTargetsRuntimeOptions = false;
+                strict = false;
+                bindsNonPublicProperties = false;
             }
         }
     }
+
+    private static void InvalidateConditionallyAssignedAliases(
+        SyntaxNode node,
+        SemanticModel model,
+        HashSet<ILocalSymbol> aliases)
+    {
+        foreach (var assignment in node
+                     .DescendantNodes(ExecutionScope.ShouldDescend)
+                     .OfType<AssignmentExpressionSyntax>())
+        {
+            if (model.GetSymbolInfo(assignment.Left).Symbol is ILocalSymbol local)
+            {
+                aliases.Remove(local);
+            }
+        }
+    }
+
+    private static void ApplyUnconditionalNestedBinderOptionsAssignments(
+        SyntaxNode node,
+        SemanticModel model,
+        IParameterSymbol parameter,
+        HashSet<ILocalSymbol> aliases,
+        bool parameterTargetsRuntimeOptions,
+        ref bool strict,
+        ref bool bindsNonPublicProperties)
+    {
+        foreach (var assignment in node
+                     .DescendantNodes(ExecutionScope.ShouldDescend)
+                     .OfType<AssignmentExpressionSyntax>()
+                     .Where(candidate => IsUnconditionallyExecutedWithin(candidate, node)))
+        {
+            ApplyDirectBinderOptionsAssignment(
+                assignment,
+                model,
+                parameter,
+                aliases,
+                parameterTargetsRuntimeOptions,
+                ref strict,
+                ref bindsNonPublicProperties);
+        }
+    }
+
+    private static CSharpSyntaxNode? GetCallbackBody(ExpressionSyntax expression)
+    {
+        return expression switch
+        {
+            SimpleLambdaExpressionSyntax simpleLambda => simpleLambda.Body,
+            ParenthesizedLambdaExpressionSyntax parenthesizedLambda => parenthesizedLambda.Body,
+            AnonymousMethodExpressionSyntax anonymousMethod => anonymousMethod.Block,
+            _ => null,
+        };
+    }
+
+    private static bool ApplyDirectBinderOptionsAssignment(
+        ExpressionSyntax expression,
+        SemanticModel model,
+        IParameterSymbol parameter,
+        HashSet<ILocalSymbol> aliases,
+        bool parameterTargetsRuntimeOptions,
+        ref bool strict,
+        ref bool bindsNonPublicProperties)
+    {
+        if (expression is not AssignmentExpressionSyntax assignment ||
+            !assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) ||
+            assignment.Left is not MemberAccessExpressionSyntax target ||
+            !IsRuntimeBinderOptionsReference(
+                target.Expression,
+                model,
+                parameter,
+                aliases,
+                parameterTargetsRuntimeOptions))
+        {
+            return false;
+        }
+
+        var property = model.GetSymbolInfo(target).Symbol as IPropertySymbol;
+        if (property?.ContainingType.ToDisplayString() != "Microsoft.Extensions.Configuration.BinderOptions")
+        {
+            return false;
+        }
+
+        var isTrue = model.GetConstantValue(assignment.Right) is { HasValue: true, Value: true };
+        switch (property.Name)
+        {
+            case "ErrorOnUnknownConfiguration":
+                strict = isTrue;
+                return true;
+            case "BindNonPublicProperties":
+                bindsNonPublicProperties = isTrue;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static void InvalidateConditionalBinderOptionsAssignments(
+        SyntaxNode node,
+        SemanticModel model,
+        IParameterSymbol parameter,
+        HashSet<ILocalSymbol> aliases,
+        bool parameterTargetsRuntimeOptions,
+        ref bool strict,
+        ref bool bindsNonPublicProperties)
+    {
+        foreach (var assignment in node
+                     .DescendantNodes(ExecutionScope.ShouldDescend)
+                     .OfType<AssignmentExpressionSyntax>())
+        {
+            if (IsUnconditionallyExecutedWithin(assignment, node) ||
+                assignment.Left is not MemberAccessExpressionSyntax target ||
+                !IsRuntimeBinderOptionsReference(
+                    target.Expression,
+                    model,
+                    parameter,
+                    aliases,
+                    parameterTargetsRuntimeOptions) ||
+                model.GetSymbolInfo(target).Symbol is not IPropertySymbol property ||
+                property.ContainingType.ToDisplayString() != "Microsoft.Extensions.Configuration.BinderOptions")
+            {
+                continue;
+            }
+
+            switch (property.Name)
+            {
+                case "ErrorOnUnknownConfiguration":
+                    strict = false;
+                    break;
+                case "BindNonPublicProperties":
+                    bindsNonPublicProperties = false;
+                    break;
+            }
+        }
+    }
+
+    private static bool IsUnconditionallyExecutedWithin(SyntaxNode candidate, SyntaxNode container)
+    {
+        if (container is not BlockSyntax and
+            not UsingStatementSyntax and
+            not TryStatementSyntax { Catches.Count: 0 })
+        {
+            return false;
+        }
+
+        foreach (var ancestor in candidate.Ancestors())
+        {
+            if (ancestor.Span == container.Span && ancestor.RawKind == container.RawKind)
+            {
+                return true;
+            }
+
+            if (ancestor is ExpressionStatementSyntax or BlockSyntax or FinallyClauseSyntax or UsingStatementSyntax)
+            {
+                continue;
+            }
+
+            if (ancestor is TryStatementSyntax { Catches.Count: 0 })
+            {
+                continue;
+            }
+
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsRuntimeBinderOptionsAliasDeclaration(
+        SyntaxNode node,
+        SemanticModel model,
+        IParameterSymbol parameter,
+        HashSet<ILocalSymbol> aliases,
+        bool parameterTargetsRuntimeOptions)
+    {
+        return node.DescendantNodes(ExecutionScope.ShouldDescend)
+            .OfType<VariableDeclaratorSyntax>()
+            .Any(variable =>
+                variable.Initializer?.Value is { } initializer &&
+                IsRuntimeBinderOptionsReference(
+                    initializer,
+                    model,
+                    parameter,
+                    aliases,
+                    parameterTargetsRuntimeOptions));
+    }
+
+    private static bool ContainsRuntimeBinderOptionsEscape(
+        SyntaxNode node,
+        SemanticModel model,
+        IParameterSymbol parameter,
+        HashSet<ILocalSymbol> aliases,
+        bool parameterTargetsRuntimeOptions)
+    {
+        foreach (var anonymousFunction in node
+                     .DescendantNodesAndSelf()
+                     .OfType<AnonymousFunctionExpressionSyntax>())
+        {
+            SyntaxNode? body = anonymousFunction.ExpressionBody ?? (SyntaxNode?)anonymousFunction.Block;
+            if (ReferencesRuntimeBinderOptions(
+                    body,
+                    model,
+                    parameter,
+                    aliases,
+                    parameterTargetsRuntimeOptions))
+            {
+                return true;
+            }
+        }
+
+        foreach (var localFunction in node
+                     .DescendantNodesAndSelf()
+                     .OfType<LocalFunctionStatementSyntax>())
+        {
+            SyntaxNode? body = localFunction.ExpressionBody?.Expression ?? (SyntaxNode?)localFunction.Body;
+            if (ReferencesRuntimeBinderOptions(
+                    body,
+                    model,
+                    parameter,
+                    aliases,
+                    parameterTargetsRuntimeOptions))
+            {
+                return true;
+            }
+        }
+
+        foreach (var assignment in node
+                     .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
+                     .OfType<AssignmentExpressionSyntax>())
+        {
+            if (IsRuntimeBinderOptionsReference(
+                    assignment.Right,
+                    model,
+                    parameter,
+                    aliases,
+                    parameterTargetsRuntimeOptions) &&
+                model.GetSymbolInfo(assignment.Left).Symbol is not ILocalSymbol and not IParameterSymbol)
+            {
+                return true;
+            }
+        }
+
+        foreach (var invocation in node
+                     .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
+                     .OfType<InvocationExpressionSyntax>())
+        {
+            if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
+                IsRuntimeBinderOptionsReference(
+                    memberAccess.Expression,
+                    model,
+                    parameter,
+                    aliases,
+                    parameterTargetsRuntimeOptions))
+            {
+                return true;
+            }
+
+            if (invocation.ArgumentList.Arguments.Any(argument =>
+                    IsRuntimeBinderOptionsReference(
+                        argument.Expression,
+                        model,
+                        parameter,
+                        aliases,
+                        parameterTargetsRuntimeOptions)))
+            {
+                return true;
+            }
+        }
+
+        return node.DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
+            .OfType<BaseObjectCreationExpressionSyntax>()
+            .Any(creation =>
+                creation.ArgumentList?.Arguments.Any(argument =>
+                    IsRuntimeBinderOptionsReference(
+                        argument.Expression,
+                        model,
+                        parameter,
+                        aliases,
+                        parameterTargetsRuntimeOptions)) == true);
+    }
+
+    private static bool ReferencesRuntimeBinderOptions(
+        SyntaxNode? node,
+        SemanticModel model,
+        IParameterSymbol parameter,
+        HashSet<ILocalSymbol> aliases,
+        bool parameterTargetsRuntimeOptions)
+    {
+        return node?.DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
+            .OfType<ExpressionSyntax>()
+            .Any(expression =>
+                IsRuntimeBinderOptionsReference(
+                    expression,
+                    model,
+                    parameter,
+                    aliases,
+                    parameterTargetsRuntimeOptions)) == true;
+    }
+
+    private static bool ContainsBinderOptionsParameterAssignment(
+        SyntaxNode node,
+        SemanticModel model,
+        IParameterSymbol parameter)
+    {
+        return node.DescendantNodes(ExecutionScope.ShouldDescend)
+            .OfType<AssignmentExpressionSyntax>()
+            .Any(assignment =>
+                SymbolEqualityComparer.Default.Equals(
+                    model.GetSymbolInfo(assignment.Left).Symbol,
+                    parameter));
+    }
+
+    private static bool IsRuntimeBinderOptionsReference(
+        ExpressionSyntax expression,
+        SemanticModel model,
+        IParameterSymbol parameter,
+        HashSet<ILocalSymbol> aliases,
+        bool parameterTargetsRuntimeOptions)
+    {
+        while (true)
+        {
+            switch (expression)
+            {
+                case ParenthesizedExpressionSyntax parenthesized:
+                    expression = parenthesized.Expression;
+                    continue;
+                case CastExpressionSyntax cast:
+                    expression = cast.Expression;
+                    continue;
+                case PostfixUnaryExpressionSyntax postfix
+                    when postfix.IsKind(SyntaxKind.SuppressNullableWarningExpression):
+                    expression = postfix.Operand;
+                    continue;
+                case CheckedExpressionSyntax checkedExpression:
+                    expression = checkedExpression.Expression;
+                    continue;
+                case BinaryExpressionSyntax asExpression
+                    when asExpression.IsKind(SyntaxKind.AsExpression):
+                    expression = asExpression.Left;
+                    continue;
+                default:
+                    break;
+            }
+
+            break;
+        }
+
+        var symbol = model.GetSymbolInfo(expression).Symbol;
+        return parameterTargetsRuntimeOptions &&
+               SymbolEqualityComparer.Default.Equals(symbol, parameter) ||
+               symbol is ILocalSymbol local && aliases.Contains(local);
+    }
+
+    private static bool TryGetBinderOptionsParameter(
+        ExpressionSyntax expression,
+        SemanticModel model,
+        out IParameterSymbol parameter)
+    {
+        ParameterSyntax? syntax = expression switch
+        {
+            SimpleLambdaExpressionSyntax simpleLambda => simpleLambda.Parameter,
+            ParenthesizedLambdaExpressionSyntax parenthesizedLambda
+                when parenthesizedLambda.ParameterList.Parameters.Count == 1 =>
+                parenthesizedLambda.ParameterList.Parameters[0],
+            AnonymousMethodExpressionSyntax anonymousMethod
+                when anonymousMethod.ParameterList?.Parameters.Count == 1 =>
+                anonymousMethod.ParameterList.Parameters[0],
+            _ => null,
+        };
+
+        if (syntax is null ||
+            model.GetDeclaredSymbol(syntax) is not IParameterSymbol candidate ||
+            candidate.Type.ToDisplayString() != "Microsoft.Extensions.Configuration.BinderOptions")
+        {
+            parameter = null!;
+            return false;
+        }
+
+        parameter = candidate;
+        return true;
+    }
+
 }
