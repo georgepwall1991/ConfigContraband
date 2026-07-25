@@ -217,8 +217,9 @@ grammars are stricter than the attributes' lenient checks), and `[MinLength]` (J
 code points while DataAnnotations counts UTF-16 units) — each could otherwise flag configuration the runtime
 accepts.
 
-Keep the committed schema honest in CI with `--check`, which regenerates in memory and exits non-zero
-when the schema is out of date:
+Keep the committed schema honest in CI with `--check`, which regenerates in memory and returns `0` only
+when analysis completed and the schema is current. It returns `1` when the schema is missing or out of date,
+and `2` when project loading or compilation errors prevent a complete check:
 
 ```bash
 configcontraband schema --project src/MyApp/MyApp.csproj --check

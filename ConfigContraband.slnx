@@ -7,5 +7,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/ConfigContraband.Core.Tests/ConfigContraband.Core.Tests.csproj" />
     <Project Path="tests/ConfigContraband.Tests/ConfigContraband.Tests.csproj" />
+    <Project Path="tests/ConfigContraband.Tool.Tests/ConfigContraband.Tool.Tests.csproj" />
   </Folder>
 </Solution>
