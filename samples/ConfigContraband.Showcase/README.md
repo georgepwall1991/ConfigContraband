@@ -3,7 +3,7 @@
 This standalone project is intentionally broken. Build it to see one clear diagnostic for each analyzer rule.
 
 ```bash
-dotnet build samples/ConfigContraband.Showcase/ConfigContraband.Showcase.csproj --configuration Release --no-incremental
+dotnet build samples/ConfigContraband.Showcase/ConfigContraband.Showcase.csproj --configuration Release --no-incremental -p:ContinuousIntegrationBuild=true
 ```
 
 Expected diagnostics:
@@ -11,13 +11,19 @@ Expected diagnostics:
 | Rule | What the sample shows |
 |---|---|
 | `CFG001` | `BindConfiguration("Strpie")` does not match the `Stripe` section in `appsettings.json`. |
+| `CFG002` | The `RequiredKey` section is missing the `[Required]` `ApiKey` property. |
 | `CFG003` | A custom `Validate(...)` rule exists, but `ValidateOnStart()` is missing. |
 | `CFG004` | An options type uses `[Required]`, but `ValidateDataAnnotations()` is missing. |
 | `CFG005` | A nested options object has validation attributes, but the parent property is not marked for recursive validation. |
 | `CFG006` | `appsettings.json` contains `WebookSecret`, which does not match `WebhookSecret`. |
 | `CFG007` | `ErrorOnUnknownConfiguration` is enabled, so the unknown `WebookSecret` key will fail binding. |
+| `CFG008` | The scalar value `"eighty"` cannot be converted to the bound `int Port` property. |
+| `CFG009` | `GetRequiredSection("Strpie")` reads a path that is absent from visible appsettings files. |
 
-The sample is not included in the main solution, so normal package and test builds stay clean. Its local `.globalconfig` promotes `CFG006` from `Info` to `warning` so it is visible with the other showcase diagnostics.
+The `ContinuousIntegrationBuild` property is required because normal local command-line builds disable
+analyzers for fast feedback. The sample is not included in the main solution, so normal package and test
+builds stay clean. Its local `.globalconfig` promotes `CFG006` from `Info` to `warning` so it is visible
+with the other showcase diagnostics.
 
 ## Generated schema
 

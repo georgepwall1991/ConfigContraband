@@ -229,10 +229,12 @@ configcontraband schema --project src/MyApp/MyApp.csproj --check
 The repository includes a showcase project with one intentional example for each rule:
 
 ```bash
-dotnet build samples/ConfigContraband.Showcase/ConfigContraband.Showcase.csproj --configuration Release --no-incremental
+dotnet build samples/ConfigContraband.Showcase/ConfigContraband.Showcase.csproj --configuration Release --no-incremental -p:ContinuousIntegrationBuild=true
 ```
 
-The sample stays out of the main solution so normal development builds remain clean.
+The `ContinuousIntegrationBuild` property is required because normal local command-line builds disable
+analyzer execution for fast feedback. The sample stays out of the main solution so normal development
+builds remain clean.
 
 ## Rule Details
 
