@@ -47,6 +47,17 @@ jobs:
           dotnet pack src/ConfigContraband/ConfigContraband.csproj --configuration Release --no-build --output artifacts/packages
           dotnet pack src/ConfigContraband.Tool/ConfigContraband.Tool.csproj --configuration Release --no-build --output artifacts/packages
 
+      - name: Verify package payloads
+        run: bash scripts/verify-packages.sh artifacts/packages
+
+      - name: Setup .NET 8 compatibility SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Verify .NET 8 analyzer host compatibility
+        run: bash scripts/verify-net8-analyzer-host.sh
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7

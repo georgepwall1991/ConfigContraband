@@ -46,7 +46,7 @@ Use it when your app relies on strongly typed options and you want configuration
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.7.22" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.7.23" PrivateAssets="all" />
 ```
 
 The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyser automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
@@ -55,7 +55,7 @@ No runtime dependency is added to your app. ConfigContraband runs as an analyser
 
 ## Compatibility
 
-ConfigContraband targets `netstandard2.0`, so it can run in current .NET SDKs and supported Visual Studio versions. The package is intended for modern SDK-style projects; use the latest stable .NET SDK and IDE servicing release for the best analyser experience.
+The ConfigContraband analyzer package targets `netstandard2.0` and compiles against Roslyn 4.8, so it can load in .NET 8 or newer SDKs and Visual Studio 2022 17.8 or newer. The analyzer is intended for modern SDK-style projects; use the latest servicing release of your SDK and IDE for the best experience.
 
 ## What It Looks At
 
@@ -143,6 +143,9 @@ Install the companion tool and generate the schema:
 dotnet tool install --global ConfigContraband.Tool
 configcontraband schema --project src/MyApp/MyApp.csproj
 ```
+
+`ConfigContraband.Tool` targets .NET 10 and requires a .NET 10 SDK. This runtime requirement is
+separate from the analyzer package's .NET 8 compiler-host compatibility floor.
 
 That writes `appsettings.schema.json` next to your project. Point your settings file at it:
 

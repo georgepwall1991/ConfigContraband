@@ -251,7 +251,7 @@ public sealed partial class ConfigContrabandAnalyzer
 
         var methodName = memberAccess.Name.Identifier.ValueText;
         INamedTypeSymbol? optionsType = null;
-        ImmutableArray<ExpressionSyntax> candidateSectionExpressions = [];
+        var candidateSectionExpressions = ImmutableArray<ExpressionSyntax>.Empty;
 
         if (string.Equals(methodName, "Bind", StringComparison.Ordinal) &&
             semanticModel.GetTypeInfo(memberAccess.Expression).Type is INamedTypeSymbol
@@ -267,7 +267,8 @@ public sealed partial class ConfigContrabandAnalyzer
             IsOptionsBuilderConfigurationMethod(invocation, semanticModel, methodName))
         {
             optionsType = bindOptionsType;
-            candidateSectionExpressions = [invocation.ArgumentList.Arguments[0].Expression];
+            candidateSectionExpressions =
+                ImmutableArray.Create(invocation.ArgumentList.Arguments[0].Expression);
         }
         else if (string.Equals(methodName, "Configure", StringComparison.Ordinal) &&
                  semanticModel.GetSymbolInfo(invocation).Symbol is IMethodSymbol
@@ -279,7 +280,9 @@ public sealed partial class ConfigContrabandAnalyzer
         {
             optionsType = configureOptionsType;
             candidateSectionExpressions =
-                [.. invocation.ArgumentList.Arguments.Select(argument => argument.Expression)];
+                invocation.ArgumentList.Arguments
+                    .Select(argument => argument.Expression)
+                    .ToImmutableArray();
         }
 
         if (optionsType is null)

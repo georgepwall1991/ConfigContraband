@@ -2,6 +2,19 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.23 - 2026-07-25
+
+- Restored analyzer compatibility with supported .NET 8 and newer SDKs and Visual Studio 2022
+  17.8 and newer by lowering the shipped Roslyn API baseline from 5.3 to 4.8. The previous
+  package could fail to load under older compiler hosts with `CS9057`, despite targeting
+  `netstandard2.0`, because analyzer host compatibility is governed by referenced Roslyn APIs.
+- Added a regression test that inspects both shipped analyzer assemblies and rejects Roslyn references
+  newer than the supported 4.8 floor. The repository's tests continue to run against Roslyn 5.3,
+  while CI and the publish workflow now run a package consumer under the .NET 8 compiler host.
+  No diagnostic IDs, severities, messages, or code fixes changed.
+- Included the root README in `ConfigContraband.Tool` so NuGet renders package documentation and
+  the release pack no longer emits the missing-readme warning.
+
 ## 0.7.22 - 2026-07-21
 
 - Fixed an infinite-loop analyzer hang in the `CFG002` constructor-overwrite proof. A public

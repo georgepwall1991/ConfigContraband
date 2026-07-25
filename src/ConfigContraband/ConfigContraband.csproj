@@ -14,7 +14,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.22</Version>
+    <Version>0.7.23</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband</Title>
     <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
@@ -25,7 +25,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Robustness release: fixed an infinite-loop analyzer hang in the CFG002 constructor-overwrite proof triggered by a self-cycling parameterless constructor (a zero-argument :this() initializer, CS0516 broken-compilation input), which now resolves as an unprovable constructor chain and reports conservatively instead of spinning. No diagnostic IDs, severities, messages, or code fixes changed.</PackageReleaseNotes>
+    <PackageReleaseNotes>Compatibility release: lowered the shipped Roslyn API baseline from 5.3 to 4.8 so ConfigContraband loads under .NET 8 and newer SDKs and Visual Studio 2022 17.8 and newer. Added a package-reference regression guard and retained current-host coverage. No diagnostic IDs, severities, messages, or code fixes changed.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
@@ -33,8 +33,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.3.0" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.3.0" PrivateAssets="all" />
+    <!-- Roslyn 4.8 is the .NET 8 / Visual Studio 17.8 compatibility floor.
+         Keep shipped analyzer references at this baseline so older compiler hosts can load them. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="5.3.0" PrivateAssets="all" />
   </ItemGroup>
 

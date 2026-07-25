@@ -4,6 +4,35 @@ namespace ConfigContraband.Tests;
 
 public sealed partial class ConfigContrabandAnalyzerTests
 {
+    [Fact]
+    public void Packaged_analyzer_references_net8_compatible_roslyn()
+    {
+        var supportedRoslynVersion = new Version(4, 8, 0, 0);
+        var packagedAssemblies = new[]
+        {
+            typeof(ConfigContrabandAnalyzer).Assembly,
+            typeof(ConfigurationSnapshot).Assembly,
+        };
+
+        var roslynReferences = packagedAssemblies
+            .SelectMany(assembly => assembly.GetReferencedAssemblies())
+            .Where(reference => reference.Name?.StartsWith("Microsoft.CodeAnalysis", StringComparison.Ordinal) == true)
+            .ToArray();
+
+        Assert.NotEmpty(roslynReferences);
+
+        var mismatchedReferences = roslynReferences
+            .Where(reference => reference.Version != supportedRoslynVersion)
+            .Select(reference => $"{reference.Name}, Version={reference.Version}")
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(reference => reference)
+            .ToArray();
+
+        Assert.True(
+            mismatchedReferences.Length == 0,
+            $"The shipped analyzer assemblies must reference the exact .NET 8 / Visual Studio 17.8 "
+            + $"Roslyn baseline {supportedRoslynVersion}. Mismatches: {string.Join(", ", mismatchedReferences)}");
+    }
 
     [Fact]
     public async Task Analyzer_ignores_generated_code()
