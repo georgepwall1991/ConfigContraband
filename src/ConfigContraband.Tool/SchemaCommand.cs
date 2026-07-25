@@ -17,13 +17,22 @@ internal static class SchemaCommand
 {
     private const string DefaultSchemaFileName = "appsettings.schema.json";
 
-    public static async Task<int> RunAsync(SchemaOptions options)
+    public static Task<int> RunAsync(SchemaOptions options)
+    {
+        return RunAsync(options, static project => project.GetCompilationAsync());
+    }
+
+    internal static async Task<int> RunAsync(
+        SchemaOptions options,
+        Func<Project, Task<Compilation?>> getCompilationAsync)
     {
         using var workspace = MSBuildWorkspace.Create();
+        var anyAnalysisFailure = false;
         workspace.WorkspaceFailed += (_, e) =>
         {
             if (e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
             {
+                anyAnalysisFailure = true;
                 Console.Error.WriteLine($"warning: {e.Diagnostic.Message}");
             }
         };
@@ -65,10 +74,19 @@ internal static class SchemaCommand
                 project = project.WithParseOptions(parseOptions.WithDocumentationMode(DocumentationMode.Parse));
             }
 
-            var compilation = await project.GetCompilationAsync();
+            var compilation = await getCompilationAsync(project);
             if (compilation is null)
             {
+                anyAnalysisFailure = true;
                 Console.Error.WriteLine($"warning: could not compile '{project.Name}'; skipping.");
+                continue;
+            }
+
+            if (options.Check &&
+                compilation.GetDiagnostics().Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+            {
+                anyAnalysisFailure = true;
+                Console.Error.WriteLine($"warning: could not analyze '{project.Name}' because it has compilation errors; skipping.");
                 continue;
             }
 
@@ -99,13 +117,32 @@ internal static class SchemaCommand
             }
         }
 
-        if (options.Check && anyStale)
+        var exitCode = DetermineExitCode(options.Check, anyStale, anyAnalysisFailure);
+        if (exitCode == 2)
+        {
+            Console.Error.WriteLine("Schema check was incomplete because one or more projects could not be analyzed.");
+        }
+        else if (exitCode == 1)
         {
             Console.Error.WriteLine("Schema is out of date. Run 'configcontraband schema' to regenerate.");
-            return 1;
         }
 
-        return 0;
+        return exitCode;
+    }
+
+    internal static int DetermineExitCode(bool check, bool anyStale, bool anyAnalysisFailure)
+    {
+        if (!check)
+        {
+            return 0;
+        }
+
+        if (anyAnalysisFailure)
+        {
+            return 2;
+        }
+
+        return anyStale ? 1 : 0;
     }
 
     private static async Task<IReadOnlyList<Project>> LoadProjectsAsync(MSBuildWorkspace workspace, SchemaOptions options)
