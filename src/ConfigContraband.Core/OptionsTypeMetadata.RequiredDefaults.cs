@@ -329,6 +329,17 @@ internal sealed partial class OptionsTypeMetadata
             return true;
         }
 
+        // RequiredAttribute accepts every non-null, non-string value. These array-only syntax
+        // shapes intrinsically create a non-null array; keep collection expressions targeting
+        // custom collection builders conservative because user code can decide the result.
+        if (propertyType is IArrayTypeSymbol &&
+            initializer is CollectionExpressionSyntax or
+                ImplicitArrayCreationExpressionSyntax or
+                ArrayCreationExpressionSyntax)
+        {
+            return true;
+        }
+
         if (initializer is not (ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax))
         {
             return false;

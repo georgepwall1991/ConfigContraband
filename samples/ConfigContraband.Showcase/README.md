@@ -23,7 +23,8 @@ Expected diagnostics:
 The `ContinuousIntegrationBuild` property is required because normal local command-line builds disable
 analyzers for fast feedback. The sample is not included in the main solution, so normal package and test
 builds stay clean. Its local `.globalconfig` promotes `CFG006` from `Info` to `warning` so it is visible
-with the other showcase diagnostics.
+with the other showcase diagnostics. CI runs `bash scripts/verify-showcase.sh` and fails unless this
+project emits exactly one diagnostic for every ID from `CFG001` through `CFG009`.
 
 ## Generated schema
 

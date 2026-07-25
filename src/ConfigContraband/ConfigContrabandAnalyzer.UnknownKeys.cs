@@ -54,7 +54,8 @@ public sealed partial class ConfigContrabandAnalyzer
                 unknownKeysReported,
                 registration.ErrorsOnUnknownConfiguration,
                 strictUnknownConfigurationKeySuppressed,
-                compilation);
+                compilation,
+                conversionFailuresThrow: true);
         }
     }
 
@@ -191,7 +192,8 @@ public sealed partial class ConfigContrabandAnalyzer
         ConcurrentDictionary<string, byte> unknownKeysReported,
         bool errorsOnUnknownConfiguration,
         bool strictUnknownConfigurationKeySuppressed,
-        Compilation compilation)
+        Compilation compilation,
+        bool conversionFailuresThrow)
     {
         var knownNames = metadata.GetConfigurationNames();
         foreach (var property in section.Properties)
@@ -279,12 +281,24 @@ public sealed partial class ConfigContrabandAnalyzer
 
             if (property.Value.Properties.IsDefaultOrEmpty)
             {
-                AnalyzeScalarValueConversion(
+                if (conversionFailuresThrow)
+                {
+                    AnalyzeScalarValueConversion(
+                        reportDiagnostic,
+                        unknownKeysReported,
+                        bindableProperty.Symbol.Type,
+                        property);
+                }
+                continue;
+            }
+
+            if (errorsOnUnknownConfiguration)
+            {
+                AnalyzeStrictContainerScalarConversions(
                     reportDiagnostic,
                     unknownKeysReported,
-                    bindableProperty,
-                    property);
-                continue;
+                    bindableProperty.Symbol.Type,
+                    property.Value);
             }
 
             if (metadata.TryCreateNestedMetadata(bindableProperty, out var nestedMetadata))
@@ -298,7 +312,8 @@ public sealed partial class ConfigContrabandAnalyzer
                     unknownKeysReported,
                     nestedErrorsOnUnknownConfiguration,
                     strictUnknownConfigurationKeySuppressed,
-                    compilation);
+                    compilation,
+                    conversionFailuresThrow);
                 continue;
             }
 
@@ -317,7 +332,8 @@ public sealed partial class ConfigContrabandAnalyzer
                             unknownKeysReported,
                             dictionaryErrorsOnUnknownConfiguration,
                             strictUnknownConfigurationKeySuppressed,
-                            compilation);
+                            compilation,
+                            conversionFailuresThrow: errorsOnUnknownConfiguration);
                     }
                 }
 
@@ -339,7 +355,8 @@ public sealed partial class ConfigContrabandAnalyzer
                                 unknownKeysReported,
                                 errorsOnUnknownConfiguration,
                                 strictUnknownConfigurationKeySuppressed,
-                                compilation);
+                                compilation,
+                                conversionFailuresThrow: errorsOnUnknownConfiguration);
                         }
                     }
                 }
@@ -444,7 +461,8 @@ public sealed partial class ConfigContrabandAnalyzer
                         unknownKeysReported,
                         errorsOnUnknownConfiguration,
                         strictUnknownConfigurationKeySuppressed,
-                        compilation);
+                        compilation,
+                        conversionFailuresThrow: errorsOnUnknownConfiguration);
                 }
             }
         }
@@ -669,6 +687,9 @@ public sealed partial class ConfigContrabandAnalyzer
                     if (!nestedEntry.Value.Properties.IsDefaultOrEmpty)
                     {
                         var nestedPath = entryPath.Add(nestedEntry.Key);
+                        // This helper is reachable only after strict binding has been established.
+                        // A polymorphic initializer suppresses CFG006's unknown-key certainty, but
+                        // it does not stop the runtime binder throwing for a known scalar conversion.
                         AnalyzeUnknownKeysInSection(
                             reportDiagnostic,
                             nestedEntry.Value,
@@ -676,7 +697,8 @@ public sealed partial class ConfigContrabandAnalyzer
                             unknownKeysReported,
                             errorsOnUnknownConfiguration: !bindableProperty.HasPotentialPolymorphicDictionaryValueInitializerForPath(nestedPath),
                             strictUnknownConfigurationKeySuppressed: strictUnknownConfigurationKeySuppressed,
-                            compilation: compilation);
+                            compilation: compilation,
+                            conversionFailuresThrow: true);
                     }
                 }
             }
@@ -706,7 +728,8 @@ public sealed partial class ConfigContrabandAnalyzer
                         unknownKeysReported,
                         errorsOnUnknownConfiguration: true,
                         strictUnknownConfigurationKeySuppressed: strictUnknownConfigurationKeySuppressed,
-                        compilation: compilation);
+                        compilation: compilation,
+                        conversionFailuresThrow: true);
                 }
             }
         }
@@ -805,14 +828,95 @@ public sealed partial class ConfigContrabandAnalyzer
             suffix));
     }
 
+    private static void AnalyzeStrictContainerScalarConversions(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> reportedDiagnostics,
+        ITypeSymbol containerType,
+        ConfigurationNode value)
+    {
+        if (OptionsTypeMetadata.TryGetDictionaryValueType(containerType, out _))
+        {
+            if (!OptionsTypeMetadata.TryGetSupportedDictionaryValueType(
+                    containerType,
+                    out var dictionaryValueType))
+            {
+                return;
+            }
+
+            if (OptionsTypeMetadata.TryGetSupportedCollectionElementType(
+                    dictionaryValueType,
+                    out var dictionaryCollectionElementType))
+            {
+                foreach (var entry in value.Properties)
+                {
+                    foreach (var item in entry.Value.Properties)
+                    {
+                        AnalyzeScalarContainerEntry(
+                            reportDiagnostic,
+                            reportedDiagnostics,
+                            dictionaryCollectionElementType,
+                            item);
+                    }
+                }
+
+                return;
+            }
+
+            foreach (var entry in value.Properties)
+            {
+                AnalyzeScalarContainerEntry(
+                    reportDiagnostic,
+                    reportedDiagnostics,
+                    dictionaryValueType,
+                    entry);
+            }
+
+            return;
+        }
+
+        if (!OptionsTypeMetadata.TryGetSupportedCollectionElementType(
+                containerType,
+                out var collectionElementType))
+        {
+            return;
+        }
+
+        foreach (var item in value.Properties)
+        {
+            AnalyzeScalarContainerEntry(
+                reportDiagnostic,
+                reportedDiagnostics,
+                collectionElementType,
+                item);
+        }
+    }
+
+    private static void AnalyzeScalarContainerEntry(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> reportedDiagnostics,
+        ITypeSymbol targetType,
+        ConfigurationProperty entry)
+    {
+        if (!entry.Value.Properties.IsDefaultOrEmpty)
+        {
+            return;
+        }
+
+        AnalyzeScalarValueConversion(
+            reportDiagnostic,
+            reportedDiagnostics,
+            targetType,
+            entry);
+    }
+
     private static void AnalyzeScalarValueConversion(
         Action<Diagnostic> reportDiagnostic,
         ConcurrentDictionary<string, byte> unknownKeysReported,
-        BindableProperty bindableProperty,
+        ITypeSymbol targetType,
         ConfigurationProperty property)
     {
         if (!ScalarConversion.IsProvablyNotConvertible(
-                bindableProperty.Symbol.Type,
+                targetType,
                 property.ScalarKind,
                 property.ScalarValue))
         {
@@ -821,7 +925,7 @@ public sealed partial class ConfigContrabandAnalyzer
 
         var location = property.ValueLocation ?? property.Location;
         var reportKey = CreateConfigurationValueTypeMismatchReportKey(
-            bindableProperty.Symbol.Type,
+            targetType,
             location,
             property.FullPath);
         if (!unknownKeysReported.TryAdd(reportKey, 0))
@@ -833,7 +937,7 @@ public sealed partial class ConfigContrabandAnalyzer
             DiagnosticDescriptors.ConfigurationValueTypeMismatch,
             location,
             property.FullPath,
-            bindableProperty.Symbol.Type.ToDisplayString()));
+            targetType.ToDisplayString()));
     }
 
     private static string CreateConfigurationValueTypeMismatchReportKey(

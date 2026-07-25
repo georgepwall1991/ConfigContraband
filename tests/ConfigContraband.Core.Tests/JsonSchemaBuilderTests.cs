@@ -121,6 +121,33 @@ public sealed partial class JsonSchemaBuilderTests
     }
 
     [Fact]
+    public void Required_array_properties_with_non_null_defaults_are_not_marked_required()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ArrayOptions
+            {
+                [Required]
+                public string[] CollectionExpression { get; set; } = [];
+
+                [Required]
+                public string[] ImplicitArray { get; set; } = new[] { "configured" };
+
+                [Required]
+                public string[] ExplicitSizedArray { get; set; } = new string[0];
+
+                [Required]
+                public string[] ExplicitArray { get; set; } = new string[] { "configured" };
+            }
+            """,
+            "ArrayOptions");
+
+        Assert.DoesNotContain("\"required\"", schema);
+    }
+
+    [Fact]
     public void Required_recursive_object_with_default_keeps_parent_required_when_nested_required_is_unsatisfied()
     {
         var schema = BuildSchema(
