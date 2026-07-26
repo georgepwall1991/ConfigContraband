@@ -11,6 +11,8 @@ public sealed partial class ConfigContrabandAnalyzerTests
             Path.Combine(AppContext.BaseDirectory, "../../../../.."));
         var codecovConfiguration = File.ReadAllText(
             Path.Combine(repositoryRoot, "codecov.yml"));
+        var ciWorkflow = File.ReadAllText(
+            Path.Combine(repositoryRoot, ".github", "workflows", "ci.yml"));
 
         const string ExpectedProjectPolicy =
             "    project:\n"
@@ -31,6 +33,22 @@ public sealed partial class ConfigContrabandAnalyzerTests
         Assert.Contains(ExpectedProjectPolicy, codecovConfiguration, StringComparison.Ordinal);
         Assert.Contains(ExpectedPatchPolicy, codecovConfiguration, StringComparison.Ordinal);
         Assert.DoesNotContain("target: 98%", codecovConfiguration, StringComparison.Ordinal);
+        Assert.Contains(
+            "run: bash scripts/verify-codecov-policy-tests.sh",
+            ciWorkflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "run: bash scripts/verify-codecov-policy.sh \"$CODECOV_BASE_SHA\" \"$CODECOV_HEAD_SHA\"",
+            ciWorkflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CODECOV_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}",
+            ciWorkflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CODECOV_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}",
+            ciWorkflow,
+            StringComparison.Ordinal);
     }
 
     [Fact]
