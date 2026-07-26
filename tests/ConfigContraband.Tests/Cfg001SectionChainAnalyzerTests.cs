@@ -377,6 +377,38 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg001_reports_stored_section_with_reordered_named_bind_arguments()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            var section = configuration.GetSection("Features");
+            services.AddOptions<StripeOptions>()
+                .Bind(
+                    configureBinder: _ => { },
+                    config: section.GetSection({|#0:"Strpie"|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Features:Strpie", ". Did you mean \"Features:Stripe\"?");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Features": {
+                "Stripe": {
+                  "ApiKey": "secret"
+                }
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg001_reports_conditional_access_get_section_chained_off_origin_visible_stored_section_variable()
     {
         var source = OptionsSource("""

@@ -60,14 +60,10 @@ public sealed partial class ConfigContrabandAnalyzer
         bool sectionExpressionContainsFullPath;
         if (string.Equals(methodName, "BindConfiguration", StringComparison.Ordinal))
         {
-            if (semanticModel.GetOperation(invocation) is not IInvocationOperation operation)
-            {
-                return false;
-            }
-
-            var sectionArgument = operation.Arguments.FirstOrDefault(argument =>
-                string.Equals(argument.Parameter?.Name, "configSectionPath", StringComparison.Ordinal));
-            if (sectionArgument?.Value.Syntax is not ExpressionSyntax argumentExpression)
+            if (GetInvocationArgumentExpression(
+                    invocation,
+                    semanticModel,
+                    "configSectionPath") is not { } argumentExpression)
             {
                 return false;
             }
@@ -82,8 +78,12 @@ public sealed partial class ConfigContrabandAnalyzer
         }
         else if (string.Equals(methodName, "Bind", StringComparison.Ordinal))
         {
-            if (!TryGetConfigurationSectionPath(
-                    invocation.ArgumentList.Arguments[0].Expression,
+            if (GetInvocationArgumentExpression(
+                    invocation,
+                    semanticModel,
+                    "config") is not { } configurationExpression ||
+                !TryGetConfigurationSectionPath(
+                    configurationExpression,
                     semanticModel,
                     out sectionPath,
                     out sectionExpression,
@@ -121,6 +121,18 @@ public sealed partial class ConfigContrabandAnalyzer
             sectionExpression.GetLocation(),
             RequiresRuntimeSection(sectionExpression, semanticModel));
         return true;
+    }
+
+    private static ExpressionSyntax? GetInvocationArgumentExpression(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        string parameterName)
+    {
+        return (semanticModel.GetOperation(invocation) as IInvocationOperation)?
+            .Arguments
+            .FirstOrDefault(argument =>
+                string.Equals(argument.Parameter?.Name, parameterName, StringComparison.Ordinal))?
+            .Value.Syntax as ExpressionSyntax;
     }
 
     private static bool HasAddOptionsWithValidateOnStartReceiver(
@@ -264,11 +276,15 @@ public sealed partial class ConfigContrabandAnalyzer
                 "Microsoft.Extensions.Options",
                 StringComparison.Ordinal) &&
             receiverType.TypeArguments[0] is INamedTypeSymbol bindOptionsType &&
-            IsOptionsBuilderConfigurationMethod(invocation, semanticModel, methodName))
+            IsOptionsBuilderConfigurationMethod(invocation, semanticModel, methodName) &&
+            GetInvocationArgumentExpression(
+                invocation,
+                semanticModel,
+                "config") is { } configurationExpression)
         {
             optionsType = bindOptionsType;
             candidateSectionExpressions =
-                ImmutableArray.Create(invocation.ArgumentList.Arguments[0].Expression);
+                ImmutableArray.Create(configurationExpression);
         }
         else if (string.Equals(methodName, "Configure", StringComparison.Ordinal) &&
                  semanticModel.GetSymbolInfo(invocation).Symbol is IMethodSymbol
