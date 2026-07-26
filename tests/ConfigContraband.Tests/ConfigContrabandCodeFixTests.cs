@@ -39,6 +39,104 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Section_fix_all_applies_each_cfg001_and_cfg009_replacement()
+    {
+        var primarySource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration({|#0:"Strpie"|})
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+            """;
+
+        var fixedPrimarySource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+            """;
+
+        var secondarySource = """
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Reader
+            {
+                public void Read(IConfiguration configuration)
+                {
+                    _ = configuration.GetRequiredSection({|#1:"Databsae"|});
+                }
+            }
+            """;
+
+        var fixedSecondarySource = """
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Reader
+            {
+                public void Read(IConfiguration configuration)
+                {
+                    _ = configuration.GetRequiredSection("Database");
+                }
+            }
+            """;
+
+        var cfg001Expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+        var cfg009Expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationKeyNotFound)
+            .WithLocation(1)
+            .WithArguments("Databsae", ". Did you mean \"Database\"?");
+
+        await Verifier.VerifyFixAllAcrossProjectsAsync(
+            ("Primary.cs", primarySource),
+            ("Primary.cs", fixedPrimarySource),
+            ("Secondary.cs", secondarySource),
+            ("Secondary.cs", fixedSecondarySource),
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "configured"
+              },
+              "Database": {
+                "Host": "localhost"
+              }
+            }
+            """),
+            "UseSuggestedSection",
+            cfg001Expected,
+            cfg009Expected);
+    }
+
+    [Fact]
     public async Task Cfg001_fix_preserves_verbatim_section_literal()
     {
         var source = OptionsSource("""
@@ -459,6 +557,86 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg003_fix_all_appends_validate_on_start_to_each_registration()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    {|#0:services.AddOptions<FirstOptions>()
+                        .BindConfiguration("First")
+                        .ValidateDataAnnotations()|};
+
+                    {|#1:services.AddOptions<SecondOptions>()
+                        .BindConfiguration("Second")
+                        .Validate(_ => true)|};
+                }
+            }
+
+            public sealed class FirstOptions
+            {
+                [Required]
+                public string Value { get; set; } = "";
+            }
+
+            public sealed class SecondOptions
+            {
+                public string Value { get; set; } = "";
+            }
+            """;
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<FirstOptions>()
+                        .BindConfiguration("First")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+
+                    services.AddOptions<SecondOptions>()
+                        .BindConfiguration("Second")
+                        .Validate(_ => true)
+                        .ValidateOnStart();
+                }
+            }
+
+            public sealed class FirstOptions
+            {
+                [Required]
+                public string Value { get; set; } = "";
+            }
+
+            public sealed class SecondOptions
+            {
+                public string Value { get; set; } = "";
+            }
+            """;
+
+        var firstExpected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("FirstOptions");
+        var secondExpected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(1)
+            .WithArguments("SecondOptions");
+
+        await Verifier.VerifyFixAllAsync(
+            source,
+            fixedSource,
+            "AddValidateOnStart",
+            firstExpected,
+            secondExpected);
+    }
+
+    [Fact]
     public async Task Cfg003_fix_appends_validate_on_start_for_named_options_builder()
     {
         var source = OptionsSource("""
@@ -710,6 +888,85 @@ public sealed partial class ConfigContrabandCodeFixTests
             .WithArguments("StripeOptions");
 
         await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_fix_all_applies_each_diagnostics_validation_shape()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    {|#0:services.AddOptionsWithValidateOnStart<FirstOptions>()
+                        .BindConfiguration("First")|};
+
+                    {|#1:services.AddOptions<SecondOptions>()
+                        .BindConfiguration("Second")|};
+                }
+            }
+
+            public sealed class FirstOptions
+            {
+                [Required]
+                public string Value { get; set; } = "";
+            }
+
+            public sealed class SecondOptions
+            {
+                [Required]
+                public string Value { get; set; } = "";
+            }
+            """;
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptionsWithValidateOnStart<FirstOptions>()
+                        .BindConfiguration("First")
+                        .ValidateDataAnnotations();
+
+                    services.AddOptions<SecondOptions>()
+                        .BindConfiguration("Second")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+
+            public sealed class FirstOptions
+            {
+                [Required]
+                public string Value { get; set; } = "";
+            }
+
+            public sealed class SecondOptions
+            {
+                [Required]
+                public string Value { get; set; } = "";
+            }
+            """;
+
+        var firstExpected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("FirstOptions");
+        var secondExpected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(1)
+            .WithArguments("SecondOptions");
+
+        await Verifier.VerifyFixAllAsync(
+            source,
+            fixedSource,
+            "AddValidateDataAnnotations",
+            firstExpected,
+            secondExpected);
     }
 
     [Fact]
