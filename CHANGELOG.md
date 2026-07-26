@@ -4,6 +4,9 @@ All notable changes to ConfigContraband will be documented in this file.
 
 ## Unreleased
 
+- Added stable per-rule documentation links to all CFG001-CFG009 diagnostics so IDE help actions
+  open the exact README guidance for the reported rule. Diagnostic IDs, severities, messages, and
+  code fixes are unchanged.
 - Made CFG005 recursive-validation candidate traversal deterministic across syntax-tree input
   ordering, removed duplicate candidates from self-recursive validated option types, and propagated
   analyzer cancellation through metadata construction and the recursive walk. Diagnostic IDs,

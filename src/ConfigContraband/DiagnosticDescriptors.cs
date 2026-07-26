@@ -5,6 +5,7 @@ namespace ConfigContraband;
 public static class DiagnosticDescriptors
 {
     private const string Category = "Configuration";
+    private const string DocumentationBaseUrl = "https://github.com/georgepwall1991/ConfigContraband#";
 
     public static readonly DiagnosticDescriptor MissingConfigurationSection = new(
         id: DiagnosticIds.MissingConfigurationSection,
@@ -13,7 +14,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "The section passed to BindConfiguration should exist in appsettings configuration files.");
+        description: "The section passed to BindConfiguration should exist in appsettings configuration files.",
+        helpLinkUri: DocumentationBaseUrl + "cfg001-the-section-must-exist");
 
     public static readonly DiagnosticDescriptor MissingRequiredConfigurationKey = new(
         id: DiagnosticIds.MissingRequiredConfigurationKey,
@@ -22,7 +24,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "DataAnnotations [Required] properties that can fail validation should be present in the configuration section.");
+        description: "DataAnnotations [Required] properties that can fail validation should be present in the configuration section.",
+        helpLinkUri: DocumentationBaseUrl + "cfg002-required-configuration-keys-must-be-present");
 
     public static readonly DiagnosticDescriptor ValidationNotOnStart = new(
         id: DiagnosticIds.ValidationNotOnStart,
@@ -31,7 +34,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Options validation normally runs when options are first created. Add ValidateOnStart() to fail during startup.");
+        description: "Options validation normally runs when options are first created. Add ValidateOnStart() to fail during startup.",
+        helpLinkUri: DocumentationBaseUrl + "cfg003-validation-should-run-when-the-app-starts");
 
     public static readonly DiagnosticDescriptor DataAnnotationsNotEnabled = new(
         id: DiagnosticIds.DataAnnotationsNotEnabled,
@@ -40,7 +44,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Options classes that use DataAnnotations need ValidateDataAnnotations() in the options registration chain.");
+        description: "Options classes that use DataAnnotations need ValidateDataAnnotations() in the options registration chain.",
+        helpLinkUri: DocumentationBaseUrl + "cfg004-dataannotations-must-be-switched-on");
 
     public static readonly DiagnosticDescriptor NestedValidationNotRecursive = new(
         id: DiagnosticIds.NestedValidationNotRecursive,
@@ -49,7 +54,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "DataAnnotations validation does not recursively validate nested objects or collection items unless recursive validation attributes are used.");
+        description: "DataAnnotations validation does not recursively validate nested objects or collection items unless recursive validation attributes are used.",
+        helpLinkUri: DocumentationBaseUrl + "cfg005-nested-options-need-recursive-validation");
 
     public static readonly DiagnosticDescriptor UnknownConfigurationKey = new(
         id: DiagnosticIds.UnknownConfigurationKey,
@@ -58,7 +64,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Info,
         isEnabledByDefault: true,
-        description: "A key under a bound appsettings section does not match any public bindable property on the options type.");
+        description: "A key under a bound appsettings section does not match any public bindable property on the options type.",
+        helpLinkUri: DocumentationBaseUrl + "cfg006-config-keys-should-match-options-properties");
 
     public static readonly DiagnosticDescriptor UnknownConfigurationKeyWillThrow = new(
         id: DiagnosticIds.UnknownConfigurationKeyWillThrow,
@@ -67,7 +74,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "A key under a bound appsettings section will be rejected while BinderOptions.ErrorOnUnknownConfiguration is enabled.");
+        description: "A key under a bound appsettings section will be rejected while BinderOptions.ErrorOnUnknownConfiguration is enabled.",
+        helpLinkUri: DocumentationBaseUrl + "cfg007-strict-binding-turns-unknown-keys-into-failures");
 
     public static readonly DiagnosticDescriptor ConfigurationValueTypeMismatch = new(
         id: DiagnosticIds.ConfigurationValueTypeMismatch,
@@ -76,7 +84,8 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "A scalar value in appsettings cannot be converted to a bound property or direct read's CLR target type, so the configuration binder will throw during binding or reading.");
+        description: "A scalar value in appsettings cannot be converted to a bound property or direct read's CLR target type, so the configuration binder will throw during binding or reading.",
+        helpLinkUri: DocumentationBaseUrl + "cfg008-configuration-values-that-cannot-bind-to-their-target-type");
 
     public static readonly DiagnosticDescriptor ConfigurationKeyNotFound = new(
         id: DiagnosticIds.ConfigurationKeyNotFound,
@@ -85,5 +94,6 @@ public static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Supported paths read directly from IConfiguration (GetRequiredSection, GetSection().Get<T>()/.Bind(), GetConnectionString) should be available from a visible appsettings configuration file.");
+        description: "Supported paths read directly from IConfiguration (GetRequiredSection, GetSection().Get<T>()/.Bind(), GetConnectionString) should be available from a visible appsettings configuration file.",
+        helpLinkUri: DocumentationBaseUrl + "cfg009-direct-configuration-paths-unavailable-from-visible-appsettings-files");
 }
