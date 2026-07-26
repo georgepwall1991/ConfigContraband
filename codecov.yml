@@ -2,10 +2,14 @@ coverage:
   status:
     project:
       default:
-        target: 98%
+        target: auto
         threshold: 0%
+        removed_code_behavior: off
+        if_not_found: error
         if_ci_failed: error
     patch:
       default:
-        target: auto
-        threshold: 5%
+        target: 100%
+        threshold: 0%
+        if_not_found: error
+        if_ci_failed: error

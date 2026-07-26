@@ -4,6 +4,12 @@ All notable changes to ConfigContraband will be documented in this file.
 
 ## Unreleased
 
+- Replaced the stale 98% Codecov project target with a truthful no-regression gate against the
+  measured base commit, and tightened changed-line coverage to 100% with zero tolerance. The
+  repository now rejects either an overall coverage decrease, including decreases caused by
+  removed covered code, or uncovered coverable lines in a PR; missing comparison reports fail
+  closed rather than silently passing. The CI build independently verifies Codecov's exact
+  base/head comparison so enforcement does not depend on the absent `codecov/project` context.
 - Made CI and release publication fail on every unexpected compiler or analyzer warning while
   retaining only the intentional CFG001-CFG009 showcase diagnostics. Sample-only shape warnings
   are suppressed at the sample project boundary instead of being accepted repository-wide, and

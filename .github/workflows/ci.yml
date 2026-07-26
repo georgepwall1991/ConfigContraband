@@ -38,12 +38,21 @@ jobs:
       - name: Test
         run: dotnet test ConfigContraband.slnx --configuration Release --no-build --logger trx --results-directory TestResults --collect:"XPlat Code Coverage"
 
+      - name: Verify Codecov policy helper
+        run: bash scripts/verify-codecov-policy-tests.sh
+
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
           directory: TestResults
           fail_ci_if_error: true
           use_oidc: true
+
+      - name: Enforce Codecov policy
+        env:
+          CODECOV_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CODECOV_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash scripts/verify-codecov-policy.sh "$CODECOV_BASE_SHA" "$CODECOV_HEAD_SHA"
 
       - name: Pack
         run: |
