@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="440" viewBox="0 0 920 440" role="img" aria-labelledby="title desc">
+  <title id="title">ConfigContraband dual loop: Roslyn analyzer and appsettings schema tool</title>
+  <desc id="desc">Diagram of Options types and appsettings feeding both the analyzer package for build warnings and the CLI tool that generates appsettings.schema.json for editor IntelliSense.</desc>
+  <rect width="920" height="440" rx="12" fill="#0f172a"/>
+  <text x="32" y="40" fill="#f1f5f9" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700">Dual loop: analyzer + schema (Options ↔ appsettings)</text>
+  <text x="32" y="64" fill="#94a3b8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">Same bindable model · compile-time CFG rules · live JSON IntelliSense</text>
+
+  <!-- center: sources -->
+  <rect x="310" y="100" width="300" height="100" rx="10" fill="#1e293b" stroke="#475569" stroke-width="1.5"/>
+  <text x="460" y="140" text-anchor="middle" fill="#e2e8f0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700">Your Options types</text>
+  <text x="460" y="164" text-anchor="middle" fill="#94a3b8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">IOptions&lt;T&gt; · BindConfiguration · [Required]</text>
+  <text x="460" y="184" text-anchor="middle" fill="#94a3b8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">appsettings.json / appsettings.*.json</text>
+
+  <!-- left: analyzer -->
+  <rect x="32" y="250" width="400" height="150" rx="10" fill="#172554" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="52" y="284" fill="#93c5fd" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700">ConfigContraband (analyzer)</text>
+  <text x="52" y="312" fill="#e2e8f0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">Roslyn build + IDE diagnostics CFG001–CFG009</text>
+  <text x="52" y="336" fill="#cbd5e1" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">• section typos · missing required keys</text>
+  <text x="52" y="356" fill="#cbd5e1" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">• ValidateOnStart / ValidateDataAnnotations</text>
+  <text x="52" y="376" fill="#cbd5e1" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">• unknown keys · bind conversion · direct reads</text>
+
+  <!-- right: tool -->
+  <rect x="488" y="250" width="400" height="150" rx="10" fill="#14532d" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="508" y="284" fill="#86efac" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700">ConfigContraband.Tool (CLI)</text>
+  <text x="508" y="312" fill="#e2e8f0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">configcontraband schema → appsettings.schema.json</text>
+  <text x="508" y="336" fill="#cbd5e1" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">• key completion · type checking · required hints</text>
+  <text x="508" y="356" fill="#cbd5e1" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">• Range / StringLength as JSON Schema constraints</text>
+  <text x="508" y="376" fill="#cbd5e1" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">• --check keeps schema honest in CI</text>
+
+  <!-- arrows -->
+  <path d="M360 200 L180 250" stroke="#60a5fa" stroke-width="2.5" fill="none" marker-end="url(#arrowB)"/>
+  <path d="M560 200 L740 250" stroke="#4ade80" stroke-width="2.5" fill="none"/>
+  <polygon points="172,248 188,242 182,258" fill="#60a5fa"/>
+  <polygon points="748,248 732,242 738,258" fill="#4ade80"/>
+  <text x="200" y="220" fill="#60a5fa" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="600">build / CI</text>
+  <text x="680" y="220" fill="#4ade80" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="600">edit JSON</text>
+</svg>

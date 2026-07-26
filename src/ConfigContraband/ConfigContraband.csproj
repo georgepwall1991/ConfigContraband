@@ -14,18 +14,18 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.25</Version>
+    <Version>0.7.26</Version>
     <Authors>George Wall</Authors>
-    <Title>ConfigContraband</Title>
-    <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
-    <PackageTags>configuration;options;appsettings;dotnet;csharp;aspnetcore;roslyn;roslyn-analyzer;analyzers;static-analysis</PackageTags>
+    <Title>ConfigContraband — Options and appsettings validation analyzer</Title>
+    <Description>Compile-time Options validation for .NET: a Roslyn analyzer that checks BindConfiguration, ValidateOnStart, ValidateDataAnnotations, and appsettings.json against your IOptions types so broken configuration fails in the editor and CI—not production.</Description>
+    <PackageTags>configuration;options;appsettings;validation;ValidateOnStart;ValidateDataAnnotations;BindConfiguration;IOptions;options-pattern;DataAnnotations;roslyn;roslyn-analyzer;analyzers;static-analysis;aspnetcore;csharp;dotnet</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageIcon>assets/configcontraband-icon.png</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Reliability release: adds conservative CFG006-CFG008 analysis for direct Get&lt;T&gt;/Bind targets; supports reordered named Bind arguments; suppresses unsafe validation fixes after builder retargeting; aligns duplicate JSON-path handling with the runtime; makes CFG005 deterministic and cancellation-aware; hardens schema extraction and fail-closed CLI behavior; adds rule help links and Fix All contracts; and strengthens warning, coverage, showcase, packed-tool, and exact .NET 8 release gates. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Discoverability release: keyword-rich package title, description, and tags for Options validation (ValidateOnStart, ValidateDataAnnotations, BindConfiguration, IOptions); conversion-funnel README with product-flow visuals for IDE diagnostics, code fixes, and the analyzer+schema loop; packs assets for NuGet README rendering; adds discoverability metadata tests and package verification. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
@@ -55,7 +55,7 @@
     <None Include="$(OutputPath)\ConfigContraband.Core.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     <None Include="buildTransitive\ConfigContraband.props" Pack="true" PackagePath="buildTransitive\ConfigContraband.props" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
-    <None Include="..\..\assets\configcontraband-icon.png" Pack="true" PackagePath="assets\" />
+    <None Include="..\..\assets\**\*" Pack="true" PackagePath="assets\" />
   </ItemGroup>
 
   <ItemGroup>
