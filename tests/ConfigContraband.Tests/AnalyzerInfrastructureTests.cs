@@ -5,6 +5,49 @@ namespace ConfigContraband.Tests;
 public sealed partial class ConfigContrabandAnalyzerTests
 {
     [Fact]
+    public void Diagnostics_link_to_their_exact_rule_documentation()
+    {
+        const string HelpLinkBase = "https://github.com/georgepwall1991/ConfigContraband#";
+        var expectedDocumentation = new Dictionary<string, (string Anchor, string Heading)>(StringComparer.Ordinal)
+        {
+            [DiagnosticIds.MissingConfigurationSection] =
+                ("cfg001-the-section-must-exist", "### `CFG001`: The Section Must Exist"),
+            [DiagnosticIds.MissingRequiredConfigurationKey] =
+                ("cfg002-required-configuration-keys-must-be-present", "### `CFG002`: Required Configuration Keys Must Be Present"),
+            [DiagnosticIds.ValidationNotOnStart] =
+                ("cfg003-validation-should-run-when-the-app-starts", "### `CFG003`: Validation Should Run When The App Starts"),
+            [DiagnosticIds.DataAnnotationsNotEnabled] =
+                ("cfg004-dataannotations-must-be-switched-on", "### `CFG004`: DataAnnotations Must Be Switched On"),
+            [DiagnosticIds.NestedValidationNotRecursive] =
+                ("cfg005-nested-options-need-recursive-validation", "### `CFG005`: Nested Options Need Recursive Validation"),
+            [DiagnosticIds.UnknownConfigurationKey] =
+                ("cfg006-config-keys-should-match-options-properties", "### `CFG006`: Config Keys Should Match Options Properties"),
+            [DiagnosticIds.UnknownConfigurationKeyWillThrow] =
+                ("cfg007-strict-binding-turns-unknown-keys-into-failures", "### `CFG007`: Strict Binding Turns Unknown Keys Into Failures"),
+            [DiagnosticIds.ConfigurationValueTypeMismatch] =
+                ("cfg008-configuration-values-that-cannot-bind-to-their-target-type", "### `CFG008`: Configuration Values That Cannot Bind To Their Target Type"),
+            [DiagnosticIds.ConfigurationKeyNotFound] =
+                ("cfg009-direct-configuration-paths-unavailable-from-visible-appsettings-files", "### `CFG009`: Direct Configuration Paths Unavailable from Visible Appsettings Files"),
+        };
+        var supportedDiagnostics = new ConfigContrabandAnalyzer().SupportedDiagnostics;
+        var repositoryRoot = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var readme = File.ReadAllText(Path.Combine(repositoryRoot, "README.md"));
+
+        Assert.Equal(expectedDocumentation.Count, supportedDiagnostics.Length);
+        foreach (var descriptor in supportedDiagnostics)
+        {
+            var documentation = Assert.Contains(descriptor.Id, expectedDocumentation);
+            Assert.Equal(HelpLinkBase + documentation.Anchor, descriptor.HelpLinkUri);
+            Assert.Contains(documentation.Heading, readme, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(
+            supportedDiagnostics.Length,
+            supportedDiagnostics.Select(descriptor => descriptor.HelpLinkUri).Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
     public void CI_and_publish_enforce_the_showcase_diagnostic_contract()
     {
         var repositoryRoot = Path.GetFullPath(
