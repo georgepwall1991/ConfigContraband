@@ -133,6 +133,89 @@ public sealed class ConfigurationModelCoverageTests
     }
 
     [Fact]
+    public void Json_parser_rejects_case_insensitive_duplicate_flattened_scalar_paths()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              "Server": {
+                "Value": "eighty"
+              },
+              "server:value": 80
+            }
+            """));
+
+        Assert.Null(root);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    public void Json_parser_rejects_empty_container_followed_by_scalar_at_same_flattened_path(
+        string emptyContainer)
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From($$"""
+            {
+              "Server": {
+                "Value": {{emptyContainer}}
+              },
+              "server:value": 80
+            }
+            """));
+
+        Assert.Null(root);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    public void Json_parser_preserves_scalar_followed_by_empty_container_at_same_flattened_path(
+        string emptyContainer)
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From($$"""
+            {
+              "Server": {
+                "Value": 80
+              },
+              "server:value": {{emptyContainer}}
+            }
+            """));
+
+        Assert.NotNull(root);
+        Assert.True(root!.TryGetProperty("Server", out var server));
+        Assert.Empty(server.Value.Properties);
+    }
+
+    [Fact]
+    public void Json_parser_preserves_distinct_path_below_empty_root_segment()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              "": {
+                "A": 1
+              },
+              "A": 2
+            }
+            """));
+
+        Assert.NotNull(root);
+    }
+
+    [Fact]
+    public void Json_parser_rejects_duplicate_path_below_empty_root_segment()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              "": {
+                "A": 1
+              },
+              ":A": 2
+            }
+            """));
+
+        Assert.Null(root);
+    }
+
+    [Fact]
     public void Json_parser_marks_properties_when_cfg007_is_suppressed_for_that_file()
     {
         var root = JsonConfigurationParser.Parse(
@@ -186,6 +269,30 @@ public sealed class ConfigurationModelCoverageTests
             property!.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig);
         Assert.Contains(typoProperties, property =>
             !property!.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig);
+    }
+
+    [Fact]
+    public void Configuration_snapshot_scopes_duplicate_flattened_paths_per_file()
+    {
+        var snapshot = ConfigurationSnapshot.Create(
+            [
+                new TestAdditionalText("appsettings.json", """
+                    {
+                      "Server": {
+                        "Value": 80
+                      }
+                    }
+                    """),
+                new TestAdditionalText("appsettings.Production.json", """
+                    {
+                      "server:value": 443
+                    }
+                    """)
+            ],
+            _ => false,
+            CancellationToken.None);
+
+        Assert.Equal(2, snapshot.FindProperties("Server:Value").Length);
     }
 
     [Fact]

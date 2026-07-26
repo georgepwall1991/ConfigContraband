@@ -36,6 +36,59 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg008_ignores_file_with_duplicate_flattened_scalar_paths()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": "eighty"
+              },
+              "server:value": 80
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg008_ignores_file_with_empty_container_before_duplicate_scalar()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Value": {}
+              },
+              "server:value": "eighty"
+            }
+            """));
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    public async Task Cfg008_ignores_scalar_overwritten_by_empty_container(string emptyContainer)
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", $$"""
+            {
+              "Server": {
+                "Value": "eighty"
+              },
+              "server:value": {{emptyContainer}}
+            }
+            """));
+    }
+
+    [Fact]
     public async Task Cfg008_reports_json_bool_value_bound_to_integer()
     {
         var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
