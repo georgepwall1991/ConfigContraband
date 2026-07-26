@@ -16,7 +16,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>configcontraband</ToolCommandName>
     <PackageId>ConfigContraband.Tool</PackageId>
-    <Version>0.7.24</Version>
+    <Version>0.7.25</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband.Tool</Title>
     <Description>Generates appsettings.schema.json from your .NET Options types so editors give live autocomplete, type checking, and required-key hints while editing appsettings.json.</Description>

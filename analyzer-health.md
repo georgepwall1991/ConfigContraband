@@ -3,8 +3,8 @@
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
 Last refreshed: 2026-07-26
-Package version: `0.7.24`
-Base audited commit: `a5a19bf`
+Package version: `0.7.25`
+Base audited commit: `c99d112`
 
 ## Scoring Rubric
 
@@ -497,7 +497,7 @@ CI and the publish workflow additionally run `scripts/verify-net8-analyzer-host.
 analyzer loads without `CS9057` and emits the expected `CFG001`, proving execution at the supported
 compiler-host floor before merge and publication.
 
-Last executed 2026-07-26 verifier status: 775 analyzer/fixer, 303 core, and 9 tool tests passed (1,087 total); all six offline coverage-policy scenarios passed; the CI-mode Release build (`ContinuousIntegrationBuild=true`) completed with zero warnings and zero errors after removing both `CS0618` suppressions; formatter verification passed; both `0.7.24` packages passed payload/version/README verification; Codecov's official endpoint validated the no-regression project and 100% patch policies; and `git diff --check` was clean on the iteration-139 branch. The showcase contract emitted exactly one each of CFG001-CFG009 and no unrelated warnings. The prior Roslyn analyzer-testing reference-assembly resolution failure remains resolved and is not an active release-readiness blocker.
+Last executed 2026-07-26 verifier status: 775 analyzer/fixer, 303 core, and 9 tool tests passed (1,087 total); all six offline coverage-policy scenarios passed; the CI-mode Release build (`ContinuousIntegrationBuild=true`) completed with zero warnings and zero errors after removing both `CS0618` suppressions; formatter verification passed; both `0.7.25` packages passed payload/version/README verification; Codecov's official endpoint validated the no-regression project and 100% patch policies; and `git diff --check` was clean on the release branch. The showcase contract emitted exactly one each of CFG001-CFG009 and no unrelated warnings. The prior Roslyn analyzer-testing reference-assembly resolution failure remains resolved and is not an active release-readiness blocker.
 
 Latest follow-up audit evidence on 2026-07-25 reported verification status `pass`, with both package projects and the public GitHub release at `0.7.23`, a Roslyn 4.8 compatibility floor on the shipped analyzer assemblies, and no score-math issue. Exact-HEAD CI, CodeQL, and publish workflows passed, including the .NET 8 analyzer-host smoke gate. That smoke script could not be replayed locally because only .NET 10 SDKs are installed, so the exact remote runs are the compatibility proof. Release Readiness remains `5`; rule severity and score math are otherwise unchanged.
 
