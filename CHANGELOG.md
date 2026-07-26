@@ -4,6 +4,10 @@ All notable changes to ConfigContraband will be documented in this file.
 
 ## Unreleased
 
+- Made CFG005 recursive-validation candidate traversal deterministic across syntax-tree input
+  ordering, removed duplicate candidates from self-recursive validated option types, and propagated
+  analyzer cancellation through metadata construction and the recursive walk. Diagnostic IDs,
+  severities, messages, and code fixes are unchanged.
 - Aligned the appsettings model with the runtime JSON provider for duplicate flattened keys.
   A scalar or null value that repeats a case-insensitive path already written by another scalar,
   null, or empty container now excludes that file from analysis because the provider rejects it

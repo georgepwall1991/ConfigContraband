@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 
 namespace ConfigContraband;
@@ -43,8 +44,11 @@ internal sealed partial class OptionsTypeMetadata
     public static OptionsTypeMetadata Create(
         INamedTypeSymbol type,
         bool bindsNonPublicProperties = false,
-        Compilation? compilation = null)
+        Compilation? compilation = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         // Metadata is an immutable pure function of (type, bindsNonPublicProperties, compilation), so
         // it is memoized per compilation: one registration requests the same metadata several times
         // across the validation, nested-validation, and unknown-key passes. The ConditionalWeakTable
@@ -52,7 +56,7 @@ internal sealed partial class OptionsTypeMetadata
         // builds of the same key are harmless because the metadata is immutable (TryAdd keeps one).
         if (compilation is null)
         {
-            return Build(type, bindsNonPublicProperties, compilation: null);
+            return Build(type, bindsNonPublicProperties, compilation: null, cancellationToken);
         }
 
         var cache = MetadataCaches.GetValue(compilation, static _ => new OptionsMetadataCache());
@@ -61,7 +65,7 @@ internal sealed partial class OptionsTypeMetadata
             return cached;
         }
 
-        var metadata = Build(type, bindsNonPublicProperties, compilation);
+        var metadata = Build(type, bindsNonPublicProperties, compilation, cancellationToken);
         cache.Add(type, bindsNonPublicProperties, metadata);
         return metadata;
     }
@@ -69,8 +73,10 @@ internal sealed partial class OptionsTypeMetadata
     private static OptionsTypeMetadata Build(
         INamedTypeSymbol type,
         bool bindsNonPublicProperties,
-        Compilation? compilation)
+        Compilation? compilation,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var properties = ImmutableArray.CreateBuilder<BindableProperty>();
 
         // Type-level validation attributes (including inherited ones) and IValidatableObject run
@@ -80,6 +86,7 @@ internal sealed partial class OptionsTypeMetadata
 
         foreach (var member in GetBindableProperties(type, bindsNonPublicProperties, compilation))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             properties.Add(new BindableProperty(
                 member.Property,
                 GetConfigurationNames(member.Property, member.IsConstructorBound).ToImmutableArray(),
@@ -100,7 +107,12 @@ internal sealed partial class OptionsTypeMetadata
             type,
             properties.ToImmutable(),
             ImplementsInterface(type, "System.ComponentModel.DataAnnotations.IValidatableObject"),
-            ContainsValidationAttributes(type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), bindsNonPublicProperties, compilation),
+            ContainsValidationAttributes(
+                type,
+                new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default),
+                bindsNonPublicProperties,
+                compilation,
+                cancellationToken),
             bindsNonPublicProperties,
             compilation);
     }
@@ -443,40 +455,93 @@ internal sealed partial class OptionsTypeMetadata
                string.Equals(key, "Chars", StringComparison.OrdinalIgnoreCase);
     }
 
-    public ImmutableArray<NestedValidationCandidate> GetNestedValidationCandidates()
+    public ImmutableArray<NestedValidationCandidate> GetNestedValidationCandidates(
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var builder = ImmutableArray.CreateBuilder<NestedValidationCandidate>();
-        AddNestedValidationCandidates(builder, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default));
-        return builder.ToImmutable();
+        var visited = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default)
+        {
+            TypeSymbol
+        };
+        AddNestedValidationCandidates(
+            builder,
+            visited,
+            cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return builder
+            .OrderBy(
+                candidate => GetStableSourceLocation(candidate.Property.Symbol)?.GetLineSpan().Path ?? string.Empty,
+                StringComparer.Ordinal)
+            .ThenBy(candidate => GetStableSourceLocation(candidate.Property.Symbol)?.SourceSpan.Start ?? int.MaxValue)
+            .ThenBy(
+                candidate => candidate.Property.Symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                StringComparer.Ordinal)
+            .ToImmutableArray();
+    }
+
+    private static Location? GetStableSourceLocation(IPropertySymbol property)
+    {
+        return property.Locations
+            .Where(static location => location.IsInSource)
+            .OrderBy(
+                static location => location.GetLineSpan().Path,
+                StringComparer.Ordinal)
+            .ThenBy(static location => location.SourceSpan.Start)
+            .FirstOrDefault();
     }
 
     private void AddNestedValidationCandidates(
         ImmutableArray<NestedValidationCandidate>.Builder builder,
-        HashSet<ITypeSymbol> visited)
+        HashSet<ITypeSymbol> visited,
+        CancellationToken cancellationToken)
     {
         foreach (var property in BindableProperties)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (TryGetCollectionElementType(property.Symbol.Type, out var elementType))
             {
                 if (IsPotentialNestedObject(elementType) &&
-                    ContainsValidationAttributes(elementType, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), _bindsNonPublicProperties, _compilation) &&
+                    ContainsValidationAttributes(
+                        elementType,
+                        new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default),
+                        _bindsNonPublicProperties,
+                        _compilation,
+                        cancellationToken) &&
                     !HasAttribute(property.Symbol, "Microsoft.Extensions.Options.ValidateEnumeratedItemsAttribute"))
                 {
                     builder.Add(new NestedValidationCandidate(property, "ValidateEnumeratedItems", isCollection: true));
                 }
 
-                AddNestedValidationCandidates(elementType, builder, visited, _bindsNonPublicProperties, _compilation);
+                AddNestedValidationCandidates(
+                    elementType,
+                    builder,
+                    visited,
+                    _bindsNonPublicProperties,
+                    _compilation,
+                    cancellationToken);
                 continue;
             }
 
             if (IsPotentialNestedObject(property.Symbol.Type) &&
-                ContainsValidationAttributes(property.Symbol.Type, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default), _bindsNonPublicProperties, _compilation) &&
+                ContainsValidationAttributes(
+                    property.Symbol.Type,
+                    new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default),
+                    _bindsNonPublicProperties,
+                    _compilation,
+                    cancellationToken) &&
                 !HasAttribute(property.Symbol, "Microsoft.Extensions.Options.ValidateObjectMembersAttribute"))
             {
                 builder.Add(new NestedValidationCandidate(property, "ValidateObjectMembers", isCollection: false));
             }
 
-            AddNestedValidationCandidates(property.Symbol.Type, builder, visited, _bindsNonPublicProperties, _compilation);
+            AddNestedValidationCandidates(
+                property.Symbol.Type,
+                builder,
+                visited,
+                _bindsNonPublicProperties,
+                _compilation,
+                cancellationToken);
         }
     }
 
@@ -485,8 +550,10 @@ internal sealed partial class OptionsTypeMetadata
         ImmutableArray<NestedValidationCandidate>.Builder builder,
         HashSet<ITypeSymbol> visited,
         bool bindsNonPublicProperties,
-        Compilation? compilation)
+        Compilation? compilation,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!IsPotentialNestedObject(type) ||
             type is not INamedTypeSymbol namedType ||
             !visited.Add(namedType))
@@ -494,7 +561,8 @@ internal sealed partial class OptionsTypeMetadata
             return;
         }
 
-        Create(namedType, bindsNonPublicProperties, compilation).AddNestedValidationCandidates(builder, visited);
+        Create(namedType, bindsNonPublicProperties, compilation, cancellationToken)
+            .AddNestedValidationCandidates(builder, visited, cancellationToken);
     }
 
 }
