@@ -82,8 +82,13 @@ public sealed partial class ConfigContrabandAnalyzer
         }
         else if (string.Equals(methodName, "Bind", StringComparison.Ordinal))
         {
-            if (!TryGetConfigurationSectionPath(
-                    invocation.ArgumentList.Arguments[0].Expression,
+            if (!TryGetInvocationArgumentExpression(
+                    invocation,
+                    semanticModel,
+                    "config",
+                    out var configurationExpression) ||
+                !TryGetConfigurationSectionPath(
+                    configurationExpression,
                     semanticModel,
                     out sectionPath,
                     out sectionExpression,
@@ -120,6 +125,29 @@ public sealed partial class ConfigContrabandAnalyzer
             chain.MethodNames.Contains("ValidateDataAnnotations"),
             sectionExpression.GetLocation(),
             RequiresRuntimeSection(sectionExpression, semanticModel));
+        return true;
+    }
+
+    private static bool TryGetInvocationArgumentExpression(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        string parameterName,
+        out ExpressionSyntax expression)
+    {
+        expression = null!;
+        if (semanticModel.GetOperation(invocation) is not IInvocationOperation operation)
+        {
+            return false;
+        }
+
+        var argument = operation.Arguments.FirstOrDefault(candidate =>
+            string.Equals(candidate.Parameter?.Name, parameterName, StringComparison.Ordinal));
+        if (argument?.Value.Syntax is not ExpressionSyntax argumentExpression)
+        {
+            return false;
+        }
+
+        expression = argumentExpression;
         return true;
     }
 
@@ -264,11 +292,16 @@ public sealed partial class ConfigContrabandAnalyzer
                 "Microsoft.Extensions.Options",
                 StringComparison.Ordinal) &&
             receiverType.TypeArguments[0] is INamedTypeSymbol bindOptionsType &&
-            IsOptionsBuilderConfigurationMethod(invocation, semanticModel, methodName))
+            IsOptionsBuilderConfigurationMethod(invocation, semanticModel, methodName) &&
+            TryGetInvocationArgumentExpression(
+                invocation,
+                semanticModel,
+                "config",
+                out var configurationExpression))
         {
             optionsType = bindOptionsType;
             candidateSectionExpressions =
-                ImmutableArray.Create(invocation.ArgumentList.Arguments[0].Expression);
+                ImmutableArray.Create(configurationExpression);
         }
         else if (string.Equals(methodName, "Configure", StringComparison.Ordinal) &&
                  semanticModel.GetSymbolInfo(invocation).Symbol is IMethodSymbol
