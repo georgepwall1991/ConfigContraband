@@ -84,7 +84,8 @@ public sealed partial class ConfigContrabandAnalyzer
                     syntaxContext,
                     directInvocation,
                     configuration,
-                    providerSemantics);
+                    providerSemantics,
+                    configurationDiagnosticsReported);
                 break;
             case DirectConfigurationApiKind.GetValue:
                 AnalyzeGetValueRead(
@@ -145,6 +146,12 @@ public sealed partial class ConfigContrabandAnalyzer
             if (string.Equals(originalMethod.Name, "Get", StringComparison.Ordinal))
             {
                 kind = DirectConfigurationApiKind.Get;
+                if (operation.TargetMethod.IsGenericMethod &&
+                    operation.TargetMethod.TypeArguments.Length == 1)
+                {
+                    targetType = operation.TargetMethod.TypeArguments[0];
+                }
+
                 var configureOptionsArgument = operation.Arguments.FirstOrDefault(argument =>
                     string.Equals(argument.Parameter?.Name, "configureOptions", StringComparison.Ordinal));
                 if (configureOptionsArgument is not null)
@@ -183,6 +190,10 @@ public sealed partial class ConfigContrabandAnalyzer
                     string.Equals(argument.Parameter?.Name, "instance", StringComparison.Ordinal));
                 argumentsAreProvablySafe = instanceArgument is not null &&
                     IsProvablySafeBinderInstanceArgument(instanceArgument.Value);
+                if (instanceArgument is not null)
+                {
+                    targetType = GetInlineBinderInstanceTargetType(instanceArgument.Value);
+                }
 
                 var configureOptionsArgument = operation.Arguments.FirstOrDefault(argument =>
                     string.Equals(argument.Parameter?.Name, "configureOptions", StringComparison.Ordinal));
@@ -304,7 +315,8 @@ public sealed partial class ConfigContrabandAnalyzer
         SyntaxNodeAnalysisContext syntaxContext,
         DirectConfigurationInvocation invocation,
         ConfigurationSnapshot configuration,
-        ConfigurationProviderSemantics providerSemantics)
+        ConfigurationProviderSemantics providerSemantics,
+        ConcurrentDictionary<string, byte> configurationDiagnosticsReported)
     {
         var semanticModel = syntaxContext.SemanticModel;
         var provenanceReceiver = invocation.Receiver;
@@ -361,7 +373,6 @@ public sealed partial class ConfigContrabandAnalyzer
 
         if (!hasSectionPath ||
             !invocation.ArgumentsAreProvablySafe ||
-            configuration.GetSectionExistence(sectionPath, providerSemantics) != ConfigurationSectionExistence.Missing ||
             IsOptionsRegistrationSectionRead(invocation.Syntax, semanticModel) ||
             ClassifyConfigurationReceiver(provenanceReceiver, semanticModel) !=
                 ConfigurationReceiverProvenance.Contract ||
@@ -374,14 +385,60 @@ public sealed partial class ConfigContrabandAnalyzer
             return;
         }
 
-        ReportMissingSection(
-            syntaxContext.ReportDiagnostic,
-            DiagnosticDescriptors.ConfigurationKeyNotFound,
+        if (configuration.GetSectionExistence(sectionPath, providerSemantics) ==
+            ConfigurationSectionExistence.Missing)
+        {
+            ReportMissingSection(
+                syntaxContext.ReportDiagnostic,
+                DiagnosticDescriptors.ConfigurationKeyNotFound,
+                sectionPath,
+                sectionExpression,
+                sectionExpressionContainsFullPath,
+                configuration,
+                requireSuggestion: true);
+            return;
+        }
+
+        if (invocation.TargetType is not INamedTypeSymbol targetType ||
+            targetType.IsAbstract ||
+            (invocation.Kind == DirectConfigurationApiKind.Get &&
+             !OptionsTypeMetadata.CanRuntimeCreateRootObject(targetType)) ||
+            !OptionsTypeMetadata.IsPotentialNestedObject(targetType) ||
+            OptionsTypeMetadata.TryGetCollectionElementType(targetType, out _) ||
+            OptionsTypeMetadata.TryGetDictionaryValueType(targetType, out _))
+        {
+            return;
+        }
+
+        var registration = new OptionsRegistration(
+            targetType,
             sectionPath,
             sectionExpression,
-            sectionExpressionContainsFullPath,
+            invocation.Syntax,
+            supportsValidationRules: false,
+            sectionExpressionContainsFullPath: sectionExpressionContainsFullPath,
+            hasValidateDataAnnotations: false,
+            hasValidateOnStart: false,
+            hasValidation: false,
+            bindsNonPublicProperties: HasFinalBindNonPublicPropertiesEnabled(invocation.Syntax, semanticModel),
+            errorsOnUnknownConfiguration: HasErrorOnUnknownConfigurationEnabled(invocation.Syntax, semanticModel),
+            isDataAnnotationsEnabled: false,
+            bindLocation: sectionExpression.GetLocation(),
+            requiresRuntimeSection: false);
+        var compilation = semanticModel.Compilation;
+        var strictUnknownConfigurationKeySuppressed = IsDiagnosticSuppressed(
+            syntaxContext.Options,
+            compilation,
+            invocation.Syntax.SyntaxTree,
+            DiagnosticIds.UnknownConfigurationKeyWillThrow);
+        AnalyzeUnknownKeys(
+            syntaxContext.ReportDiagnostic,
+            registration,
             configuration,
-            requireSuggestion: true);
+            providerSemantics,
+            configurationDiagnosticsReported,
+            compilation,
+            strictUnknownConfigurationKeySuppressed);
     }
 
     private static bool TryGetDeepConditionalSectionPath(

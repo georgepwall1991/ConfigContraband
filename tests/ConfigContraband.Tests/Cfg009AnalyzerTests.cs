@@ -350,7 +350,7 @@ public sealed partial class ConfigContrabandAnalyzerTests
 
         await Verifier.VerifyAnalyzerAsync(
             source,
-            ("appsettings.json", """{ "Parent": { "Child": { "Value": "present" } } }"""),
+            ("appsettings.json", """{ "Parent": { "Child": { "Host": "present" } } }"""),
             expected);
     }
 
@@ -476,7 +476,7 @@ public sealed partial class ConfigContrabandAnalyzerTests
 
         await Verifier.VerifyAnalyzerAsync(
             source,
-            ("appsettings.json", """{ "ServerOptions": { "Value": "present" } }"""),
+            ("appsettings.json", """{ "ServerOptions": { "Host": "present" } }"""),
             expected);
     }
 

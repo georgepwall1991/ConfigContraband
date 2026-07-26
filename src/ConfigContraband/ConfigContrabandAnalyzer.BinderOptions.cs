@@ -20,6 +20,17 @@ public sealed partial class ConfigContrabandAnalyzer
             BinderOptionsBooleanDetection.AnyTopLevelConstantTrue);
     }
 
+    private static bool HasFinalBindNonPublicPropertiesEnabled(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        return HasBinderOptionsBooleanEnabled(
+            invocation,
+            semanticModel,
+            "BindNonPublicProperties",
+            BinderOptionsBooleanDetection.LinearFinalConstantTrue);
+    }
+
     private static bool HasErrorOnUnknownConfigurationEnabled(
         InvocationExpressionSyntax invocation,
         SemanticModel semanticModel)
@@ -68,6 +79,21 @@ public sealed partial class ConfigContrabandAnalyzer
             return parameter is not null &&
                    (ContainsBinderOptionsBooleanEnabled(parenthesizedLambda.ExpressionBody, semanticModel, parameter, propertyName) ||
                     ContainsBinderOptionsBooleanEnabled(parenthesizedLambda.Block, semanticModel, parameter, propertyName, detection));
+        }
+
+        if (expression is AnonymousMethodExpressionSyntax
+            {
+                ParameterList.Parameters.Count: 1,
+            } anonymousMethod)
+        {
+            var parameter = semanticModel.GetDeclaredSymbol(anonymousMethod.ParameterList.Parameters[0]);
+            return parameter is not null &&
+                   ContainsBinderOptionsBooleanEnabled(
+                       anonymousMethod.Block,
+                       semanticModel,
+                       parameter,
+                       propertyName,
+                       detection);
         }
 
         return false;
