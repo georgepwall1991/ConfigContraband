@@ -55,6 +55,50 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public void Net8_host_verifier_loads_the_exact_packed_candidate()
+    {
+        var repositoryRoot = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var verifier = File.ReadAllText(
+            Path.Combine(repositoryRoot, "scripts", "verify-net8-analyzer-host.sh"));
+        var consumerProject = File.ReadAllText(
+            Path.Combine(repositoryRoot, "tests", "Compatibility", "Net8Consumer", "Net8Consumer.csproj"));
+        var ciWorkflow = File.ReadAllText(
+            Path.Combine(repositoryRoot, ".github", "workflows", "ci.yml"));
+        var publishWorkflow = File.ReadAllText(
+            Path.Combine(repositoryRoot, ".github", "workflows", "publish.yml"));
+
+        Assert.Contains("ConfigContraband.$analyzer_version.nupkg", verifier, StringComparison.Ordinal);
+        Assert.Contains("NUGET_PACKAGES=", verifier, StringComparison.Ordinal);
+        Assert.Contains("-p:ConfigContrabandVersion=$analyzer_version", verifier, StringComparison.Ordinal);
+        Assert.Contains("--source \"$package_dir\"", verifier, StringComparison.Ordinal);
+        Assert.Contains("--source https://api.nuget.org/v3/index.json", verifier, StringComparison.Ordinal);
+        var consumerDirectoryChange = verifier.IndexOf("cd \"$consumer_dir\"", StringComparison.Ordinal);
+        var restoreInvocation = verifier.IndexOf("dotnet restore", StringComparison.Ordinal);
+        var buildInvocation = verifier.IndexOf("dotnet build", StringComparison.Ordinal);
+        Assert.InRange(consumerDirectoryChange, 0, restoreInvocation - 1);
+        Assert.InRange(consumerDirectoryChange, 0, buildInvocation - 1);
+        Assert.Contains(".nupkg.metadata", verifier, StringComparison.Ordinal);
+        Assert.Contains("metadata.get(\"source\")", verifier, StringComparison.Ordinal);
+        Assert.Contains(
+            "<ConfigContrabandVersion Condition=\"'$(ConfigContrabandVersion)' == ''\">0.7.24</ConfigContrabandVersion>",
+            consumerProject,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<PackageReference Include=\"ConfigContraband\" Version=\"$(ConfigContrabandVersion)\"",
+            consumerProject,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "bash scripts/verify-net8-analyzer-host.sh artifacts/packages",
+            ciWorkflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "bash scripts/verify-net8-analyzer-host.sh artifacts/packages",
+            publishWorkflow,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Analyzer_ignores_generated_code()
     {
         var source = """

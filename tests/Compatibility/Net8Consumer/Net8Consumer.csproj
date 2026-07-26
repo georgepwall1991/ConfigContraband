@@ -6,11 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <WarningsAsErrors>$(WarningsAsErrors);CFG001;CS9057</WarningsAsErrors>
+    <ConfigContrabandVersion Condition="'$(ConfigContrabandVersion)' == ''">0.7.24</ConfigContrabandVersion>
     <RestoreSources>$(MSBuildThisFileDirectory)../../../artifacts/packages;https://api.nuget.org/v3/index.json</RestoreSources>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="ConfigContraband" Version="0.7.24" PrivateAssets="all" />
+    <PackageReference Include="ConfigContraband" Version="$(ConfigContrabandVersion)" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
   </ItemGroup>

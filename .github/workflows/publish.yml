@@ -61,7 +61,7 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Verify .NET 8 analyzer host compatibility
-        run: bash scripts/verify-net8-analyzer-host.sh
+        run: bash scripts/verify-net8-analyzer-host.sh artifacts/packages
 
       - name: Verify packages match release
         shell: bash
