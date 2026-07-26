@@ -209,6 +209,89 @@ internal static class Verifier
         await test.RunAsync();
     }
 
+    public static async Task VerifyFixAllAsync(
+        string source,
+        string fixedSource,
+        string equivalenceKey,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateFixAllTest(equivalenceKey, expected);
+        test.TestCode = source;
+        test.FixedCode = fixedSource;
+        test.BatchFixedCode = fixedSource;
+        await test.RunAsync();
+    }
+
+    public static async Task VerifyFixAllAsync(
+        string source,
+        string fixedSource,
+        (string filename, string content) additionalFile,
+        string equivalenceKey,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateFixAllTest(equivalenceKey, expected);
+        test.TestCode = source;
+        test.FixedCode = fixedSource;
+        test.BatchFixedCode = fixedSource;
+        test.TestState.AdditionalFiles.Add(additionalFile);
+        await test.RunAsync();
+    }
+
+    public static async Task VerifyFixAllAsync(
+        (string filename, string content)[] sources,
+        (string filename, string content)[] fixedSources,
+        string equivalenceKey,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateFixAllTest(equivalenceKey, expected);
+        test.NumberOfFixAllInDocumentIterations = 1;
+        test.NumberOfFixAllInProjectIterations = 1;
+        foreach (var source in sources)
+        {
+            test.TestState.Sources.Add(source);
+        }
+
+        foreach (var fixedSource in fixedSources)
+        {
+            test.FixedState.Sources.Add(fixedSource);
+            test.BatchFixedState.Sources.Add(fixedSource);
+        }
+
+        await test.RunAsync();
+    }
+
+    public static async Task VerifyFixAllAcrossProjectsAsync(
+        (string filename, string content) primarySource,
+        (string filename, string content) fixedPrimarySource,
+        (string filename, string content) secondarySource,
+        (string filename, string content) fixedSecondarySource,
+        (string filename, string content) additionalFile,
+        string equivalenceKey,
+        params DiagnosticResult[] expected)
+    {
+        const string SecondaryProjectName = "Secondary";
+
+        var test = CreateFixAllTest(equivalenceKey, expected);
+        test.NumberOfFixAllInDocumentIterations = 2;
+        test.NumberOfFixAllInProjectIterations = 2;
+        test.TestState.Sources.Add(primarySource);
+        test.TestState.AdditionalFiles.Add(additionalFile);
+        test.TestState.AdditionalProjects[SecondaryProjectName].Sources.Add(secondarySource);
+        test.TestState.AdditionalProjects[SecondaryProjectName].AdditionalFiles.Add(additionalFile);
+
+        test.FixedState.Sources.Add(fixedPrimarySource);
+        test.FixedState.AdditionalFiles.Add(additionalFile);
+        test.FixedState.AdditionalProjects[SecondaryProjectName].Sources.Add(fixedSecondarySource);
+        test.FixedState.AdditionalProjects[SecondaryProjectName].AdditionalFiles.Add(additionalFile);
+
+        test.BatchFixedState.Sources.Add(fixedPrimarySource);
+        test.BatchFixedState.AdditionalFiles.Add(additionalFile);
+        test.BatchFixedState.AdditionalProjects[SecondaryProjectName].Sources.Add(fixedSecondarySource);
+        test.BatchFixedState.AdditionalProjects[SecondaryProjectName].AdditionalFiles.Add(additionalFile);
+
+        await test.RunAsync();
+    }
+
     public static DiagnosticResult Diagnostic(Microsoft.CodeAnalysis.DiagnosticDescriptor descriptor)
     {
         return new DiagnosticResult(descriptor);
@@ -227,5 +310,20 @@ internal static class Verifier
         {
             ReferenceAssemblies = OptionsReferences
         };
+    }
+
+    private static CSharpCodeFixTest<ConfigContrabandAnalyzer, ConfigContrabandCodeFixProvider, DefaultVerifier> CreateFixAllTest(
+        string equivalenceKey,
+        DiagnosticResult[] expected)
+    {
+        var test = new CSharpCodeFixTest<ConfigContrabandAnalyzer, ConfigContrabandCodeFixProvider, DefaultVerifier>
+        {
+            ReferenceAssemblies = OptionsReferences,
+            CodeFixEquivalenceKey = equivalenceKey,
+            NumberOfIncrementalIterations = expected.Length,
+            NumberOfFixAllIterations = 1
+        };
+        test.ExpectedDiagnostics.AddRange(expected);
+        return test;
     }
 }

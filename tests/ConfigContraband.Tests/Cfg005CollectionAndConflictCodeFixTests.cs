@@ -122,6 +122,113 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg005_fix_all_adds_each_required_recursive_attribute()
+    {
+        var startupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    {|#0:services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart()|};
+                }
+            }
+            """;
+
+        var optionsSource = """
+            using System.Collections.Generic;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class AppOptions
+            {
+                public DatabaseOptions {|#1:Database|} { get; set; } = new();
+                public List<ServerOptions> {|#2:Servers|} { get; set; } = [];
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+
+            public sealed class ServerOptions
+            {
+                [Required]
+                public string Host { get; set; } = "";
+            }
+            """;
+
+        var fixedStartupSource = """
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<AppOptions>()
+                        .BindConfiguration("App")
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+            """;
+
+        var fixedOptionsSource = """
+            using System.Collections.Generic;
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.Options;
+
+            public sealed class AppOptions
+            {
+                [ValidateObjectMembers]
+                public DatabaseOptions Database { get; set; } = new();
+                [ValidateEnumeratedItems]
+                public List<ServerOptions> Servers { get; set; } = [];
+            }
+
+            public sealed class DatabaseOptions
+            {
+                [Required]
+                public string ConnectionString { get; set; } = "";
+            }
+
+            public sealed class ServerOptions
+            {
+                [Required]
+                public string Host { get; set; } = "";
+            }
+            """;
+
+        var objectExpected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(1)
+            .WithArguments("AppOptions", "Database");
+        var collectionExpected = Verifier.Diagnostic(DiagnosticDescriptors.NestedValidationNotRecursive)
+            .WithLocation(0)
+            .WithLocation(2)
+            .WithArguments("AppOptions", "Servers");
+
+        await Verifier.VerifyFixAllAsync(
+            new[]
+            {
+                ("Startup.cs", startupSource),
+                ("Options.cs", optionsSource)
+            },
+            new[]
+            {
+                ("Startup.cs", fixedStartupSource),
+                ("Options.cs", fixedOptionsSource)
+            },
+            "AddRecursiveValidationAttribute",
+            objectExpected,
+            collectionExpected);
+    }
+
+    [Fact]
     public async Task Cfg005_fix_updates_nested_object_property_in_target_document()
     {
         var startupSource = """
