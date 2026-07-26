@@ -305,6 +305,14 @@ internal sealed partial class OptionsTypeMetadata
         }
     }
 
+    internal static bool CanRuntimeCreateRootObject(INamedTypeSymbol type)
+    {
+        return type.TypeKind == TypeKind.Struct ||
+               type.TypeKind == TypeKind.Class &&
+               !type.IsAbstract &&
+               type.InstanceConstructors.Any(CanRuntimeSelectRootConstructor);
+    }
+
     private static bool CanRuntimeSelectRootConstructor(IMethodSymbol constructor)
     {
         if (constructor.DeclaredAccessibility != Accessibility.Public)
@@ -333,7 +341,9 @@ internal sealed partial class OptionsTypeMetadata
 
         return publicParameterizedConstructors.Length == 1 &&
                SymbolEqualityComparer.Default.Equals(publicParameterizedConstructors[0], constructor) &&
-               constructor.Parameters.All(parameter => TryFindMatchingConstructorProperty(containingType, parameter, out _));
+               constructor.Parameters.All(parameter =>
+                   parameter.RefKind == RefKind.None &&
+                   TryFindMatchingConstructorProperty(containingType, parameter, out _));
     }
 
     private static void AddPotentialPolymorphicDictionaryElementAssignmentKey(

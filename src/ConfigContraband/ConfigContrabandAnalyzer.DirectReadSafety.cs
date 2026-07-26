@@ -75,6 +75,11 @@ public sealed partial class ConfigContrabandAnalyzer
     {
         while (operation is IConversionOperation conversion)
         {
+            if (conversion.OperatorMethod is not null)
+            {
+                return false;
+            }
+
             operation = conversion.Operand;
         }
 
@@ -90,10 +95,30 @@ public sealed partial class ConfigContrabandAnalyzer
             IObjectCreationOperation creation =>
                 creation.Constructor?.IsImplicitlyDeclared == true &&
                 creation.Arguments.IsEmpty &&
-                creation.Initializer is null &&
+                (creation.Initializer is null || creation.Initializer.Initializers.IsEmpty) &&
                 IsProvablySideEffectFreeImplicitConstruction(creation.Constructor.ContainingType),
             _ => false,
         };
+    }
+
+    private static INamedTypeSymbol? GetInlineBinderInstanceTargetType(IOperation operation)
+    {
+        while (operation is IConversionOperation conversion)
+        {
+            if (conversion.OperatorMethod is not null)
+            {
+                return null;
+            }
+
+            operation = conversion.Operand;
+        }
+
+        return operation is IObjectCreationOperation
+        {
+            Type: INamedTypeSymbol targetType,
+        }
+            ? targetType
+            : null;
     }
 
     private static bool IsProvablySideEffectFreeImplicitConstruction(INamedTypeSymbol type)
@@ -194,7 +219,17 @@ public sealed partial class ConfigContrabandAnalyzer
     {
         while (operation is IConversionOperation conversion)
         {
+            if (conversion.OperatorMethod is not null)
+            {
+                return false;
+            }
+
             operation = conversion.Operand;
+        }
+
+        if (operation.ConstantValue is { HasValue: true, Value: null })
+        {
+            return true;
         }
 
         if (operation is IDelegateCreationOperation delegateCreation)
