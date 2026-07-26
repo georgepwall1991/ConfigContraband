@@ -120,6 +120,11 @@ public sealed class DiscoverabilityMetadataTests
         Assert.Contains("CFG009", readme, StringComparison.Ordinal);
         Assert.Contains("stays quiet", readme, StringComparison.OrdinalIgnoreCase);
 
+        // NuGet.org requires absolute HTTPS image URLs in PackageReadmeFile content.
+        // GitHub raw URLs keep both NuGet and GitHub README rendering working.
+        const string rawBase =
+            "https://raw.githubusercontent.com/georgepwall1991/ConfigContraband/main/";
+
         var visualAssets = new[]
         {
             "assets/flow-ide-diagnostics.svg",
@@ -129,25 +134,26 @@ public sealed class DiscoverabilityMetadataTests
 
         foreach (var asset in visualAssets)
         {
-            Assert.Contains(asset, readme, StringComparison.Ordinal);
+            Assert.Contains(rawBase + asset, readme, StringComparison.Ordinal);
             var fullPath = Path.Combine(RepositoryRoot, asset);
             Assert.True(File.Exists(fullPath), $"Missing README visual: {asset}");
             Assert.True(new FileInfo(fullPath).Length > 0, $"Empty README visual: {asset}");
         }
 
-        // Every relative markdown/HTML image under assets/ must resolve on disk.
+        Assert.Contains(rawBase + "assets/configcontraband-icon.png", readme, StringComparison.Ordinal);
+
+        // Relative image paths break NuGet.org README rendering — require HTTPS.
         var imageRefs = Regex.Matches(readme, @"!\[[^\]]*\]\(([^)]+)\)")
             .Select(m => m.Groups[1].Value)
             .Concat(Regex.Matches(readme, @"<img[^>]+src=""([^""]+)""")
                 .Select(m => m.Groups[1].Value))
-            .Where(p => !p.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.Ordinal);
 
-        foreach (var relative in imageRefs)
+        foreach (var imageRef in imageRefs)
         {
-            var fullPath = Path.Combine(RepositoryRoot, relative);
-            Assert.True(File.Exists(fullPath), $"Broken README image path: {relative}");
-            Assert.True(new FileInfo(fullPath).Length > 0, $"Empty README image: {relative}");
+            Assert.True(
+                imageRef.StartsWith("https://", StringComparison.OrdinalIgnoreCase),
+                $"README image must use absolute HTTPS for NuGet rendering: {imageRef}");
         }
     }
 

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/configcontraband-icon.png" width="96" height="96" alt="ConfigContraband icon — Roslyn analyzer for .NET Options and appsettings validation">
+  <img src="https://raw.githubusercontent.com/georgepwall1991/ConfigContraband/main/assets/configcontraband-icon.png" width="96" height="96" alt="ConfigContraband icon — Roslyn analyzer for .NET Options and appsettings validation">
 </p>
 
 # ConfigContraband
@@ -59,15 +59,15 @@ Product-flow diagrams from the real showcase build (`CFG001`–`CFG009` diagnost
 
 ### 1. Build / IDE diagnostics (Options validation)
 
-![ConfigContraband Roslyn analyzer warnings for Options validation and appsettings — CFG001 section typo, CFG002 missing required key, CFG003 ValidateOnStart, CFG004 ValidateDataAnnotations](assets/flow-ide-diagnostics.svg)
+![ConfigContraband Roslyn analyzer warnings for Options validation and appsettings — CFG001 section typo, CFG002 missing required key, CFG003 ValidateOnStart, CFG004 ValidateDataAnnotations](https://raw.githubusercontent.com/georgepwall1991/ConfigContraband/main/assets/flow-ide-diagnostics.svg)
 
 ### 2. Before / after code fix (BindConfiguration typo)
 
-![Before and after: BindConfiguration section typo Strpie fixed to Stripe with CFG001 Options validation code fix](assets/flow-before-after-fix.svg)
+![Before and after: BindConfiguration section typo Strpie fixed to Stripe with CFG001 Options validation code fix](https://raw.githubusercontent.com/georgepwall1991/ConfigContraband/main/assets/flow-before-after-fix.svg)
 
 ### 3. Dual loop — analyzer + appsettings schema IntelliSense
 
-![ConfigContraband dual loop: Roslyn analyzer build diagnostics and configcontraband schema tool generating appsettings.schema.json for editor IntelliSense](assets/flow-analyzer-schema-loop.svg)
+![ConfigContraband dual loop: Roslyn analyzer build diagnostics and configcontraband schema tool generating appsettings.schema.json for editor IntelliSense](https://raw.githubusercontent.com/georgepwall1991/ConfigContraband/main/assets/flow-analyzer-schema-loop.svg)
 
 ## 30-second path
 
