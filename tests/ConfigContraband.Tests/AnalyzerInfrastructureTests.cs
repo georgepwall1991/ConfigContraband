@@ -5,6 +5,35 @@ namespace ConfigContraband.Tests;
 public sealed partial class ConfigContrabandAnalyzerTests
 {
     [Fact]
+    public void Coverage_policy_preserves_the_project_baseline_and_requires_full_patch_coverage()
+    {
+        var repositoryRoot = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var codecovConfiguration = File.ReadAllText(
+            Path.Combine(repositoryRoot, "codecov.yml"));
+
+        const string ExpectedProjectPolicy =
+            "    project:\n"
+            + "      default:\n"
+            + "        target: auto\n"
+            + "        threshold: 0%\n"
+            + "        removed_code_behavior: off\n"
+            + "        if_not_found: error\n"
+            + "        if_ci_failed: error";
+        const string ExpectedPatchPolicy =
+            "    patch:\n"
+            + "      default:\n"
+            + "        target: 100%\n"
+            + "        threshold: 0%\n"
+            + "        if_not_found: error\n"
+            + "        if_ci_failed: error";
+
+        Assert.Contains(ExpectedProjectPolicy, codecovConfiguration, StringComparison.Ordinal);
+        Assert.Contains(ExpectedPatchPolicy, codecovConfiguration, StringComparison.Ordinal);
+        Assert.DoesNotContain("target: 98%", codecovConfiguration, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CI_rejects_unexpected_warnings_while_samples_allow_only_their_intentional_diagnostics()
     {
         var repositoryRoot = Path.GetFullPath(
