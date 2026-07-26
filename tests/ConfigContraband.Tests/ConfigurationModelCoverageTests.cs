@@ -147,6 +147,52 @@ public sealed class ConfigurationModelCoverageTests
         Assert.Null(root);
     }
 
+    [Fact]
+    public void Json_parser_rejects_non_object_root()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("[]"));
+
+        Assert.Null(root);
+    }
+
+    [Fact]
+    public void Json_parser_propagates_duplicate_flattened_path_from_nested_object()
+    {
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
+            {
+              "Outer": {
+                "Server": {
+                  "Value": "eighty"
+                },
+                "server:value": 80
+              }
+            }
+            """));
+
+        Assert.Null(root);
+    }
+
+    [Fact]
+    public void Json_parser_preserves_maximum_depth_fallback()
+    {
+        var json = "{" +
+            string.Concat(Enumerable.Repeat("\"Nested\":{", 65)) +
+            "\"Value\":1" +
+            new string('}', 66);
+
+        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From(json));
+
+        Assert.NotNull(root);
+        var current = root!;
+        for (var depth = 0; depth < 65; depth++)
+        {
+            Assert.True(current.TryGetProperty("Nested", out var nested));
+            current = nested.Value;
+        }
+
+        Assert.Empty(current.Properties);
+    }
+
     [Theory]
     [InlineData("{}")]
     [InlineData("[]")]
