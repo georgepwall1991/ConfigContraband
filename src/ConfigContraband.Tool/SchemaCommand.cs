@@ -28,14 +28,14 @@ internal static class SchemaCommand
     {
         using var workspace = MSBuildWorkspace.Create();
         var anyAnalysisFailure = false;
-        workspace.WorkspaceFailed += (_, e) =>
+        using var workspaceFailureRegistration = workspace.RegisterWorkspaceFailedHandler(e =>
         {
             if (e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
             {
                 anyAnalysisFailure = true;
                 Console.Error.WriteLine($"warning: {e.Diagnostic.Message}");
             }
-        };
+        });
 
         IReadOnlyList<Project> projects;
         try

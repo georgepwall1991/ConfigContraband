@@ -4,6 +4,9 @@ All notable changes to ConfigContraband will be documented in this file.
 
 ## Unreleased
 
+- Replaced obsolete Roslyn workspace-failure and code-fix testing APIs with
+  `RegisterWorkspaceFailedHandler` and `CodeActionEquivalenceKey`, then removed the two blanket
+  `CS0618` suppressions so future obsolete API drift fails the warning-clean build.
 - Replaced the stale 98% Codecov project target with a truthful no-regression gate against the
   measured base commit, and tightened changed-line coverage to 100% with zero tolerance. The
   repository now rejects either an overall coverage decrease, including decreases caused by
