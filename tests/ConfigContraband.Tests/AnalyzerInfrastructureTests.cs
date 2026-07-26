@@ -5,15 +5,18 @@ namespace ConfigContraband.Tests;
 public sealed partial class ConfigContrabandAnalyzerTests
 {
     [Fact]
-    public void CI_enforces_the_showcase_diagnostic_contract()
+    public void CI_and_publish_enforce_the_showcase_diagnostic_contract()
     {
         var repositoryRoot = Path.GetFullPath(
             Path.Combine(AppContext.BaseDirectory, "../../../../.."));
-        var workflow = File.ReadAllText(
+        var ciWorkflow = File.ReadAllText(
             Path.Combine(repositoryRoot, ".github", "workflows", "ci.yml"));
+        var publishWorkflow = File.ReadAllText(
+            Path.Combine(repositoryRoot, ".github", "workflows", "publish.yml"));
         var verifier = Path.Combine(repositoryRoot, "scripts", "verify-showcase.sh");
 
-        Assert.Contains("bash scripts/verify-showcase.sh", workflow, StringComparison.Ordinal);
+        Assert.Contains("bash scripts/verify-showcase.sh", ciWorkflow, StringComparison.Ordinal);
+        Assert.Contains("bash scripts/verify-showcase.sh", publishWorkflow, StringComparison.Ordinal);
         Assert.True(File.Exists(verifier), "The CI showcase verifier script must exist.");
 
         var verifierContents = File.ReadAllText(verifier);
