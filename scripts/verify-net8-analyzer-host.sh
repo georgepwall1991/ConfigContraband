@@ -22,7 +22,6 @@ packages_dir="$work_dir/nuget-packages"
 
 build_properties=(
   "-p:ConfigContrabandVersion=$analyzer_version"
-  "-p:RestoreSources=$package_dir;https://api.nuget.org/v3/index.json"
   "-p:BaseIntermediateOutputPath=$work_dir/obj/"
   "-p:BaseOutputPath=$work_dir/bin/"
 )
@@ -32,6 +31,8 @@ cd "$consumer_dir"
 NUGET_PACKAGES="$packages_dir" dotnet restore \
   "$consumer_project" \
   --no-cache \
+  --source "$package_dir" \
+  --source https://api.nuget.org/v3/index.json \
   "${build_properties[@]}"
 
 package_metadata="$packages_dir/configcontraband/$analyzer_version/.nupkg.metadata"

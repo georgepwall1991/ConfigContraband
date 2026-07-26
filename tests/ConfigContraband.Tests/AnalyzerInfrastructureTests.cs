@@ -71,10 +71,8 @@ public sealed partial class ConfigContrabandAnalyzerTests
         Assert.Contains("ConfigContraband.$analyzer_version.nupkg", verifier, StringComparison.Ordinal);
         Assert.Contains("NUGET_PACKAGES=", verifier, StringComparison.Ordinal);
         Assert.Contains("-p:ConfigContrabandVersion=$analyzer_version", verifier, StringComparison.Ordinal);
-        Assert.Contains(
-            "-p:RestoreSources=$package_dir;https://api.nuget.org/v3/index.json",
-            verifier,
-            StringComparison.Ordinal);
+        Assert.Contains("--source \"$package_dir\"", verifier, StringComparison.Ordinal);
+        Assert.Contains("--source https://api.nuget.org/v3/index.json", verifier, StringComparison.Ordinal);
         var consumerDirectoryChange = verifier.IndexOf("cd \"$consumer_dir\"", StringComparison.Ordinal);
         var restoreInvocation = verifier.IndexOf("dotnet restore", StringComparison.Ordinal);
         var buildInvocation = verifier.IndexOf("dotnet build", StringComparison.Ordinal);
