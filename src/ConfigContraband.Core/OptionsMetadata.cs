@@ -471,7 +471,7 @@ internal sealed partial class OptionsTypeMetadata
         cancellationToken.ThrowIfCancellationRequested();
         return builder
             .OrderBy(
-                candidate => GetStableSourceLocation(candidate.Property.Symbol)?.SourceTree?.FilePath ?? string.Empty,
+                candidate => GetStableSourceLocation(candidate.Property.Symbol)?.GetLineSpan().Path ?? string.Empty,
                 StringComparer.Ordinal)
             .ThenBy(candidate => GetStableSourceLocation(candidate.Property.Symbol)?.SourceSpan.Start ?? int.MaxValue)
             .ThenBy(
@@ -485,7 +485,7 @@ internal sealed partial class OptionsTypeMetadata
         return property.Locations
             .Where(static location => location.IsInSource)
             .OrderBy(
-                static location => location.SourceTree?.FilePath ?? string.Empty,
+                static location => location.GetLineSpan().Path,
                 StringComparer.Ordinal)
             .ThenBy(static location => location.SourceSpan.Start)
             .FirstOrDefault();

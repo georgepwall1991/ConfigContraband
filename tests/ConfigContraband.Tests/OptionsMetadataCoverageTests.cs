@@ -100,6 +100,39 @@ public sealed class OptionsMetadataCoverageTests
     }
 
     [Fact]
+    public void Nested_validation_candidates_are_stable_for_metadata_properties_without_source_locations()
+    {
+        var options = CompileMetadataType("""
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class MetadataOptions
+            {
+                public ZebraOptions Zebra { get; set; } = new();
+
+                public AlphaOptions Alpha { get; set; } = new();
+            }
+
+            public sealed class ZebraOptions
+            {
+                [Required]
+                public string Value { get; set; } = "";
+            }
+
+            public sealed class AlphaOptions
+            {
+                [Required]
+                public string Value { get; set; } = "";
+            }
+            """, "MetadataOptions");
+
+        var candidates = OptionsTypeMetadata.Create(options)
+            .GetNestedValidationCandidates()
+            .Select(candidate => candidate.Property.Symbol.Name);
+
+        Assert.Equal(["Alpha", "Zebra"], candidates);
+    }
+
+    [Fact]
     public void Metadata_creation_honors_pre_canceled_token()
     {
         var appOptions = CompileType("""
@@ -195,5 +228,34 @@ public sealed class OptionsMetadataCoverageTests
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         return compilation.GetTypeByMetadataName(typeName)!;
+    }
+
+    private static INamedTypeSymbol CompileMetadataType(string source, string typeName)
+    {
+        var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator)
+            .Select(path => MetadataReference.CreateFromFile(path))
+            .ToArray();
+        var metadataCompilation = CSharpCompilation.Create(
+            "OptionsMetadataAssembly",
+            [CSharpSyntaxTree.ParseText(source)],
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var assembly = new MemoryStream();
+        var emitResult = metadataCompilation.Emit(assembly);
+        Assert.True(
+            emitResult.Success,
+            string.Join(Environment.NewLine, emitResult.Diagnostics));
+
+        var consumerCompilation = CSharpCompilation.Create(
+            "OptionsMetadataConsumer",
+            references:
+            [
+                .. references,
+                MetadataReference.CreateFromImage(assembly.ToArray())
+            ],
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        return consumerCompilation.GetTypeByMetadataName(typeName)!;
     }
 }
