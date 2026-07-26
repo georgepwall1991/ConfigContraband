@@ -53,6 +53,9 @@ jobs:
       - name: Verify package payloads
         run: bash scripts/verify-packages.sh artifacts/packages
 
+      - name: Verify packed tool end to end
+        run: bash scripts/verify-packed-tool.sh artifacts/packages
+
       - name: Setup .NET 8 compatibility SDK
         uses: actions/setup-dotnet@v5
         with:
