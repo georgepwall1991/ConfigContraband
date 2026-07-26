@@ -3,8 +3,8 @@
 This file tracks the current ConfigContraband analyzer surface and the next hardening work that is still worth doing. It should stay practical: scores drive priority, notes describe shipped behavior, and gaps should be specific enough to turn into a focused PR.
 
 Last refreshed: 2026-07-26
-Package version: `0.7.25`
-Base audited commit: `c99d112`
+Package version: `0.7.26`
+Base audited commit: `3e996b9`
 
 ## Scoring Rubric
 

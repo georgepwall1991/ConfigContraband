@@ -2,6 +2,20 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.26 - 2026-07-26
+
+- Improved NuGet and GitHub discoverability for Options / appsettings validation: package
+  titles, descriptions, and tags now include high-intent terms (`ValidateOnStart`,
+  `ValidateDataAnnotations`, `BindConfiguration`, `IOptions`, `options-pattern`, schema /
+  IntelliSense for the tool) grounded in NuGet search practice and Options-pattern language.
+- Restructured the root README as a conversion funnel (problem → install → product visuals →
+  30-second path → feature snapshot) while keeping the full CFG001–CFG009 reference layer.
+- Added three product-flow visuals under `assets/` (build diagnostics, before/after code fix,
+  analyzer + schema dual loop) derived from the showcase diagnostics, packed into both NuGet
+  packages so PackageReadmeFile rendering resolves image paths.
+- Added discoverability metadata tests and extended `scripts/verify-packages.sh` to assert
+  high-intent nuspec terms and shipped visual assets. Diagnostic IDs and severities are unchanged.
+
 ## 0.7.25 - 2026-07-26
 
 - Replaced obsolete Roslyn workspace-failure and code-fix testing APIs with

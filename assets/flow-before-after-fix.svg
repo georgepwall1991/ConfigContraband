@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="480" viewBox="0 0 920 480" role="img" aria-labelledby="title desc">
+  <title id="title">Before and after: BindConfiguration section typo fixed by ConfigContraband</title>
+  <desc id="desc">Side-by-side before/after showing CFG001 section typo Strpie versus Stripe and the corrected BindConfiguration registration.</desc>
+  <rect width="920" height="480" rx="12" fill="#0f172a"/>
+  <text x="32" y="40" fill="#f1f5f9" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700">Code fix: BindConfiguration typo (CFG001)</text>
+  <text x="32" y="64" fill="#94a3b8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">Catch section-name typos against visible appsettings.json before production</text>
+
+  <!-- BEFORE panel -->
+  <rect x="24" y="88" width="430" height="360" rx="10" fill="#1e1b1b" stroke="#7f1d1d" stroke-width="1.5"/>
+  <rect x="24" y="88" width="430" height="40" rx="10" fill="#7f1d1d"/>
+  <rect x="24" y="118" width="430" height="10" fill="#7f1d1d"/>
+  <text x="40" y="114" fill="#fecaca" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700">BEFORE — broken Options binding</text>
+
+  <text x="40" y="156" fill="#fca5a5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">// C#</text>
+  <text x="40" y="180" fill="#e2e8f0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">services.AddOptions&lt;StripeOptions&gt;()</text>
+  <text x="40" y="200" fill="#f87171" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="700">  .BindConfiguration("Strpie")  // typo</text>
+  <text x="40" y="220" fill="#e2e8f0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">  .ValidateDataAnnotations()</text>
+  <text x="40" y="240" fill="#e2e8f0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">  .ValidateOnStart();</text>
+
+  <text x="40" y="276" fill="#fca5a5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">// appsettings.json</text>
+  <text x="40" y="300" fill="#e2e8f0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">{</text>
+  <text x="40" y="320" fill="#86efac" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">  "Stripe": { "ApiKey": "secret" }</text>
+  <text x="40" y="340" fill="#e2e8f0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">}</text>
+
+  <rect x="40" y="364" width="398" height="64" rx="6" fill="#450a0a"/>
+  <text x="52" y="390" fill="#fecaca" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="600">⚠ CFG001 warning</text>
+  <text x="52" y="410" fill="#fca5a5" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">Section "Strpie" not found. Did you mean "Stripe"?</text>
+
+  <!-- AFTER panel -->
+  <rect x="466" y="88" width="430" height="360" rx="10" fill="#0f1f17" stroke="#14532d" stroke-width="1.5"/>
+  <rect x="466" y="88" width="430" height="40" rx="10" fill="#14532d"/>
+  <rect x="466" y="118" width="430" height="10" fill="#14532d"/>
+  <text x="482" y="114" fill="#bbf7d0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700">AFTER — code fix applied</text>
+
+  <text x="482" y="156" fill="#86efac" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">// C#</text>
+  <text x="482" y="180" fill="#e2e8f0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">services.AddOptions&lt;StripeOptions&gt;()</text>
+  <text x="482" y="200" fill="#4ade80" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="700">  .BindConfiguration("Stripe")  // fixed</text>
+  <text x="482" y="220" fill="#e2e8f0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">  .ValidateDataAnnotations()</text>
+  <text x="482" y="240" fill="#e2e8f0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">  .ValidateOnStart();</text>
+
+  <text x="482" y="276" fill="#86efac" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">// appsettings.json</text>
+  <text x="482" y="300" fill="#e2e8f0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">{</text>
+  <text x="482" y="320" fill="#86efac" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">  "Stripe": { "ApiKey": "secret" }</text>
+  <text x="482" y="340" fill="#e2e8f0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">}</text>
+
+  <rect x="482" y="364" width="398" height="64" rx="6" fill="#052e16"/>
+  <text x="494" y="390" fill="#bbf7d0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="600">✓ Options binding matches appsettings</text>
+  <text x="494" y="410" fill="#86efac" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">ValidateOnStart + DataAnnotations path stays intact</text>
+</svg>
