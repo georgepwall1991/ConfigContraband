@@ -5,6 +5,68 @@ namespace ConfigContraband.Tests;
 public sealed partial class ConfigContrabandAnalyzerTests
 {
     [Fact]
+    public void CI_rejects_unexpected_warnings_while_samples_allow_only_their_intentional_diagnostics()
+    {
+        var repositoryRoot = Path.GetFullPath(
+            Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var buildProperties = System.Xml.Linq.XDocument.Load(
+            Path.Combine(repositoryRoot, "Directory.Build.props"));
+        var showcaseProject = System.Xml.Linq.XDocument.Load(
+            Path.Combine(
+                repositoryRoot,
+                "samples",
+                "ConfigContraband.Showcase",
+                "ConfigContraband.Showcase.csproj"));
+        var compatibilityProject = System.Xml.Linq.XDocument.Load(
+            Path.Combine(
+                repositoryRoot,
+                "tests",
+                "Compatibility",
+                "Net8Consumer",
+                "Net8Consumer.csproj"));
+        var compatibilityVerifier = File.ReadAllText(
+            Path.Combine(repositoryRoot, "scripts", "verify-net8-analyzer-host.sh"));
+
+        var treatWarningsAsErrors = Assert.Single(
+            buildProperties.Descendants("TreatWarningsAsErrors"));
+        Assert.Equal("'$(ContinuousIntegrationBuild)' == 'true'", treatWarningsAsErrors.Attribute("Condition")?.Value);
+        Assert.Equal("true", treatWarningsAsErrors.Value);
+
+        var showcaseWarningsNotAsErrors = Assert.Single(
+            showcaseProject.Descendants("WarningsNotAsErrors"));
+        Assert.Equal(
+            [
+                "$(WarningsNotAsErrors)",
+                "CFG001",
+                "CFG002",
+                "CFG003",
+                "CFG004",
+                "CFG005",
+                "CFG006",
+                "CFG007",
+                "CFG008",
+                "CFG009",
+            ],
+            showcaseWarningsNotAsErrors.Value.Split(';'));
+
+        var showcaseSuppressions = Assert.Single(showcaseProject.Descendants("NoWarn"));
+        Assert.Equal(
+            ["$(NoWarn)", "CA1050", "CA1822", "IDE0005"],
+            showcaseSuppressions.Value.Split(';'));
+
+        var compatibilitySuppressions = Assert.Single(compatibilityProject.Descendants("NoWarn"));
+        Assert.Equal(
+            ["$(NoWarn)", "CA1050"],
+            compatibilitySuppressions.Value.Split(';'));
+
+        Assert.Contains("unexpected_build_diagnostics", compatibilityVerifier, StringComparison.Ordinal);
+        Assert.Contains(
+            "The .NET 8 compiler-host smoke emitted diagnostics other than CFG001",
+            compatibilityVerifier,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Diagnostics_link_to_their_exact_rule_documentation()
     {
         const string HelpLinkBase = "https://github.com/georgepwall1991/ConfigContraband#";
