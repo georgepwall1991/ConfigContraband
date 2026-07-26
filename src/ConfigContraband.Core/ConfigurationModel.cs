@@ -533,7 +533,119 @@ internal static class JsonConfigurationParser
         public ConfigurationNode? ParseRoot()
         {
             SkipWhitespace();
-            return Current == '{' ? ParseObject(parentPath: string.Empty, depth: 0) : null;
+            if (Current != '{')
+            {
+                return null;
+            }
+
+            var root = ParseObject(parentPath: string.Empty, depth: 0);
+            var overwrittenScalarPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (HasDuplicateRuntimePath(
+                    root,
+                    parentRuntimePath: null,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                    overwrittenScalarPaths))
+            {
+                return null;
+            }
+
+            return overwrittenScalarPaths.Count == 0
+                ? root
+                : RemoveOverwrittenScalars(root, parentRuntimePath: null, overwrittenScalarPaths);
+        }
+
+        private static bool HasDuplicateRuntimePath(
+            ConfigurationNode node,
+            string? parentRuntimePath,
+            HashSet<string> runtimePaths,
+            HashSet<string> overwrittenScalarPaths)
+        {
+            foreach (var property in node.Properties)
+            {
+                var runtimePath = CreateRuntimePath(parentRuntimePath, property.Key);
+                if (property.ScalarKind != ScalarKind.None &&
+                    !runtimePaths.Add(runtimePath))
+                {
+                    return true;
+                }
+
+                if (HasDuplicateRuntimePath(
+                        property.Value,
+                        runtimePath,
+                        runtimePaths,
+                        overwrittenScalarPaths))
+                {
+                    return true;
+                }
+
+                if (property.ScalarKind == ScalarKind.None &&
+                    property.Value.Properties.IsDefaultOrEmpty &&
+                    (property.Value.Kind == ConfigurationNodeKind.Object ||
+                     property.Value.Kind == ConfigurationNodeKind.Array))
+                {
+                    // Empty containers write their path through the runtime
+                    // provider's dictionary indexer. They overwrite an earlier
+                    // value, but make a later scalar at the same path invalid.
+                    if (!runtimePaths.Add(runtimePath))
+                    {
+                        overwrittenScalarPaths.Add(runtimePath);
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static ConfigurationNode RemoveOverwrittenScalars(
+            ConfigurationNode node,
+            string? parentRuntimePath,
+            HashSet<string> overwrittenScalarPaths)
+        {
+            var properties = ImmutableArray.CreateBuilder<ConfigurationProperty>(node.Properties.Length);
+            var changed = false;
+
+            foreach (var property in node.Properties)
+            {
+                var runtimePath = CreateRuntimePath(parentRuntimePath, property.Key);
+                if (property.ScalarKind != ScalarKind.None &&
+                    overwrittenScalarPaths.Contains(runtimePath))
+                {
+                    changed = true;
+                    continue;
+                }
+
+                var value = RemoveOverwrittenScalars(
+                    property.Value,
+                    runtimePath,
+                    overwrittenScalarPaths);
+                if (ReferenceEquals(value, property.Value))
+                {
+                    properties.Add(property);
+                    continue;
+                }
+
+                changed = true;
+                properties.Add(new ConfigurationProperty(
+                    property.Key,
+                    property.FullPath,
+                    value,
+                    property.Location,
+                    property.StrictUnknownConfigurationKeySuppressedByAnalyzerConfig,
+                    property.ScalarKind,
+                    property.ScalarValue,
+                    property.ValueLocation));
+            }
+
+            return changed
+                ? new ConfigurationNode(properties.ToImmutable(), node.Kind)
+                : node;
+        }
+
+        private static string CreateRuntimePath(string? parentRuntimePath, string key)
+        {
+            // Null means the root. An empty string is a real JSON path segment
+            // and must retain the leading delimiter for its descendants.
+            return parentRuntimePath is null ? key : parentRuntimePath + ":" + key;
         }
 
         private ConfigurationNode ParseObject(string parentPath, int depth)

@@ -2,6 +2,15 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## Unreleased
+
+- Aligned the appsettings model with the runtime JSON provider for duplicate flattened keys.
+  A scalar or null value that repeats a case-insensitive path already written by another scalar,
+  null, or empty container now excludes that file from analysis because the provider rejects it
+  before binding. Runtime order is preserved: a later empty container may overwrite an earlier
+  value without invalidating the file. Matching paths across separate files and duplicate object
+  members with disjoint leaves remain supported.
+
 ## 0.7.24 - 2026-07-25
 
 - Fixed four `CFG002` false positives for `[Required]` array properties initialized with a

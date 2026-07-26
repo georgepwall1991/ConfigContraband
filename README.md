@@ -292,7 +292,7 @@ services.AddOptions<StripeOptions>()
 
 For nested typos, the fix keeps the parent path and replaces only the bad leaf section. If the code says `Features:Strpie` and the file contains `Features:Stripe`, the fix changes it to `Features:Stripe`.
 
-The analyzer checks every visible `appsettings.json` and `appsettings.*.json` additional file for section existence, including commented files, JSON string escapes, colon-delimited keys such as `"Features:Stripe"`, and duplicate JSON section members when resolving nested section paths. Lookalike files such as `appsettingsBackup.json` are ignored. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
+The analyzer checks every visible `appsettings.json` and `appsettings.*.json` additional file for section existence, including commented files, JSON string escapes, colon-delimited keys such as `"Features:Stripe"`, and duplicate JSON object members with disjoint nested paths. A file is ignored entirely when a scalar or null value repeats a case-insensitive flattened path already written by a scalar, null, or empty container, because the runtime JSON provider rejects that file before binding. Lookalike files such as `appsettingsBackup.json` are ignored. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
 
 ### `CFG002`: Required Configuration Keys Must Be Present
 
