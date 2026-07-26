@@ -96,4 +96,22 @@ if [[ "$build_output" == *"CS9057"* ]]; then
   exit 1
 fi
 
+unexpected_build_diagnostics="$(
+  while IFS= read -r line; do
+    case "$line" in
+      *": error CFG001:"*)
+        ;;
+      *": error "*|*": warning "*)
+        printf '%s\n' "$line"
+        ;;
+    esac
+  done <<< "$build_output"
+)"
+
+if [[ -n "$unexpected_build_diagnostics" ]]; then
+  echo "The .NET 8 compiler-host smoke emitted diagnostics other than CFG001:" >&2
+  printf '%s\n' "$unexpected_build_diagnostics" >&2
+  exit 1
+fi
+
 echo "Verified packed ConfigContraband $analyzer_version execution under the .NET 8 compiler host."

@@ -4,6 +4,10 @@ All notable changes to ConfigContraband will be documented in this file.
 
 ## Unreleased
 
+- Made CI and release publication fail on every unexpected compiler or analyzer warning while
+  retaining only the intentional CFG001-CFG009 showcase diagnostics. Sample-only shape warnings
+  are suppressed at the sample project boundary instead of being accepted repository-wide, and
+  the expected-failure .NET 8 host smoke now rejects every diagnostic except its required CFG001.
 - Added stable per-rule documentation links to all CFG001-CFG009 diagnostics so IDE help actions
   open the exact README guidance for the reported rule. Diagnostic IDs, severities, messages, and
   code fixes are unchanged.
