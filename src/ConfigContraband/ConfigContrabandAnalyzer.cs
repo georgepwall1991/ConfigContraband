@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -81,10 +82,19 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                     }
 
                     var compilation = syntaxContext.SemanticModel.Compilation;
-                    AnalyzeRegistrationChain(syntaxContext.ReportDiagnostic, registration, compilation);
+                    AnalyzeRegistrationChain(
+                        syntaxContext.ReportDiagnostic,
+                        registration,
+                        compilation,
+                        syntaxContext.CancellationToken);
                     if (registration.SupportsValidationRules)
                     {
-                        AnalyzeOptionType(syntaxContext.ReportDiagnostic, registration, nestedValidationReported, compilation);
+                        AnalyzeOptionType(
+                            syntaxContext.ReportDiagnostic,
+                            registration,
+                            nestedValidationReported,
+                            compilation,
+                            syntaxContext.CancellationToken);
                     }
 
                     if (configuration.HasFiles)
@@ -155,8 +165,10 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
     private static void AnalyzeRegistrationChain(
         Action<Diagnostic> reportDiagnostic,
         OptionsRegistration registration,
-        Compilation compilation)
+        Compilation compilation,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!registration.SupportsValidationRules)
         {
             return;
@@ -173,7 +185,8 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         var metadata = OptionsTypeMetadata.Create(
             registration.OptionsType,
             registration.BindsNonPublicProperties,
-            compilation);
+            compilation,
+            cancellationToken);
         if (metadata.HasAnyDataAnnotations() && !registration.HasValidateDataAnnotations)
         {
             var properties = ImmutableDictionary<string, string?>.Empty
@@ -191,14 +204,18 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         Action<Diagnostic> reportDiagnostic,
         OptionsRegistration registration,
         ConcurrentDictionary<string, byte> nestedValidationReported,
-        Compilation compilation)
+        Compilation compilation,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var metadata = OptionsTypeMetadata.Create(
             registration.OptionsType,
             registration.BindsNonPublicProperties,
-            compilation);
-        foreach (var candidate in metadata.GetNestedValidationCandidates())
+            compilation,
+            cancellationToken);
+        foreach (var candidate in metadata.GetNestedValidationCandidates(cancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var reportKey = candidate.Property.Symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) +
                             "|" +
                             candidate.Property.Symbol.Locations.FirstOrDefault()?.GetLineSpan().Span.Start;

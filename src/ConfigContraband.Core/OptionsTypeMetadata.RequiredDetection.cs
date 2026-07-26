@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 
 namespace ConfigContraband;
@@ -103,8 +104,10 @@ internal sealed partial class OptionsTypeMetadata
         ITypeSymbol type,
         HashSet<ITypeSymbol> visited,
         bool bindsNonPublicProperties,
-        Compilation? compilation)
+        Compilation? compilation,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!visited.Add(type))
         {
             return false;
@@ -126,6 +129,7 @@ internal sealed partial class OptionsTypeMetadata
 
         foreach (var candidate in GetBindableProperties(namedType, bindsNonPublicProperties, compilation))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var property = candidate.Property;
             if (HasValidationAttribute(property))
             {
@@ -135,7 +139,12 @@ internal sealed partial class OptionsTypeMetadata
             if (TryGetCollectionElementType(property.Type, out var elementType))
             {
                 if (IsPotentialNestedObject(elementType) &&
-                    ContainsValidationAttributes(elementType, visited, bindsNonPublicProperties, compilation))
+                    ContainsValidationAttributes(
+                        elementType,
+                        visited,
+                        bindsNonPublicProperties,
+                        compilation,
+                        cancellationToken))
                 {
                     return true;
                 }
@@ -144,7 +153,12 @@ internal sealed partial class OptionsTypeMetadata
             }
 
             if (IsPotentialNestedObject(property.Type) &&
-                ContainsValidationAttributes(property.Type, visited, bindsNonPublicProperties, compilation))
+                ContainsValidationAttributes(
+                    property.Type,
+                    visited,
+                    bindsNonPublicProperties,
+                    compilation,
+                    cancellationToken))
             {
                 return true;
             }
