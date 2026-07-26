@@ -482,6 +482,90 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg003_suppresses_fix_after_terminal_non_builder_extension()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .Finish()|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: TerminalExtensionOptionsTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_fix_appends_validate_on_start_after_derived_builder_extension()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .AsDerived()|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: DerivedExtensionOptionsTypes);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .AsDerived()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: DerivedExtensionOptionsTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_fix_appends_validate_on_start_after_constrained_builder_extension()
+    {
+        var source = ConstrainedBuilderSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .As<TBuilder>()|};
+            """);
+
+        var fixedSource = ConstrainedBuilderSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .As<TBuilder>()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_suppresses_fix_after_terminal_builder_for_different_options_type()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .SwitchOptions()|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: SwitchedBuilderOptionsTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_fix_appends_validate_on_start_after_bind_get_section()
     {
         var source = OptionsSource("""
@@ -559,6 +643,46 @@ public sealed partial class ConfigContrabandCodeFixTests
                 .ValidateDataAnnotations()
                 .ValidateOnStart();
             """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_suppresses_fix_after_terminal_non_builder_extension()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .Finish()|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: TerminalExtensionOptionsTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_fix_appends_validation_after_derived_builder_extension()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .AsDerived()|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: DerivedExtensionOptionsTypes);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .AsDerived()
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: DerivedExtensionOptionsTypes);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
             .WithLocation(0)
@@ -951,6 +1075,104 @@ public sealed partial class ConfigContrabandCodeFixTests
                 public void Read(IConfiguration configuration)
                 {
                     {{body}}
+                }
+            }
+            """;
+    }
+
+    private const string TerminalExtensionOptionsTypes = """
+        public sealed class StripeOptions
+        {
+            [Required]
+            public string ApiKey { get; set; } = "";
+        }
+
+        public static class CustomOptionsBuilderExtensions
+        {
+            public static int Finish<TOptions>(this OptionsBuilder<TOptions> builder)
+                where TOptions : class
+            {
+                return 0;
+            }
+        }
+        """;
+
+    private const string DerivedExtensionOptionsTypes = """
+        public sealed class StripeOptions
+        {
+            [Required]
+            public string ApiKey { get; set; } = "";
+        }
+
+        public sealed class DerivedOptionsBuilder<TOptions> : OptionsBuilder<TOptions>
+            where TOptions : class
+        {
+            public DerivedOptionsBuilder(IServiceCollection services, string? name)
+                : base(services, name)
+            {
+            }
+        }
+
+        public static class CustomOptionsBuilderExtensions
+        {
+            public static DerivedOptionsBuilder<TOptions> AsDerived<TOptions>(
+                this OptionsBuilder<TOptions> builder)
+                where TOptions : class
+            {
+                return new DerivedOptionsBuilder<TOptions>(builder.Services, builder.Name);
+            }
+        }
+        """;
+
+    private const string SwitchedBuilderOptionsTypes = """
+        public sealed class StripeOptions
+        {
+            [Required]
+            public string ApiKey { get; set; } = "";
+        }
+
+        public sealed class OtherOptions
+        {
+        }
+
+        public static class CustomOptionsBuilderExtensions
+        {
+            public static OptionsBuilder<OtherOptions> SwitchOptions(
+                this OptionsBuilder<StripeOptions> builder)
+            {
+                return new OptionsBuilder<OtherOptions>(builder.Services, builder.Name);
+            }
+        }
+        """;
+
+    private static string ConstrainedBuilderSource(string registration)
+    {
+        return $$"""
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public sealed class Startup
+            {
+                public void Configure<TBuilder>(IServiceCollection services)
+                    where TBuilder : OptionsBuilder<StripeOptions>
+                {
+                    {{registration}}
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+
+            public static class CustomOptionsBuilderExtensions
+            {
+                public static TBuilder As<TBuilder>(this OptionsBuilder<StripeOptions> builder)
+                    where TBuilder : OptionsBuilder<StripeOptions>
+                {
+                    return null!;
                 }
             }
             """;

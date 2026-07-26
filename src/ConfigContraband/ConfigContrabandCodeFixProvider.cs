@@ -28,7 +28,7 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
 
     private static readonly string[] ValidateOnStartInvocation = { "ValidateOnStart" };
 
-    public override Task RegisterCodeFixesAsync(CodeFixContext context)
+    public override async Task RegisterCodeFixesAsync(CodeFixContext context)
     {
         foreach (var diagnostic in context.Diagnostics)
         {
@@ -40,6 +40,14 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
                     break;
 
                 case DiagnosticIds.ValidationNotOnStart:
+                    if (!await CanAppendInvocationsAsync(
+                            context.Document,
+                            diagnostic.Location.SourceSpan,
+                            context.CancellationToken).ConfigureAwait(false))
+                    {
+                        break;
+                    }
+
                     context.RegisterCodeFix(
                         CodeAction.Create(
                             "Add ValidateOnStart()",
@@ -49,6 +57,14 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
                     break;
 
                 case DiagnosticIds.DataAnnotationsNotEnabled:
+                    if (!await CanAppendInvocationsAsync(
+                            context.Document,
+                            diagnostic.Location.SourceSpan,
+                            context.CancellationToken).ConfigureAwait(false))
+                    {
+                        break;
+                    }
+
                     var methods = diagnostic.Properties.TryGetValue(ConfigContrabandAnalyzer.HasValidateOnStartPropertyName, out var hasValidateOnStart) &&
                         string.Equals(hasValidateOnStart, "true", StringComparison.Ordinal)
                             ? new[] { "ValidateDataAnnotations" }
@@ -78,8 +94,6 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
                     break;
             }
         }
-
-        return Task.CompletedTask;
     }
 
     private static void RegisterMissingSectionFix(CodeFixContext context, Diagnostic diagnostic)
@@ -233,6 +247,114 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             .WithAdditionalAnnotations(Formatter.Annotation);
 
         return document.WithSyntaxRoot(root.ReplaceNode(outermost, replacement));
+    }
+
+    private static async Task<bool> CanAppendInvocationsAsync(
+        Document document,
+        TextSpan span,
+        CancellationToken cancellationToken)
+    {
+        var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+        var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+        if (root is null || semanticModel is null)
+        {
+            return false;
+        }
+
+        var invocation = root.FindNode(span).FirstAncestorOrSelf<InvocationExpressionSyntax>();
+        if (invocation is null)
+        {
+            return false;
+        }
+
+        var outermost = FindOutermostInvocation(invocation);
+        var optionsBuilderType = semanticModel.Compilation.GetTypeByMetadataName(
+            "Microsoft.Extensions.Options.OptionsBuilder`1");
+        var invocationType = semanticModel.GetTypeInfo(outermost, cancellationToken).Type;
+
+        return optionsBuilderType is not null &&
+               invocationType is not null &&
+               TryGetOptionsBuilderType(invocationType, optionsBuilderType, out var appendBuilderType) &&
+               TryGetBoundOptionsType(outermost, semanticModel, optionsBuilderType, out var boundOptionsType) &&
+               SymbolEqualityComparer.Default.Equals(
+                   appendBuilderType.TypeArguments[0],
+                   boundOptionsType);
+    }
+
+    private static bool TryGetOptionsBuilderType(
+        ITypeSymbol invocationType,
+        INamedTypeSymbol optionsBuilderType,
+        out INamedTypeSymbol constructedOptionsBuilderType)
+    {
+        if (invocationType is ITypeParameterSymbol typeParameter)
+        {
+            foreach (var constraint in typeParameter.ConstraintTypes)
+            {
+                if (TryGetOptionsBuilderType(
+                        constraint,
+                        optionsBuilderType,
+                        out constructedOptionsBuilderType))
+                {
+                    return true;
+                }
+            }
+        }
+
+        for (var current = invocationType as INamedTypeSymbol;
+             current is not null;
+             current = current.BaseType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(
+                    current.OriginalDefinition,
+                    optionsBuilderType))
+            {
+                constructedOptionsBuilderType = current;
+                return true;
+            }
+        }
+
+        constructedOptionsBuilderType = null!;
+        return false;
+    }
+
+    private static bool TryGetBoundOptionsType(
+        InvocationExpressionSyntax outermost,
+        SemanticModel semanticModel,
+        INamedTypeSymbol optionsBuilderType,
+        out ITypeSymbol boundOptionsType)
+    {
+        var current = outermost;
+        while (current.Expression is MemberAccessExpressionSyntax memberAccess)
+        {
+            var symbol = semanticModel.GetSymbolInfo(current).Symbol as IMethodSymbol;
+            var original = symbol?.ReducedFrom ?? symbol;
+            if (original is not null &&
+                (string.Equals(original.Name, "BindConfiguration", StringComparison.Ordinal) ||
+                 string.Equals(original.Name, "Bind", StringComparison.Ordinal)) &&
+                string.Equals(
+                    original.ContainingType.ToDisplayString(),
+                    "Microsoft.Extensions.DependencyInjection.OptionsBuilderConfigurationExtensions",
+                    StringComparison.Ordinal) &&
+                semanticModel.GetTypeInfo(memberAccess.Expression).Type is { } receiverType &&
+                TryGetOptionsBuilderType(
+                    receiverType,
+                    optionsBuilderType,
+                    out var registrationBuilderType))
+            {
+                boundOptionsType = registrationBuilderType.TypeArguments[0];
+                return true;
+            }
+
+            if (memberAccess.Expression is not InvocationExpressionSyntax receiverInvocation)
+            {
+                break;
+            }
+
+            current = receiverInvocation;
+        }
+
+        boundOptionsType = null!;
+        return false;
     }
 
     private static SyntaxToken CreateAppendedInvocationDotToken(InvocationExpressionSyntax outermost)
