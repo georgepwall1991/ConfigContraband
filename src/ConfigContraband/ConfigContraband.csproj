@@ -14,18 +14,18 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.24</Version>
+    <Version>0.7.26</Version>
     <Authors>George Wall</Authors>
-    <Title>ConfigContraband</Title>
-    <Description>Stop smuggling broken appsettings into production. ConfigContraband is a Roslyn analyzer for .NET Options and configuration correctness.</Description>
-    <PackageTags>configuration;options;appsettings;dotnet;csharp;aspnetcore;roslyn;roslyn-analyzer;analyzers;static-analysis</PackageTags>
+    <Title>ConfigContraband — Options and appsettings validation analyzer</Title>
+    <Description>Compile-time Options validation for .NET: a Roslyn analyzer that checks BindConfiguration, ValidateOnStart, ValidateDataAnnotations, and appsettings.json against your IOptions types so broken configuration fails in the editor and CI—not production.</Description>
+    <PackageTags>configuration;options;appsettings;validation;ValidateOnStart;ValidateDataAnnotations;BindConfiguration;IOptions;options-pattern;DataAnnotations;roslyn;roslyn-analyzer;analyzers;static-analysis;aspnetcore;csharp;dotnet</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageIcon>assets/configcontraband-icon.png</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Precision release: CFG002 now recognizes non-null array initializer forms that already satisfy RequiredAttribute. CFG008 now follows ConfigurationBinder container semantics by suppressing loose collection/dictionary conversion failures that the runtime skips and reporting supported malformed elements only when strict binding rethrows. CI now enforces exactly one CFG001-CFG009 showcase diagnostic. No diagnostic IDs, severities, messages, or code fixes changed.</PackageReleaseNotes>
+    <PackageReleaseNotes>Discoverability release: keyword-rich package title, description, and tags for Options validation (ValidateOnStart, ValidateDataAnnotations, BindConfiguration, IOptions); conversion-funnel README with product-flow visuals for IDE diagnostics, code fixes, and the analyzer+schema loop; packs assets for NuGet README rendering; adds discoverability metadata tests and package verification. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
@@ -37,7 +37,7 @@
          Keep shipped analyzer references at this baseline so older compiler hosts can load them. -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="5.3.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="5.6.0" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -55,7 +55,7 @@
     <None Include="$(OutputPath)\ConfigContraband.Core.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     <None Include="buildTransitive\ConfigContraband.props" Pack="true" PackagePath="buildTransitive\ConfigContraband.props" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
-    <None Include="..\..\assets\configcontraband-icon.png" Pack="true" PackagePath="assets\" />
+    <None Include="..\..\assets\**\*" Pack="true" PackagePath="assets\" />
   </ItemGroup>
 
   <ItemGroup>

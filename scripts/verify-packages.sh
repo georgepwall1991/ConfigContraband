@@ -23,4 +23,33 @@ cmp src/ConfigContraband.Core/bin/Release/netstandard2.0/ConfigContraband.Core.d
 cmp README.md <(unzip -p "$analyzer_package" README.md)
 cmp README.md <(unzip -p "$tool_package" README.md)
 
-echo "Verified package versions, analyzer payloads, and README contents for $analyzer_version."
+# Product-flow visuals referenced by PackageReadmeFile must ship inside both packages.
+for asset in \
+  assets/configcontraband-icon.png \
+  assets/flow-ide-diagnostics.svg \
+  assets/flow-before-after-fix.svg \
+  assets/flow-analyzer-schema-loop.svg
+do
+  cmp "$asset" <(unzip -p "$analyzer_package" "$asset")
+  cmp "$asset" <(unzip -p "$tool_package" "$asset")
+done
+
+# Discoverability metadata: high-intent Options / appsettings terms (NuGet search).
+analyzer_nuspec="$(unzip -p "$analyzer_package" ConfigContraband.nuspec)"
+tool_nuspec="$(unzip -p "$tool_package" ConfigContraband.Tool.nuspec)"
+
+for term in ValidateOnStart ValidateDataAnnotations BindConfiguration IOptions appsettings validation; do
+  printf '%s' "$analyzer_nuspec" | grep -Fq "$term" || {
+    echo "Analyzer nuspec missing discoverability term: $term" >&2
+    exit 1
+  }
+done
+
+for term in appsettings.schema.json ValidateDataAnnotations BindConfiguration json-schema; do
+  printf '%s' "$tool_nuspec" | grep -Fq "$term" || {
+    echo "Tool nuspec missing discoverability term: $term" >&2
+    exit 1
+  }
+done
+
+echo "Verified package versions, analyzer payloads, README, assets, and discoverability metadata for $analyzer_version."

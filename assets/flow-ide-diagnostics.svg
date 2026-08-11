@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="420" viewBox="0 0 920 420" role="img" aria-labelledby="title desc">
+  <title id="title">ConfigContraband IDE/build diagnostics for Options and appsettings</title>
+  <desc id="desc">Real CFG001–CFG003 warning messages from the ConfigContraband showcase project build, shown as a product diagnostic panel.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+  </defs>
+  <rect width="920" height="420" rx="12" fill="url(#bg)"/>
+  <rect x="16" y="16" width="888" height="388" rx="10" fill="#0b1220" stroke="#334155" stroke-width="1"/>
+  <!-- title bar -->
+  <rect x="16" y="16" width="888" height="44" rx="10" fill="#1e293b"/>
+  <rect x="16" y="50" width="888" height="10" fill="#1e293b"/>
+  <circle cx="44" cy="38" r="6" fill="#f87171"/>
+  <circle cx="66" cy="38" r="6" fill="#fbbf24"/>
+  <circle cx="88" cy="38" r="6" fill="#4ade80"/>
+  <text x="120" y="43" fill="#e2e8f0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="600">Build / Error List — Options validation (ConfigContraband)</text>
+
+  <!-- column headers -->
+  <text x="36" y="90" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">Code</text>
+  <text x="110" y="90" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">Description (from showcase build)</text>
+
+  <!-- rows: real diagnostic text -->
+  <rect x="28" y="104" width="864" height="52" rx="6" fill="#1a2332"/>
+  <text x="36" y="126" fill="#fbbf24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="700">CFG001</text>
+  <text x="110" y="126" fill="#f8fafc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">Configuration section "Strpie" was not found. Did you mean "Stripe"?</text>
+  <text x="110" y="144" fill="#64748b" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11">Program.cs · BindConfiguration typo vs appsettings.json</text>
+
+  <rect x="28" y="164" width="864" height="52" rx="6" fill="#15202b"/>
+  <text x="36" y="186" fill="#fbbf24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="700">CFG002</text>
+  <text x="110" y="186" fill="#f8fafc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">Required configuration key "ApiKey" is missing from section "RequiredKey"</text>
+  <text x="110" y="204" fill="#64748b" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11">[Required] + ValidateDataAnnotations · missing appsettings key</text>
+
+  <rect x="28" y="224" width="864" height="52" rx="6" fill="#1a2332"/>
+  <text x="36" y="246" fill="#fbbf24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="700">CFG003</text>
+  <text x="110" y="246" fill="#f8fafc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">StartupValidationOptions has validation, but it is not configured to validate on startup</text>
+  <text x="110" y="264" fill="#64748b" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11">Validate(...) without ValidateOnStart()</text>
+
+  <rect x="28" y="284" width="864" height="52" rx="6" fill="#15202b"/>
+  <text x="36" y="306" fill="#fbbf24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="700">CFG004</text>
+  <text x="110" y="306" fill="#f8fafc" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">DataAnnotationOptions uses DataAnnotations, but ValidateDataAnnotations() is not registered</text>
+  <text x="110" y="324" fill="#64748b" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11">[Required] attributes need ValidateDataAnnotations()</text>
+
+  <text x="36" y="372" fill="#64748b" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12">Source: samples/ConfigContraband.Showcase · ContinuousIntegrationBuild=true · CFG001–CFG009 (9 warnings)</text>
+  <text x="36" y="390" fill="#475569" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11">Product-flow diagram from real analyzer output — not a stock screenshot</text>
+</svg>

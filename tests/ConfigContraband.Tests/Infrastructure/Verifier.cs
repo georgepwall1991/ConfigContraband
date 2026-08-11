@@ -319,7 +319,7 @@ internal static class Verifier
         var test = new CSharpCodeFixTest<ConfigContrabandAnalyzer, ConfigContrabandCodeFixProvider, DefaultVerifier>
         {
             ReferenceAssemblies = OptionsReferences,
-            CodeFixEquivalenceKey = equivalenceKey,
+            CodeActionEquivalenceKey = equivalenceKey,
             NumberOfIncrementalIterations = expected.Length,
             NumberOfFixAllIterations = 1
         };

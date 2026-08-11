@@ -2,8 +2,25 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
-## Unreleased
+## 0.7.26 - 2026-07-26
 
+- Improved NuGet and GitHub discoverability for Options / appsettings validation: package
+  titles, descriptions, and tags now include high-intent terms (`ValidateOnStart`,
+  `ValidateDataAnnotations`, `BindConfiguration`, `IOptions`, `options-pattern`, schema /
+  IntelliSense for the tool) grounded in NuGet search practice and Options-pattern language.
+- Restructured the root README as a conversion funnel (problem → install → product visuals →
+  30-second path → feature snapshot) while keeping the full CFG001–CFG009 reference layer.
+- Added three product-flow visuals under `assets/` (build diagnostics, before/after code fix,
+  analyzer + schema dual loop) derived from the showcase diagnostics, packed into both NuGet
+  packages so PackageReadmeFile rendering resolves image paths.
+- Added discoverability metadata tests and extended `scripts/verify-packages.sh` to assert
+  high-intent nuspec terms and shipped visual assets. Diagnostic IDs and severities are unchanged.
+
+## 0.7.25 - 2026-07-26
+
+- Replaced obsolete Roslyn workspace-failure and code-fix testing APIs with
+  `RegisterWorkspaceFailedHandler` and `CodeActionEquivalenceKey`, then removed the two blanket
+  `CS0618` suppressions so future obsolete API drift fails the warning-clean build.
 - Replaced the stale 98% Codecov project target with a truthful no-regression gate against the
   measured base commit, and tightened changed-line coverage to 100% with zero tolerance. The
   repository now rejects either an overall coverage decrease, including decreases caused by
@@ -27,6 +44,21 @@ All notable changes to ConfigContraband will be documented in this file.
   before binding. Runtime order is preserved: a later empty container may overwrite an earlier
   value without invalidating the file. Matching paths across separate files and duplicate object
   members with disjoint leaves remain supported.
+- Extended the existing `CFG006`-`CFG008` content checks to sound direct `Get<T>()` targets and
+  inline-object `Bind(...)` calls, while retaining the framework-identity, provenance, side-effect,
+  strict-binding, and deduplication gates. Reordered named `OptionsBuilder.Bind(...)` arguments are
+  now resolved by parameter identity instead of source order.
+- Suppressed `CFG003` and `CFG004` automatic fixes when a later fluent call retargets the options
+  builder, so a fix is offered only when it can append validation to the builder that is actually
+  bound. Added document, project, and solution Fix All contracts for all five automatic-fix
+  families, including mixed CFG001/CFG009 suggestions and cross-document CFG005 edits.
+- Made schema registration extraction conservative when framework identity, the options type,
+  section argument, or invocation provenance cannot be proved; same-name lookalike APIs no longer
+  create bogus schema sections. The CLI now fails closed on incomplete workspace or project-load
+  analysis instead of writing a partial schema.
+- Strengthened the public-package path by installing and exercising the packed CLI across help,
+  generation, current, stale, and load-failure paths; binding the .NET 8 compiler-host smoke to the
+  exact candidate package; and enforcing the CFG001-CFG009 showcase contract during publication.
 
 ## 0.7.24 - 2026-07-25
 

@@ -8,21 +8,19 @@
     <Nullable>enable</Nullable>
     <RootNamespace>ConfigContraband.Tool</RootNamespace>
     <AssemblyName>ConfigContraband.Tool</AssemblyName>
-    <!-- MSBuildWorkspace.WorkspaceFailed is the documented load-diagnostics hook; its replacement is not
-         available across the Roslyn versions we target. Matches the test project's CS0618 suppression. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS0618;CS1591</NoWarn>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>configcontraband</ToolCommandName>
     <PackageId>ConfigContraband.Tool</PackageId>
-    <Version>0.7.24</Version>
+    <Version>0.7.26</Version>
     <Authors>George Wall</Authors>
-    <Title>ConfigContraband.Tool</Title>
-    <Description>Generates appsettings.schema.json from your .NET Options types so editors give live autocomplete, type checking, and required-key hints while editing appsettings.json.</Description>
-    <PackageTags>configuration;options;appsettings;json-schema;dotnet;csharp;aspnetcore;intellisense;tool</PackageTags>
+    <Title>ConfigContraband.Tool — appsettings JSON Schema generator</Title>
+    <Description>Generate appsettings.schema.json from .NET Options types for editor IntelliSense, type checking, and required-key hints that match ValidateDataAnnotations and BindConfiguration.</Description>
+    <PackageTags>configuration;options;appsettings;json-schema;schema;intellisense;ValidateDataAnnotations;IOptions;BindConfiguration;tool;aspnetcore;csharp;dotnet</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
@@ -50,6 +48,7 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\assets\**\*" Pack="true" PackagePath="assets\" />
   </ItemGroup>
 
 </Project>

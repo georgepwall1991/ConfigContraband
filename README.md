@@ -1,8 +1,10 @@
 <p align="center">
-  <img src="assets/configcontraband-icon.png" width="96" height="96" alt="ConfigContraband icon">
+  <img src="https://raw.githubusercontent.com/georgepwall1991/ConfigContraband/main/assets/configcontraband-icon.png" width="96" height="96" alt="ConfigContraband icon — Roslyn analyzer for .NET Options and appsettings validation">
 </p>
 
 # ConfigContraband
+
+**Compile-time Options validation for .NET** — a high-signal Roslyn analyzer that checks `BindConfiguration`, `ValidateOnStart`, `ValidateDataAnnotations`, and `appsettings.json` against your `IOptions` types so broken configuration fails in the editor and CI, not production.
 
 [![CI](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/ci.yml/badge.svg)](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/codeql.yml/badge.svg)](https://github.com/georgepwall1991/ConfigContraband/actions/workflows/codeql.yml)
@@ -13,49 +15,124 @@
 
 Stop smuggling broken `appsettings` into production.
 
-ConfigContraband is a high-signal Roslyn analyser for .NET configuration, ASP.NET Core Options, `appsettings.json`, `ValidateOnStart()`, and `ValidateDataAnnotations()`. It catches the configuration mistakes that compile cleanly, pass code review, and then fail at startup or, worse, on first use.
+## The problem
 
-It focuses on the boring production failures:
+ASP.NET Core Options and the Options pattern compile cleanly even when configuration is wrong. A section typo in `BindConfiguration(...)`, a missing `[Required]` key in `appsettings.json`, validation without `ValidateOnStart()`, or DataAnnotations that never call `ValidateDataAnnotations()` only fail at startup — or on first use in production.
 
-- a section name typo in `BindConfiguration(...)`
+Runtime helpers and manual review miss what static analysis can prove from your registration code and visible appsettings files.
+
+## What it catches
+
+ConfigContraband reports the boring production failures early:
+
+- a section name typo in `BindConfiguration(...)` or `Configure<T>(GetSection(...))`
 - a required configuration key missing from all visible `appsettings*.json` files
-- validation that exists but does not run on startup
-- `[Required]` properties that are never wired into Options validation
+- options validation that exists but does not run on startup (`ValidateOnStart`)
+- `[Required]` / DataAnnotations properties never wired with `ValidateDataAnnotations()`
 - nested options that look validated but are silently skipped
-- misspelled JSON keys hiding under a bound section
-- strict binding that will throw because an unknown key is present
-- scalar values that the configuration binder cannot convert to the target CLR type
-- direct configuration reads whose path is unavailable from visible appsettings files
+- misspelled JSON keys under a bound section
+- strict binding (`ErrorOnUnknownConfiguration`) that will throw on unknown keys
+- scalar values the configuration binder cannot convert to the target CLR type
+- direct `IConfiguration` reads whose path is unavailable from visible appsettings files
 
-Use it when your app relies on strongly typed options and you want configuration validation feedback in the editor, in pull requests, and in CI before a bad setting reaches production.
+When the analyzer cannot prove a configuration shape statically, it **stays quiet**. High-signal feedback, not noisy guesses.
 
-## Feature Snapshot
+## Install
+
+```xml
+  <PackageReference Include="ConfigContraband" Version="0.7.26" PrivateAssets="all" />
+```
+
+Or:
+
+```bash
+dotnet add package ConfigContraband
+```
+
+The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyzer automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
+
+**No runtime dependency** is added to your app. ConfigContraband runs as a Roslyn analyzer during build and in supported IDEs.
+
+## See it work
+
+Product-flow diagrams from the real showcase build (`CFG001`–`CFG009` diagnostics):
+
+### 1. Build / IDE diagnostics (Options validation)
+
+![ConfigContraband Roslyn analyzer warnings for Options validation and appsettings — CFG001 section typo, CFG002 missing required key, CFG003 ValidateOnStart, CFG004 ValidateDataAnnotations](https://raw.githubusercontent.com/georgepwall1991/ConfigContraband/main/assets/flow-ide-diagnostics.svg)
+
+### 2. Before / after code fix (BindConfiguration typo)
+
+![Before and after: BindConfiguration section typo Strpie fixed to Stripe with CFG001 Options validation code fix](https://raw.githubusercontent.com/georgepwall1991/ConfigContraband/main/assets/flow-before-after-fix.svg)
+
+### 3. Dual loop — analyzer + appsettings schema IntelliSense
+
+![ConfigContraband dual loop: Roslyn analyzer build diagnostics and configcontraband schema tool generating appsettings.schema.json for editor IntelliSense](https://raw.githubusercontent.com/georgepwall1991/ConfigContraband/main/assets/flow-analyzer-schema-loop.svg)
+
+## 30-second path
+
+1. Reference the package (`PrivateAssets="all"`).
+2. Keep your existing Options registrations, for example:
+
+```csharp
+services.AddOptions<StripeOptions>()
+    .BindConfiguration("Stripe")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+```
+
+3. Build in the IDE or with `ContinuousIntegrationBuild=true` on the command line so analyzers run.
+4. Fix any `CFG00x` warnings (many have code fixes).
+5. Optional: generate JSON Schema for appsettings IntelliSense:
+
+```bash
+dotnet tool install --global ConfigContraband.Tool
+configcontraband schema --project src/MyApp/MyApp.csproj
+```
+
+Then point your settings file at the schema:
+
+```json
+{
+  "$schema": "appsettings.schema.json",
+  "Stripe": {
+    "ApiKey": "sk_live_..."
+  }
+}
+```
+
+## Feature snapshot
 
 | Area | What ConfigContraband does |
 |------|----------------------------|
 | Section binding | Checks supported options bindings against visible `appsettings.json` and `appsettings.*.json` files. |
 | Required keys | Warns when a DataAnnotations-required key is missing from all visible configuration files. |
-| Startup validation | Flags options validation that is registered but not forced to run at startup. |
+| Startup validation | Flags options validation that is registered but not forced to run at startup (`ValidateOnStart`). |
 | DataAnnotations | Finds `[Required]`, `[Range]`, and inherited validation attributes without `ValidateDataAnnotations()`. |
 | Nested validation | Detects nested options objects and collections that need recursive validation attributes. |
 | JSON key drift | Reports likely misspelled keys under bound sections while staying conservative for flexible binding shapes. |
 | Strict binding | Warns when `ErrorOnUnknownConfiguration` makes an unknown key a binding failure. |
 | Value conversion | Warns when a visible appsettings scalar provably cannot convert to a bound property or direct `GetValue<T>` target type. |
 | Direct reads | Checks supported direct `IConfiguration` reads against visible appsettings paths. |
-
-## Install
-
-```xml
-  <PackageReference Include="ConfigContraband" Version="0.7.24" PrivateAssets="all" />
-```
-
-The package includes `buildTransitive` props that pass visible `appsettings.json` and `appsettings.*.json` files to the analyser automatically. Add the package, build, and let your editor or CI tell you when your options contract and configuration drift apart.
-
-No runtime dependency is added to your app. ConfigContraband runs as an analyser during build and in supported IDEs.
+| Schema / IntelliSense | Companion tool emits `appsettings.schema.json` from the same Options model for live editor completion. |
 
 ## Compatibility
 
 The ConfigContraband analyzer package targets `netstandard2.0` and compiles against Roslyn 4.8, so it can load in .NET 8 or newer SDKs and Visual Studio 2022 17.8 or newer. The analyzer is intended for modern SDK-style projects; use the latest servicing release of your SDK and IDE for the best experience.
+
+`ConfigContraband.Tool` targets .NET 10 and requires a .NET 10 SDK. That runtime requirement is separate from the analyzer package's .NET 8 compiler-host compatibility floor.
+
+## Try the showcase
+
+The repository includes a showcase project with one intentional example for each rule:
+
+```bash
+dotnet build samples/ConfigContraband.Showcase/ConfigContraband.Showcase.csproj --configuration Release --no-incremental -p:ContinuousIntegrationBuild=true
+```
+
+The `ContinuousIntegrationBuild` property is required because normal local command-line builds disable analyzer execution for fast feedback. The sample stays out of the main solution so normal development builds remain clean.
+
+---
 
 ## What It Looks At
 
@@ -137,15 +214,12 @@ ConfigContraband also works the other way around. Instead of only flagging `apps
 after the fact, it can **generate a JSON Schema from your options types** so your editor gives you
 autocomplete, type checking, required-key hints, and unknown-key warnings *while you type*.
 
-Install the companion tool and generate the schema:
+Install the companion tool and generate the schema (see [30-second path](#30-second-path) for a quick start):
 
 ```bash
 dotnet tool install --global ConfigContraband.Tool
 configcontraband schema --project src/MyApp/MyApp.csproj
 ```
-
-`ConfigContraband.Tool` targets .NET 10 and requires a .NET 10 SDK. This runtime requirement is
-separate from the analyzer package's .NET 8 compiler-host compatibility floor.
 
 That writes `appsettings.schema.json` next to your project. Point your settings file at it:
 
@@ -224,18 +298,6 @@ and `2` when project loading or compilation errors prevent a complete check:
 ```bash
 configcontraband schema --project src/MyApp/MyApp.csproj --check
 ```
-
-## Fast Feedback Loop
-
-The repository includes a showcase project with one intentional example for each rule:
-
-```bash
-dotnet build samples/ConfigContraband.Showcase/ConfigContraband.Showcase.csproj --configuration Release --no-incremental -p:ContinuousIntegrationBuild=true
-```
-
-The `ContinuousIntegrationBuild` property is required because normal local command-line builds disable
-analyzer execution for fast feedback. The sample stays out of the main solution so normal development
-builds remain clean.
 
 ## Rule Details
 
