@@ -1234,12 +1234,7 @@ public sealed partial class ConfigContrabandAnalyzer
         InvocationExpressionSyntax invocation,
         SemanticModel semanticModel)
     {
-        if (semanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method)
-        {
-            return false;
-        }
-
-        return OptionsValidatorRegistration.IsServiceCollectionRegistration(method);
+        return OptionsValidatorRegistration.IsServiceCollectionRegistration(invocation, semanticModel);
     }
 
     private static bool OptionsNamesMatch(string? configureOptionsName, string? validationOptionsName)

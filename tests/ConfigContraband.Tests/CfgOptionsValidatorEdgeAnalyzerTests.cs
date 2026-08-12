@@ -958,6 +958,184 @@ public sealed partial class ConfigContrabandAnalyzerTests
         await Verifier.VerifyAnalyzerAsync(source, expected);
     }
 
+    [Fact]
+    public async Task Cfg004_still_reports_when_options_validator_registration_is_in_a_switch_statement()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            switch (true)
+            {
+                case true:
+                    services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+                    break;
+            }
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: OptionsValidatorTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_still_reports_when_options_validator_registration_is_coalesce_assigned()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            IServiceCollection? maybe = null;
+            maybe ??= services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: OptionsValidatorTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_still_reports_when_options_validator_registration_uses_conditional_access()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            IServiceCollection? maybe = services;
+            maybe?.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: OptionsValidatorTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_still_reports_when_options_validator_registration_is_in_a_lambda()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            Action register = () => services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            register();
+            """, extraUsings: "using System;\nusing Microsoft.Extensions.Options;\n", optionsTypes: OptionsValidatorTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_when_options_validator_is_registered_via_parenthesized_receiver()
+    {
+        var source = OptionsSource("""
+            {|#0:(services).AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            (services).AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: OptionsValidatorTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppsettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_when_options_validator_is_registered_via_static_unreduced_add_singleton()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            ServiceCollectionServiceExtensions.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>(services);
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: OptionsValidatorTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppsettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_named_bindless_validate_when_options_validator_is_registered()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<StripeOptions>("tenant", configuration.GetSection("Stripe"));
+            {|#0:services.AddOptions<StripeOptions>("tenant")
+                .Validate(_ => true)|};
+            services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\nusing Microsoft.Extensions.Options;\n", optionsTypes: OptionsValidatorTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppsettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_stays_quiet_for_record_options_when_options_validator_is_registered()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: """
+            public sealed record StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+
+            [OptionsValidator]
+            public sealed class ValidateStripeOptions : IValidateOptions<StripeOptions>
+            {
+                public ValidateOptionsResult Validate(string? name, StripeOptions options) => ValidateOptionsResult.Success;
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppsettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_still_reports_for_unresolved_options_validator_attribute()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: """
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+
+            [DoesNotExist]
+            public sealed class ValidateStripeOptions : IValidateOptions<StripeOptions>
+            {
+                public ValidateOptionsResult Validate(string? name, StripeOptions options) => ValidateOptionsResult.Success;
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAllowingCompilerErrorsAsync(source, StripeAppsettings, expected);
+    }
+
     private static readonly (string filename, string content) StripeAppsettings =
         ("appsettings.json", """
         {

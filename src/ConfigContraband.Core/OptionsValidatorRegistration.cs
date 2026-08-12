@@ -36,6 +36,18 @@ internal static class OptionsValidatorRegistration
         return IsFrameworkOptionsValidator(implementation, optionsType);
     }
 
+    public static bool IsServiceCollectionRegistration(
+        InvocationExpressionSyntax invocation,
+        SemanticModel model)
+    {
+        if (model.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method)
+        {
+            return false;
+        }
+
+        return IsServiceCollectionRegistration(method);
+    }
+
     public static bool IsServiceCollectionRegistration(IMethodSymbol method)
     {
         var original = GetUnreducedOriginal(method);
@@ -169,7 +181,7 @@ internal static class OptionsValidatorRegistration
 
         foreach (var attribute in implementation.GetAttributes())
         {
-            if (IsFrameworkOptionsValidatorAttribute(attribute.AttributeClass))
+            if (IsFrameworkOptionsValidatorAttribute(attribute.AttributeClass!))
             {
                 return true;
             }
@@ -214,12 +226,12 @@ internal static class OptionsValidatorRegistration
             return false;
         }
 
-        if (type.ContainingNamespace?.ToDisplayString() != "Microsoft.Extensions.Options")
+        if (type.ContainingNamespace.ToDisplayString() != "Microsoft.Extensions.Options")
         {
             return false;
         }
 
-        if (type.ContainingAssembly?.Name != "Microsoft.Extensions.Options")
+        if (type.ContainingAssembly.Name != "Microsoft.Extensions.Options")
         {
             return false;
         }
@@ -228,19 +240,14 @@ internal static class OptionsValidatorRegistration
         return true;
     }
 
-    private static bool IsFrameworkOptionsValidatorAttribute(INamedTypeSymbol? attributeClass)
+    private static bool IsFrameworkOptionsValidatorAttribute(INamedTypeSymbol attributeClass)
     {
-        if (attributeClass is null)
-        {
-            return false;
-        }
-
         if (attributeClass.ToDisplayString() != "Microsoft.Extensions.Options.OptionsValidatorAttribute")
         {
             return false;
         }
 
-        return attributeClass.ContainingAssembly?.Name == "Microsoft.Extensions.Options";
+        return attributeClass.ContainingAssembly.Name == "Microsoft.Extensions.Options";
     }
 
     private static bool IsFrameworkAddSingleton(IMethodSymbol method)
@@ -250,7 +257,7 @@ internal static class OptionsValidatorRegistration
             return false;
         }
 
-        return method.ContainingType?.ToDisplayString() ==
+        return method.ContainingType.ToDisplayString() ==
                "Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions";
     }
 
@@ -261,7 +268,7 @@ internal static class OptionsValidatorRegistration
             return false;
         }
 
-        return method.ContainingType?.ToDisplayString() ==
+        return method.ContainingType.ToDisplayString() ==
                "Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions";
     }
 
@@ -272,7 +279,7 @@ internal static class OptionsValidatorRegistration
             return false;
         }
 
-        return method.ContainingType?.ToDisplayString() == "Microsoft.Extensions.DependencyInjection.ServiceDescriptor";
+        return method.ContainingType.ToDisplayString() == "Microsoft.Extensions.DependencyInjection.ServiceDescriptor";
     }
 
     private static IMethodSymbol GetUnreducedOriginal(IMethodSymbol method)

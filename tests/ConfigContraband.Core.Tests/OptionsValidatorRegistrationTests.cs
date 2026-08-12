@@ -614,6 +614,305 @@ public sealed class OptionsValidatorRegistrationTests
         Assert.True(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, register, model));
     }
 
+    [Fact]
+    public void Does_not_prove_a_user_defined_conversion_to_service_descriptor()
+    {
+        var result = TryProve(
+            "services.TryAddEnumerable(new DescriptorBox(ServiceDescriptor.Singleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>()));",
+            extraTypes: StripeValidatorTypes + """
+
+            public readonly struct DescriptorBox
+            {
+                private readonly ServiceDescriptor _descriptor;
+
+                public DescriptorBox(ServiceDescriptor descriptor)
+                {
+                    _descriptor = descriptor;
+                }
+
+                public static implicit operator ServiceDescriptor(DescriptorBox box) => box._descriptor;
+            }
+            """);
+
+        Assert.False(result.Proved);
+        Assert.True(result.SawServiceCollectionRegistration);
+    }
+
+    [Fact]
+    public void Does_not_prove_ivalidate_options_of_an_array_type_argument()
+    {
+        var result = TryProve(
+            "services.AddSingleton<IValidateOptions<string[]>, ValidateArrayOptions>();",
+            extraTypes: """
+            [Microsoft.Extensions.Options.OptionsValidator]
+            public sealed class ValidateArrayOptions : Microsoft.Extensions.Options.IValidateOptions<string[]>
+            {
+                public Microsoft.Extensions.Options.ValidateOptionsResult Validate(string? name, string[] options) =>
+                    Microsoft.Extensions.Options.ValidateOptionsResult.Success;
+            }
+            """);
+
+        Assert.False(result.Proved);
+    }
+
+    [Fact]
+    public void Does_not_prove_a_non_generic_lookalike_ivalidate_options()
+    {
+        var result = TryProve(
+            "services.AddSingleton<Contoso.IValidateOptions, ValidateStripeOptions>();",
+            extraTypes: """
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; set; } = "";
+            }
+
+            namespace Contoso
+            {
+                public interface IValidateOptions
+                {
+                }
+            }
+
+            [OptionsValidator]
+            public sealed class ValidateStripeOptions : Contoso.IValidateOptions
+            {
+            }
+            """);
+
+        Assert.False(result.Proved);
+    }
+
+    [Fact]
+    public void Does_not_prove_add_singleton_of_plain_string_type_arguments()
+    {
+        var result = TryProve("services.AddSingleton<string, string>();");
+
+        Assert.False(result.Proved);
+        Assert.True(result.SawServiceCollectionRegistration);
+    }
+
+    [Fact]
+    public void Does_not_prove_a_custom_try_add_enumerable_extension()
+    {
+        var result = TryProve(
+            "services.TryAddEnumerable(42);",
+            extraTypes: StripeValidatorTypes + """
+
+            namespace Microsoft.Extensions.DependencyInjection.Extensions
+            {
+                public static class ContosoDescriptorExtensions
+                {
+                    public static void TryAddEnumerable(this IServiceCollection services, int marker)
+                    {
+                    }
+                }
+            }
+            """);
+
+        Assert.False(result.Proved);
+        Assert.False(result.SawServiceCollectionRegistration);
+    }
+
+    [Fact]
+    public void Does_not_prove_a_lookalike_service_descriptor_singleton()
+    {
+        var result = TryProve(
+            "services.TryAddEnumerable(FakeDescriptor.Singleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>());",
+            extraTypes: StripeValidatorTypes + """
+
+            public static class FakeDescriptor
+            {
+                public static ServiceDescriptor Singleton<TService, TImplementation>()
+                    where TService : class
+                    where TImplementation : class, TService
+                {
+                    return ServiceDescriptor.Singleton<TService, TImplementation>();
+                }
+            }
+            """);
+
+        Assert.False(result.Proved);
+        Assert.True(result.SawServiceCollectionRegistration);
+    }
+
+    [Fact]
+    public void Does_not_prove_an_implementation_with_no_interfaces()
+    {
+        var result = TryProve(
+            "services.AddSingleton<IValidateOptions<StripeOptions>, IValidateOptions<StripeOptions>>();");
+
+        Assert.False(result.Proved);
+        Assert.True(result.SawServiceCollectionRegistration);
+    }
+
+    [Fact]
+    public void Does_not_prove_an_unresolved_options_validator_attribute()
+    {
+        var result = TryProve(
+            "services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();",
+            extraTypes: """
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; set; } = "";
+            }
+
+            [DoesNotExist]
+            public sealed class ValidateStripeOptions : IValidateOptions<StripeOptions>
+            {
+                public ValidateOptionsResult Validate(string? name, StripeOptions options) => ValidateOptionsResult.Success;
+            }
+            """,
+            allowErrors: true);
+
+        Assert.False(result.Proved);
+    }
+
+    [Fact]
+    public void Service_collection_registration_rejects_an_unresolved_invocation()
+    {
+        var (configure, model) = CompileConfigure(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.DoesNotExist();
+                }
+            }
+            """,
+            allowErrors: true);
+
+        var invocation = configure.DescendantNodes().OfType<InvocationExpressionSyntax>().Single();
+        Assert.False(OptionsValidatorRegistration.IsServiceCollectionRegistration(invocation, model));
+    }
+
+    [Fact]
+    public void Service_collection_registration_rejects_a_dynamic_invocation()
+    {
+        var (configure, model) = CompileConfigure(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    dynamic d = services;
+                    d.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+                }
+            }
+            """ + StripeValidatorTypes);
+
+        var invocation = configure.DescendantNodes()
+            .OfType<InvocationExpressionSyntax>()
+            .Single(node => node.ToString().Contains("AddSingleton", StringComparison.Ordinal));
+        Assert.False(OptionsValidatorRegistration.IsServiceCollectionRegistration(invocation, model));
+    }
+
+    [Fact]
+    public void Service_collection_registration_accepts_add_singleton_from_an_invocation()
+    {
+        var (configure, model) = CompileConfigure(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+                }
+            }
+            """ + StripeValidatorTypes);
+
+        var invocation = configure.DescendantNodes().OfType<InvocationExpressionSyntax>().Single();
+        Assert.True(OptionsValidatorRegistration.IsServiceCollectionRegistration(invocation, model));
+    }
+
+    [Fact]
+    public void Does_not_prove_ivalidate_options_from_a_lookalike_assembly()
+    {
+        var source = """
+            using Microsoft.Extensions.DependencyInjection;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; set; } = "";
+            }
+
+            namespace Microsoft.Extensions.Options
+            {
+                public interface IValidateOptions<T> where T : class
+                {
+                }
+
+                public sealed class OptionsValidatorAttribute : System.Attribute
+                {
+                }
+            }
+
+            [Microsoft.Extensions.Options.OptionsValidator]
+            public sealed class ValidateStripeOptions : Microsoft.Extensions.Options.IValidateOptions<StripeOptions>
+            {
+            }
+            """;
+
+        var references = TrustedReferences()
+            .Where(reference => !IsMicrosoftExtensionsOptionsAssembly(reference));
+        var (configure, model) = CompileConfigure(source, references, allowErrors: false);
+        var invocation = configure.DescendantNodes().OfType<InvocationExpressionSyntax>().Single();
+
+        Assert.False(OptionsValidatorRegistration.TryGetValidatedOptionsType(invocation, model, out _));
+        Assert.True(OptionsValidatorRegistration.IsServiceCollectionRegistration(invocation, model));
+    }
+
+    [Fact]
+    public void Does_not_prove_options_validator_attribute_from_a_lookalike_assembly()
+    {
+        var lookalike = EmitLookalikeOptionsValidatorAttribute();
+        var source = """
+            extern alias Lookalike;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; set; } = "";
+            }
+
+            [Lookalike::Microsoft.Extensions.Options.OptionsValidator]
+            public sealed class ValidateStripeOptions : IValidateOptions<StripeOptions>
+            {
+                public ValidateOptionsResult Validate(string? name, StripeOptions options) => ValidateOptionsResult.Success;
+            }
+            """;
+
+        var (configure, model) = CompileConfigure(source, TrustedReferences().Append(lookalike), allowErrors: false);
+        var invocation = configure.DescendantNodes().OfType<InvocationExpressionSyntax>().Single();
+
+        Assert.False(OptionsValidatorRegistration.TryGetValidatedOptionsType(invocation, model, out _));
+    }
+
     private static (InvocationExpressionSyntax Bind, InvocationExpressionSyntax Validator, SemanticModel Model) GetBindAndValidator(
         string registration)
     {
@@ -668,7 +967,8 @@ public sealed class OptionsValidatorRegistrationTests
     private static ProofResult TryProve(
         string registration,
         string extraUsings = "",
-        string extraTypes = StripeValidatorTypes)
+        string extraTypes = StripeValidatorTypes,
+        bool allowErrors = false)
     {
         var source = $$"""
             using Microsoft.Extensions.DependencyInjection;
@@ -687,33 +987,13 @@ public sealed class OptionsValidatorRegistrationTests
             {{extraTypes}}
             """;
 
-        var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-            .Split(Path.PathSeparator)
-            .Select(path => MetadataReference.CreateFromFile(path));
-
-        var tree = CSharpSyntaxTree.ParseText(source);
-        var compilation = CSharpCompilation.Create(
-            "OptionsValidatorRegistrationTests",
-            [tree],
-            references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-
-        Assert.DoesNotContain(
-            compilation.GetDiagnostics(),
-            diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-
-        var model = compilation.GetSemanticModel(tree);
-        var configure = tree.GetRoot()
-            .DescendantNodes()
-            .OfType<MethodDeclarationSyntax>()
-            .Single(method => method.Identifier.ValueText == "Configure");
+        var (configure, model) = CompileConfigure(source, allowErrors: allowErrors);
 
         var provedName = default(string);
         var sawServiceCollectionRegistration = false;
         foreach (var invocation in configure.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
-            if (model.GetSymbolInfo(invocation).Symbol is IMethodSymbol method &&
-                OptionsValidatorRegistration.IsServiceCollectionRegistration(method))
+            if (OptionsValidatorRegistration.IsServiceCollectionRegistration(invocation, model))
             {
                 sawServiceCollectionRegistration = true;
             }
@@ -725,6 +1005,78 @@ public sealed class OptionsValidatorRegistrationTests
         }
 
         return new ProofResult(provedName is not null, provedName, sawServiceCollectionRegistration);
+    }
+
+    private static (MethodDeclarationSyntax Configure, SemanticModel Model) CompileConfigure(
+        string source,
+        bool allowErrors = false)
+    {
+        return CompileConfigure(source, TrustedReferences(), allowErrors);
+    }
+
+    private static (MethodDeclarationSyntax Configure, SemanticModel Model) CompileConfigure(
+        string source,
+        IEnumerable<MetadataReference> references,
+        bool allowErrors)
+    {
+        var tree = CSharpSyntaxTree.ParseText(source);
+        var compilation = CSharpCompilation.Create(
+            "OptionsValidatorRegistrationTests",
+            [tree],
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        if (!allowErrors)
+        {
+            Assert.DoesNotContain(
+                compilation.GetDiagnostics(),
+                diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        }
+
+        var model = compilation.GetSemanticModel(tree);
+        var configure = tree.GetRoot()
+            .DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .Single(method => method.Identifier.ValueText == "Configure");
+        return (configure, model);
+    }
+
+    private static IEnumerable<MetadataReference> TrustedReferences()
+    {
+        return ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator)
+            .Select(path => MetadataReference.CreateFromFile(path));
+    }
+
+    private static bool IsMicrosoftExtensionsOptionsAssembly(MetadataReference reference)
+    {
+        return Path.GetFileNameWithoutExtension(reference.Display) == "Microsoft.Extensions.Options";
+    }
+
+    private static PortableExecutableReference EmitLookalikeOptionsValidatorAttribute()
+    {
+        var compilation = CSharpCompilation.Create(
+            "OptionsValidatorAttributeLookalike",
+            [CSharpSyntaxTree.ParseText(
+                """
+                namespace Microsoft.Extensions.Options
+                {
+                    public sealed class OptionsValidatorAttribute : System.Attribute
+                    {
+                    }
+                }
+                """)],
+            TrustedReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        using var stream = new MemoryStream();
+        var emitted = compilation.Emit(stream);
+        Assert.True(emitted.Success, string.Join(Environment.NewLine, emitted.Diagnostics));
+        return MetadataReference.CreateFromImage(
+            stream.ToArray(),
+            new MetadataReferenceProperties(
+                MetadataImageKind.Assembly,
+                System.Collections.Immutable.ImmutableArray.Create("Lookalike")));
     }
 
     private sealed record ProofResult(bool Proved, string? OptionsTypeName, bool SawServiceCollectionRegistration);

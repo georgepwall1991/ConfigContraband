@@ -431,6 +431,83 @@ public sealed class OptionsValidatorSchemaTests
         Assert.False(Assert.Single(sections).ValidatesDataAnnotations);
     }
 
+    [Fact]
+    public void Binding_is_validated_for_static_unreduced_add_singleton()
+    {
+        var section = Assert.Single(Extract("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe");
+            ServiceCollectionServiceExtensions.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>(services);
+            """));
+
+        Assert.True(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
+    public void Binding_is_validated_for_parenthesized_and_null_forgiving_receivers()
+    {
+        var section = Assert.Single(Extract("""
+            (services).AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe");
+            services!.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """));
+
+        Assert.True(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
+    public void Binding_is_not_validated_by_a_switch_statement_registration()
+    {
+        var section = Assert.Single(Extract("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe");
+            switch (true)
+            {
+                case true:
+                    services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+                    break;
+            }
+            """));
+
+        Assert.False(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
+    public void Binding_is_not_validated_by_a_user_defined_descriptor_conversion()
+    {
+        var sections = ExtractCompilation(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.DependencyInjection.Extensions;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe");
+                    services.TryAddEnumerable(new DescriptorBox(ServiceDescriptor.Singleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>()));
+                }
+            }
+
+            public readonly struct DescriptorBox
+            {
+                private readonly ServiceDescriptor _descriptor;
+
+                public DescriptorBox(ServiceDescriptor descriptor)
+                {
+                    _descriptor = descriptor;
+                }
+
+                public static implicit operator ServiceDescriptor(DescriptorBox box) => box._descriptor;
+            }
+            """,
+            includeDefaultValidators: true);
+
+        Assert.False(Assert.Single(sections).ValidatesDataAnnotations);
+    }
+
     private static IReadOnlyList<SchemaSection> Extract(string configureBody, string extraUsings = "")
     {
         return ExtractCompilation(
