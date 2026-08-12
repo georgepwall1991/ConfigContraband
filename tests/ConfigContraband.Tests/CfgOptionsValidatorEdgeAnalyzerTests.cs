@@ -274,12 +274,28 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
-    public async Task Cfg004_stays_quiet_for_parenthesized_and_null_forgiving_service_collection_receiver()
+    public async Task Cfg004_stays_quiet_for_parenthesized_service_collection_receiver()
     {
         var source = OptionsSource("""
             {|#0:services.AddOptions<StripeOptions>()
                 .BindConfiguration("Stripe")|};
-            (services)!.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            (services).AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: OptionsValidatorTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppsettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_stays_quiet_for_null_forgiving_service_collection_receiver()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            services!.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
             """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: OptionsValidatorTypes);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
