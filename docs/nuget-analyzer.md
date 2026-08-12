@@ -9,7 +9,7 @@
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.7.27" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.7.28" PrivateAssets="all" />
 ```
 
 ```bash

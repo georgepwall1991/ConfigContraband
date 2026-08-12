@@ -16,7 +16,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>configcontraband</ToolCommandName>
     <PackageId>ConfigContraband.Tool</PackageId>
-    <Version>0.7.27</Version>
+    <Version>0.7.28</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband.Tool — appsettings JSON Schema generator</Title>
     <Description>Generate appsettings.schema.json from .NET Options types for editor IntelliSense, type checking, and required-key hints that match ValidateDataAnnotations and BindConfiguration.</Description>
@@ -29,7 +29,7 @@
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageReleaseNotes>Conversion and trust release: short tool-focused NuGet README, package summary, package icon parity with the analyzer, and SemVer/path-to-1.0 docs. Use with ConfigContraband 0.7.27.</PackageReleaseNotes>
+    <PackageReleaseNotes>Ship alongside ConfigContraband 0.7.28 CFG001 host-provenance hardening. Schema generation surface unchanged.</PackageReleaseNotes>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
 

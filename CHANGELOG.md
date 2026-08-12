@@ -2,6 +2,19 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.28 - 2026-08-12
+
+### What's new
+
+- **CFG001 host-provenance gate** for options `Bind(GetSection(...))` / `Configure(GetSection(...))`: concrete custom `IConfiguration` implementations and locally built `ConfigurationBuilder` / `ConfigurationManager` roots stay quiet instead of comparing their section paths against project appsettings (same non-host boundary CFG009 already used for direct reads).
+
+### Details
+
+- `TryGetConfigurationSectionPath` rejects proven `Custom` / `Local` configuration roots before building an options registration path; host contracts and ambiguous DI stubs such as `IConfiguration configuration = null!;` keep reporting.
+- Added regressions for custom configuration, local `ConfigurationManager`, `ConfigurationBuilder.Build()`, and a host-contract parameter still reporting.
+- Synced stale CFG001 Rule Notes that still claimed stored-section origin tracking never happens (origin-visible stored sections already report).
+- Diagnostic IDs and severities are unchanged.
+
 ## 0.7.27 - 2026-08-12
 
 ### What's new
