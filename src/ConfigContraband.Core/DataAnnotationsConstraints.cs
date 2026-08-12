@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Linq;
 using Microsoft.CodeAnalysis;
@@ -9,8 +10,8 @@ namespace ConfigContraband;
 /// <summary>
 /// Decides whether a bound appsettings scalar provably fails a framework DataAnnotations constraint
 /// that <c>ValidateDataAnnotations()</c> would evaluate. Biased to the safe side: culture-dependent
-/// Range bounds, custom <c>IsValid</c> overrides, and unconvertible values return no failure so CFG010
-/// never reports a value the runtime validator would accept.
+/// Range bounds, custom <c>ValidationAttribute</c> subclasses, and unconvertible values return no
+/// failure so CFG010 never reports a value the runtime validator would accept.
 /// </summary>
 internal static class DataAnnotationsConstraints
 {
@@ -47,7 +48,7 @@ internal static class DataAnnotationsConstraints
 
         foreach (var attribute in attributes)
         {
-            var attributeName = GetFrameworkConstraintName(attribute.AttributeClass);
+            var attributeName = GetFrameworkConstraintName(attribute.AttributeClass!);
             var failed = attributeName switch
             {
                 ValidationAttributeLimits.RangeAttributeName =>
@@ -99,8 +100,8 @@ internal static class DataAnnotationsConstraints
         var effective = new Dictionary<string, AttributeData>(StringComparer.Ordinal);
         foreach (var attribute in declaredAttributes)
         {
-            var name = GetFrameworkConstraintName(attribute.AttributeClass);
-            if (name is not null && !OverridesIsValid(attribute.AttributeClass!))
+            var name = GetFrameworkConstraintName(attribute.AttributeClass!);
+            if (name is not null)
             {
                 effective[name] = attribute;
             }
@@ -109,25 +110,26 @@ internal static class DataAnnotationsConstraints
         return effective.Values.ToList();
     }
 
-    private static string? GetFrameworkConstraintName(INamedTypeSymbol? attributeClass)
+    private static string? GetFrameworkConstraintName(INamedTypeSymbol attributeClass)
     {
-        for (var current = attributeClass; current is not null; current = current.BaseType)
+        return attributeClass.ToDisplayString() switch
         {
-            var name = current.ToDisplayString();
-            if (name is
-                ValidationAttributeLimits.RangeAttributeName or
-                ValidationAttributeLimits.MaxLengthAttributeName or
-                ValidationAttributeLimits.MinLengthAttributeName or
-                ValidationAttributeLimits.StringLengthAttributeName or
-                ValidationAttributeLimits.LengthAttributeName or
-                ValidationAttributeLimits.AllowedValuesAttributeName or
-                ValidationAttributeLimits.DeniedValuesAttributeName)
-            {
-                return name;
-            }
-        }
-
-        return null;
+            ValidationAttributeLimits.RangeAttributeName =>
+                ValidationAttributeLimits.RangeAttributeName,
+            ValidationAttributeLimits.MaxLengthAttributeName =>
+                ValidationAttributeLimits.MaxLengthAttributeName,
+            ValidationAttributeLimits.MinLengthAttributeName =>
+                ValidationAttributeLimits.MinLengthAttributeName,
+            ValidationAttributeLimits.StringLengthAttributeName =>
+                ValidationAttributeLimits.StringLengthAttributeName,
+            ValidationAttributeLimits.LengthAttributeName =>
+                ValidationAttributeLimits.LengthAttributeName,
+            ValidationAttributeLimits.AllowedValuesAttributeName =>
+                ValidationAttributeLimits.AllowedValuesAttributeName,
+            ValidationAttributeLimits.DeniedValuesAttributeName =>
+                ValidationAttributeLimits.DeniedValuesAttributeName,
+            _ => null,
+        };
     }
 
     private static bool FailsRange(AttributeData attribute, object converted)
@@ -235,7 +237,8 @@ internal static class DataAnnotationsConstraints
 
     private static bool FailsAllowedValues(AttributeData attribute, object converted, ITypeSymbol convertedType)
     {
-        foreach (var allowed in GetParamsValues(attribute))
+        var allowedValues = GetParamsValues(attribute);
+        foreach (var allowed in allowedValues)
         {
             if (ValuesEqual(converted, convertedType, allowed))
             {
@@ -243,7 +246,7 @@ internal static class DataAnnotationsConstraints
             }
         }
 
-        return GetParamsValues(attribute).Count > 0;
+        return allowedValues.Length > 0;
     }
 
     private static bool FailsDeniedValues(AttributeData attribute, object converted, ITypeSymbol convertedType)
@@ -259,22 +262,12 @@ internal static class DataAnnotationsConstraints
         return false;
     }
 
-    private static List<TypedConstant> GetParamsValues(AttributeData attribute)
+    private static ImmutableArray<TypedConstant> GetParamsValues(AttributeData attribute)
     {
-        var values = new List<TypedConstant>();
-        foreach (var argument in attribute.ConstructorArguments)
+        var values = attribute.ConstructorArguments[0].Values;
+        if (values.IsDefault)
         {
-            if (argument.Kind != TypedConstantKind.Array)
-            {
-                continue;
-            }
-
-            if (argument.Values.IsDefault)
-            {
-                continue;
-            }
-
-            values.AddRange(argument.Values);
+            return ImmutableArray<TypedConstant>.Empty;
         }
 
         return values;
@@ -329,6 +322,28 @@ internal static class DataAnnotationsConstraints
                 }
 
                 return false;
+            case SpecialType.System_Char:
+                {
+                    var text = rawValue;
+                    if (text.Length > 1)
+                    {
+                        text = text.Trim();
+                    }
+
+                    if (text.Length > 1)
+                    {
+                        return false;
+                    }
+
+                    if (text.Length == 0)
+                    {
+                        converted = '\0';
+                        return true;
+                    }
+
+                    converted = text[0];
+                    return true;
+                }
             case SpecialType.System_SByte:
                 return TryParseInteger(
                     rawValue,
@@ -604,34 +619,6 @@ internal static class DataAnnotationsConstraints
         }
 
         return type;
-    }
-
-    private static bool OverridesIsValid(INamedTypeSymbol attributeClass)
-    {
-        if (IsFrameworkConstraintName(attributeClass))
-        {
-            return false;
-        }
-
-        if (attributeClass.GetMembers("IsValid").OfType<IMethodSymbol>().Any(method => method.IsOverride))
-        {
-            return true;
-        }
-
-        return OverridesIsValid(attributeClass.BaseType!);
-    }
-
-    private static bool IsFrameworkConstraintName(INamedTypeSymbol attributeClass)
-    {
-        var name = attributeClass.ToDisplayString();
-        return name is
-            ValidationAttributeLimits.RangeAttributeName or
-            ValidationAttributeLimits.MaxLengthAttributeName or
-            ValidationAttributeLimits.MinLengthAttributeName or
-            ValidationAttributeLimits.StringLengthAttributeName or
-            ValidationAttributeLimits.LengthAttributeName or
-            ValidationAttributeLimits.AllowedValuesAttributeName or
-            ValidationAttributeLimits.DeniedValuesAttributeName;
     }
 
     private static string DisplayName(string attributeFullName)

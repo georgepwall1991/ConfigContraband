@@ -288,9 +288,192 @@ public sealed class DataAnnotationsConstraintsTests
     }
 
     [Fact]
-    public void Range_subclass_without_is_valid_override_still_reports()
+    public void AllowedValues_reports_unlisted_char()
     {
         AssertFailure(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class CodeOptions
+            {
+                [AllowedValues('A', 'B')]
+                public char Letter { get; set; }
+            }
+            """,
+            "Letter",
+            ScalarKind.String,
+            "C",
+            "AllowedValues");
+    }
+
+    [Fact]
+    public void AllowedValues_stays_quiet_for_listed_char()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class CodeOptions
+            {
+                [AllowedValues('A', 'B')]
+                public char Letter { get; set; }
+            }
+            """,
+            "Letter",
+            ScalarKind.String,
+            "A");
+    }
+
+    [Fact]
+    public void AllowedValues_stays_quiet_for_padded_listed_char()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class CodeOptions
+            {
+                [AllowedValues('A')]
+                public char Letter { get; set; }
+            }
+            """,
+            "Letter",
+            ScalarKind.String,
+            " A");
+    }
+
+    [Fact]
+    public void AllowedValues_stays_quiet_for_single_space_char()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class CodeOptions
+            {
+                [AllowedValues(' ')]
+                public char Letter { get; set; }
+            }
+            """,
+            "Letter",
+            ScalarKind.String,
+            " ");
+    }
+
+    [Fact]
+    public void AllowedValues_reports_single_space_when_null_char_is_allowed()
+    {
+        AssertFailure(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class CodeOptions
+            {
+                [AllowedValues('\0')]
+                public char Letter { get; set; }
+            }
+            """,
+            "Letter",
+            ScalarKind.String,
+            " ",
+            "AllowedValues");
+    }
+
+    [Fact]
+    public void Whitespace_only_char_maps_to_null_char()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class CodeOptions
+            {
+                [AllowedValues('\0')]
+                public char Letter { get; set; }
+            }
+            """,
+            "Letter",
+            ScalarKind.String,
+            "  ");
+    }
+
+    [Fact]
+    public void DeniedValues_reports_listed_char()
+    {
+        AssertFailure(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class CodeOptions
+            {
+                [DeniedValues('X')]
+                public char Letter { get; set; }
+            }
+            """,
+            "Letter",
+            ScalarKind.String,
+            "X",
+            "DeniedValues");
+    }
+
+    [Fact]
+    public void AllowedValues_with_no_constructor_arguments_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class EnvOptions
+            {
+                [AllowedValues]
+                public string Environment { get; set; } = "";
+            }
+            """,
+            "Environment",
+            ScalarKind.String,
+            "prod");
+    }
+
+    [Fact]
+    public void Empty_char_stays_quiet_for_allowed_values()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class CodeOptions
+            {
+                [AllowedValues('\0')]
+                public char Letter { get; set; }
+            }
+            """,
+            "Letter",
+            ScalarKind.String,
+            "");
+    }
+
+    [Fact]
+    public void Multi_character_char_value_stays_quiet_for_cfg008()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class CodeOptions
+            {
+                [AllowedValues('A')]
+                public char Letter { get; set; }
+            }
+            """,
+            "Letter",
+            ScalarKind.String,
+            "AB");
+    }
+
+    [Fact]
+    public void Range_subclass_without_is_valid_override_stays_quiet()
+    {
+        AssertQuiet(
             """
             using System.ComponentModel.DataAnnotations;
 
@@ -309,8 +492,7 @@ public sealed class DataAnnotationsConstraintsTests
             """,
             "Port",
             ScalarKind.Number,
-            "0",
-            "Range");
+            "0");
     }
 
     [Fact]
@@ -1345,9 +1527,9 @@ public sealed class DataAnnotationsConstraintsTests
     }
 
     [Fact]
-    public void AllowedValues_subclass_with_extra_constructor_argument_still_reports()
+    public void AllowedValues_subclass_with_extra_constructor_argument_stays_quiet()
     {
-        AssertFailure(
+        AssertQuiet(
             """
             using System.ComponentModel.DataAnnotations;
 
@@ -1366,8 +1548,7 @@ public sealed class DataAnnotationsConstraintsTests
             """,
             "Environment",
             ScalarKind.String,
-            "staging",
-            "AllowedValues");
+            "staging");
     }
 
     [Fact]

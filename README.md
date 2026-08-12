@@ -670,7 +670,7 @@ v1 attributes, aligned with runtime DataAnnotations:
 - `[MaxLength]` / `[MinLength]` / `[StringLength]` / `[Length]` on strings, counting UTF-16 code units the same way DataAnnotations does
 - `[AllowedValues]` / `[DeniedValues]` against the converted value
 
-Stay quiet: `[RegularExpression]` / `[EmailAddress]` / `[Url]` / `[Phone]` / `[CreditCard]`; `IValidatableObject`; custom `ValidationAttribute` subclasses that override `IsValid` or `TypeId`; JSON null (`CFG002`); conversion failures (`CFG008`); missing keys; nested or collection members without `[ValidateObjectMembers]` / `[ValidateEnumeratedItems]`; dictionary values; direct `Get` / `Bind` / `GetValue` (those APIs do not run DataAnnotations); registrations without a proven `ValidateDataAnnotations` path (`CFG004`).
+Stay quiet: `[RegularExpression]` / `[EmailAddress]` / `[Url]` / `[Phone]` / `[CreditCard]`; `IValidatableObject`; custom `ValidationAttribute` subclasses (constructor arguments are not proven to match runtime bounds); JSON null (`CFG002`); conversion failures (`CFG008`); missing keys; nested or collection members without `[ValidateObjectMembers]` / `[ValidateEnumeratedItems]`; dictionary values; direct `Get` / `Bind` / `GetValue` (those APIs do not run DataAnnotations); registrations without a proven `ValidateDataAnnotations` path (`CFG004`).
 
 There is no automatic code fix — like `CFG002`/`CFG006`/`CFG007`/`CFG008`, the diagnostic points at a JSON additional file rather than at C# the analyzer can rewrite.
 

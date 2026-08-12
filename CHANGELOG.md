@@ -11,7 +11,7 @@ All notable changes to ConfigContraband will be documented in this file.
 ### Details
 
 - Gated on the same DataAnnotations proof as CFG002: `ValidateDataAnnotations()` on the OptionsBuilder chain, or same-block `Configure<T>(GetSection)` paired with matching `AddOptions<T>().ValidateDataAnnotations()`.
-- Reports after CFG008 conversion succeeds. Nested and collection members require `[ValidateObjectMembers]` / `[ValidateEnumeratedItems]`. Dictionary values, direct `Get`/`Bind`/`GetValue`, Configure-only, culture-dependent `Range(typeof(T), …)`, custom `IsValid`/`TypeId` overrides, regex/email/url/phone/credit-card attributes, and `IValidatableObject` stay quiet.
+- Reports after CFG008 conversion succeeds. Nested and collection members require `[ValidateObjectMembers]` / `[ValidateEnumeratedItems]`. Dictionary values, direct `Get`/`Bind`/`GetValue`, Configure-only, culture-dependent `Range(typeof(T), …)`, custom `ValidationAttribute` subclasses, regex/email/url/phone/credit-card attributes, and `IValidatableObject` stay quiet.
 - Shared `ValidationAttributeLimits` readers keep JSON Schema bounds and CFG010 proofs from drifting. No code fix — the diagnostic points at a JSON additional file.
 - Showcase contract is now exactly one each of CFG001–CFG010.
 

@@ -989,4 +989,74 @@ public sealed partial class ConfigContrabandAnalyzerTests
             """),
             expected);
     }
+
+    [Fact]
+    public async Task Cfg010_reports_char_allowed_values_failure()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<CodeOptions>()
+                .BindConfiguration("Code")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class CodeOptions
+            {
+                [AllowedValues('A', 'B')]
+                public char Letter { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueFailsValidation)
+            .WithSpan("appsettings.json", 3, 15, 3, 18)
+            .WithArguments("Code:Letter", "AllowedValues", "CodeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Code": {
+                "Letter": "C"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg010_stays_quiet_for_range_subclass()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration("Server")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class PortRangeAttribute : RangeAttribute
+            {
+                public PortRangeAttribute(int minimum, int maximum) : base(minimum, maximum)
+                {
+                }
+            }
+
+            public sealed class ServerOptions
+            {
+                [PortRange(1, 65535)]
+                public int Port { get; set; }
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": 0
+              }
+            }
+            """));
+    }
 }
