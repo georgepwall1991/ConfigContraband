@@ -514,4 +514,479 @@ public sealed partial class ConfigContrabandAnalyzerTests
             }
             """));
     }
+
+    [Fact]
+    public async Task Cfg010_reports_denied_values_failure()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<EnvOptions>()
+                .BindConfiguration("Env")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class EnvOptions
+            {
+                [DeniedValues("debug")]
+                public string Environment { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueFailsValidation)
+            .WithSpan("appsettings.json", 3, 20, 3, 27)
+            .WithArguments("Env:Environment", "DeniedValues", "EnvOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Env": {
+                "Environment": "debug"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg010_reports_minlength_failure()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<NameOptions>()
+                .BindConfiguration("Name")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class NameOptions
+            {
+                [MinLength(3)]
+                public string Code { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueFailsValidation)
+            .WithSpan("appsettings.json", 3, 13, 3, 17)
+            .WithArguments("Name:Code", "MinLength", "NameOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Name": {
+                "Code": "ab"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg010_reports_stringlength_failure()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<NameOptions>()
+                .BindConfiguration("Name")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class NameOptions
+            {
+                [StringLength(3, MinimumLength = 2)]
+                public string Code { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueFailsValidation)
+            .WithSpan("appsettings.json", 3, 13, 3, 19)
+            .WithArguments("Name:Code", "StringLength", "NameOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Name": {
+                "Code": "abcd"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg010_reports_length_failure()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<NameOptions>()
+                .BindConfiguration("Name")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class NameOptions
+            {
+                [Length(2, 4)]
+                public string Code { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueFailsValidation)
+            .WithSpan("appsettings.json", 3, 13, 3, 16)
+            .WithArguments("Name:Code", "Length", "NameOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Name": {
+                "Code": "a"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg010_reports_exclusive_range_boundary()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<RateOptions>()
+                .BindConfiguration("Rate")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class RateOptions
+            {
+                [Range(0.0, 1.0, MinimumIsExclusive = true, MaximumIsExclusive = true)]
+                public double Ratio { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueFailsValidation)
+            .WithSpan("appsettings.json", 3, 14, 3, 15)
+            .WithArguments("Rate:Ratio", "Range", "RateOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Rate": {
+                "Ratio": 0
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg010_reports_value_bound_through_bind_get_section()
+    {
+        var source = OptionsSource(
+            """
+            IConfiguration configuration = null!;
+            services.AddOptions<ServerOptions>()
+                .Bind(configuration.GetSection("Server"))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            extraUsings: "using Microsoft.Extensions.Configuration;\n",
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                [Range(1, 65535)]
+                public int Port { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueFailsValidation)
+            .WithSpan("appsettings.json", 3, 13, 3, 14)
+            .WithArguments("Server:Port", "Range", "ServerOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": 0
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg010_reports_named_options_out_of_range()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>("tenant")
+                .BindConfiguration("Server")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                [Range(1, 65535)]
+                public int Port { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueFailsValidation)
+            .WithSpan("appsettings.json", 3, 13, 3, 14)
+            .WithArguments("Server:Port", "Range", "ServerOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": 0
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg010_stays_quiet_for_custom_is_valid_override()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration("Server")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class WideRangeAttribute : RangeAttribute
+            {
+                public WideRangeAttribute(int minimum, int maximum) : base(minimum, maximum)
+                {
+                }
+
+                public override bool IsValid(object? value) => true;
+            }
+
+            public sealed class ServerOptions
+            {
+                [WideRange(1, 10)]
+                public int Port { get; set; }
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": 0
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg010_stays_quiet_for_regular_expression()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<NameOptions>()
+                .BindConfiguration("Name")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class NameOptions
+            {
+                [RegularExpression("^[a-z]+$")]
+                public string Code { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Name": {
+                "Code": "123"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg010_stays_quiet_for_email_address()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<MailOptions>()
+                .BindConfiguration("Mail")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class MailOptions
+            {
+                [EmailAddress]
+                public string Address { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Mail": {
+                "Address": "not-an-email"
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg010_reports_hex_string_out_of_range()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration("Server")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                [Range(1, 65535)]
+                public int Port { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueFailsValidation)
+            .WithSpan("appsettings.json", 3, 13, 3, 18)
+            .WithArguments("Server:Port", "Range", "ServerOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": "0x0"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg010_reports_nullable_range_failure()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration("Server")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class ServerOptions
+            {
+                [Range(1, 10)]
+                public int? Port { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueFailsValidation)
+            .WithSpan("appsettings.json", 3, 13, 3, 14)
+            .WithArguments("Server:Port", "Range", "ServerOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": 0
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg010_stays_quiet_for_ivalidatable_object()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<ServerOptions>()
+                .BindConfiguration("Server")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            extraUsings: "using System.Collections.Generic;\n",
+            optionsTypes: """
+            public sealed class ServerOptions : IValidatableObject
+            {
+                public int Port { get; set; }
+
+                public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+                {
+                    if (Port < 1)
+                    {
+                        yield return new ValidationResult("Port must be positive.");
+                    }
+                }
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Server": {
+                "Port": 0
+              }
+            }
+            """));
+    }
+
+    [Fact]
+    public async Task Cfg010_reports_invariant_typeof_range()
+    {
+        var source = OptionsSource(
+            """
+            services.AddOptions<PriceOptions>()
+                .BindConfiguration("Price")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """,
+            optionsTypes: """
+            public sealed class PriceOptions
+            {
+                [Range(typeof(decimal), "0.0", "100.0", ParseLimitsInInvariantCulture = true)]
+                public decimal Amount { get; set; }
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationValueFailsValidation)
+            .WithSpan("appsettings.json", 3, 15, 3, 17)
+            .WithArguments("Price:Amount", "Range", "PriceOptions");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """
+            {
+              "Price": {
+                "Amount": -1
+              }
+            }
+            """),
+            expected);
+    }
 }

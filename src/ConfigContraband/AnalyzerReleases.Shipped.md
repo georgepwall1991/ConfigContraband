@@ -1,6 +1,13 @@
 ; Shipped analyzer releases
 ; https://github.com/dotnet/roslyn-analyzers/blob/main/src/Microsoft.CodeAnalysis.Analyzers/ReleaseTrackingAnalyzers.Help.md
 
+## Release 0.8.0
+
+### New Rules
+Rule ID | Category | Severity | Notes
+--------|----------|----------|-------
+CFG010 | Configuration | Warning | Bound configuration value fails DataAnnotations validation
+
 ## Release 0.7.0
 
 ### New Rules

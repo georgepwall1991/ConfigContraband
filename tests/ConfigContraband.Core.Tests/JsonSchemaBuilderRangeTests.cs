@@ -952,4 +952,227 @@ public sealed partial class JsonSchemaBuilderTests
         Assert.DoesNotContain("minimum", schema);
         Assert.Contains("\"maximum\": 10", schema);
     }
+
+    [Fact]
+    public void Range_nan_minimum_is_skipped()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class LimitOptions
+            {
+                [Range(double.NaN, 1.0)]
+                public double Limit { get; set; }
+            }
+            """,
+            "LimitOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.Contains("\"maximum\": 1", schema);
+        Assert.DoesNotContain("NaN", schema);
+    }
+
+    [Fact]
+    public void Range_negative_infinity_minimum_is_skipped()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class LimitOptions
+            {
+                [Range(double.NegativeInfinity, 1.0)]
+                public double Limit { get; set; }
+            }
+            """,
+            "LimitOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.Contains("\"maximum\": 1", schema);
+        Assert.DoesNotContain("Infinity", schema);
+    }
+
+    [Fact]
+    public void Parameterless_range_subclass_emits_no_bounds()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class PortRangeAttribute : RangeAttribute
+            {
+                public PortRangeAttribute() : base(1, 65535)
+                {
+                }
+            }
+
+            public sealed class ServerOptions
+            {
+                [PortRange]
+                public int Port { get; set; }
+            }
+            """,
+            "ServerOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.DoesNotContain("maximum", schema);
+    }
+
+    [Fact]
+    public void Inclusive_exclusive_flags_set_to_false_emit_inclusive_keywords()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class RateOptions
+            {
+                [Range(0, 1, MinimumIsExclusive = false, MaximumIsExclusive = false)]
+                public double Ratio { get; set; }
+            }
+            """,
+            "RateOptions");
+
+        Assert.Contains("\"minimum\": 0", schema);
+        Assert.Contains("\"maximum\": 1", schema);
+        Assert.DoesNotContain("exclusiveMinimum", schema);
+        Assert.DoesNotContain("exclusiveMaximum", schema);
+    }
+
+    [Fact]
+    public void Minimum_exclusive_only_emits_exclusive_minimum()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class RateOptions
+            {
+                [Range(0, 1, MinimumIsExclusive = true)]
+                public double Ratio { get; set; }
+            }
+            """,
+            "RateOptions");
+
+        Assert.Contains("\"exclusiveMinimum\": 0", schema);
+        Assert.Contains("\"maximum\": 1", schema);
+        Assert.DoesNotContain("exclusiveMaximum", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_int_drops_unparseable_integer_bounds()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ServerOptions
+            {
+                [Range(typeof(int), "abc", "10")]
+                public int Port { get; set; }
+            }
+            """,
+            "ServerOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.Contains("\"maximum\": 10", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_decimal_drops_unparseable_bounds()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class PriceOptions
+            {
+                [Range(typeof(decimal), "abc", "5")]
+                public decimal Price { get; set; }
+            }
+            """,
+            "PriceOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.Contains("\"maximum\": 5", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_double_drops_nan_and_infinity_separately()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class RateOptions
+            {
+                [Range(typeof(double), "NaN", "Infinity")]
+                public double Ratio { get; set; }
+            }
+            """,
+            "RateOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.DoesNotContain("maximum", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_unknown_operand_keeps_uppercase_exponent_and_negative_exponent()
+    {
+        var schema = BuildSchema(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class WhenOptions
+            {
+                [Range(typeof(DateTime), "1E2", "1e-2")]
+                public double Amount { get; set; }
+            }
+            """,
+            "WhenOptions");
+
+        Assert.Contains("\"minimum\": 1E2", schema);
+        Assert.Contains("\"maximum\": 1e-2", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_unknown_operand_drops_incomplete_fraction()
+    {
+        var schema = BuildSchema(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class WhenOptions
+            {
+                [Range(typeof(DateTime), "1.", "2")]
+                public double Amount { get; set; }
+            }
+            """,
+            "WhenOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.Contains("\"maximum\": 2", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_float_drops_unparseable_bounds()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class RateOptions
+            {
+                [Range(typeof(float), "abc", "1.5")]
+                public float Ratio { get; set; }
+            }
+            """,
+            "RateOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.Contains("\"maximum\": 1.5", schema);
+    }
 }

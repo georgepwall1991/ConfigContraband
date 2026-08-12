@@ -941,7 +941,7 @@ public sealed partial class ConfigContrabandAnalyzer
             return;
         }
 
-        var location = property.ValueLocation ?? property.Location;
+        var location = property.GetReportedLocation();
         var reportKey = CreateConfigurationValueTypeMismatchReportKey(
             targetType,
             location,
@@ -984,7 +984,7 @@ public sealed partial class ConfigContrabandAnalyzer
             return;
         }
 
-        var location = property.ValueLocation ?? property.Location;
+        var location = property.GetReportedLocation();
         var reportKey = CreateConfigurationValueFailsValidationReportKey(
             targetType,
             location,

@@ -486,6 +486,19 @@ internal sealed class ConfigurationProperty
 
     /// <summary>Location of the property's scalar value, or <c>null</c> for non-scalar values.</summary>
     public Location? ValueLocation { get; }
+
+    /// <summary>
+    /// Prefers the scalar value span when the parser captured one; otherwise the property key.
+    /// </summary>
+    public Location GetReportedLocation()
+    {
+        if (ValueLocation is { } valueLocation)
+        {
+            return valueLocation;
+        }
+
+        return Location;
+    }
 }
 
 internal static class JsonConfigurationParser

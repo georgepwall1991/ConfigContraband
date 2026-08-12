@@ -65,11 +65,13 @@ internal static class DataAnnotationsConstraints
                 _ => FailsDeniedValues(attribute, converted, convertedType),
             };
 
-            if (failed && attributeName is not null)
+            if (!failed)
             {
-                attributeDisplayName = DisplayName(attributeName);
-                return true;
+                continue;
             }
+
+            attributeDisplayName = DisplayName(attributeName!);
+            return true;
         }
 
         return false;
@@ -98,7 +100,7 @@ internal static class DataAnnotationsConstraints
         foreach (var attribute in declaredAttributes)
         {
             var name = GetFrameworkConstraintName(attribute.AttributeClass);
-            if (name is not null && !OverridesIsValid(attribute.AttributeClass))
+            if (name is not null && !OverridesIsValid(attribute.AttributeClass!))
             {
                 effective[name] = attribute;
             }
@@ -130,21 +132,43 @@ internal static class DataAnnotationsConstraints
 
     private static bool FailsRange(AttributeData attribute, object converted)
     {
-        if (!ValidationAttributeLimits.TryReadRangeOperands(attribute, out var range) ||
-            range.OperandType is null ||
-            range.Minimum is null ||
-            range.Maximum is null)
+        if (!ValidationAttributeLimits.TryReadRangeOperands(attribute, out var range))
         {
             return false;
         }
 
-        if (range.IsTypeStringOverload && !range.ParseLimitsInInvariantCulture)
+        if (range.Minimum is null)
         {
             return false;
         }
 
-        var operandClr = GetClrType(range.OperandType);
+        if (range.Maximum is null)
+        {
+            return false;
+        }
+
+        if (range.IsTypeStringOverload)
+        {
+            if (!range.ParseLimitsInInvariantCulture)
+            {
+                return false;
+            }
+        }
+
+        var operandClr = GetClrType(range.OperandType!);
         if (operandClr is null)
+        {
+            return false;
+        }
+
+        IComparable minimum;
+        IComparable maximum;
+        try
+        {
+            minimum = (IComparable)Convert.ChangeType(range.Minimum, operandClr, Invariant);
+            maximum = (IComparable)Convert.ChangeType(range.Maximum, operandClr, Invariant);
+        }
+        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException or ArgumentException)
         {
             return false;
         }
@@ -152,13 +176,15 @@ internal static class DataAnnotationsConstraints
         try
         {
             var value = (IComparable)Convert.ChangeType(converted, operandClr, Invariant);
-            var minimum = (IComparable)Convert.ChangeType(range.Minimum, operandClr, Invariant);
-            var maximum = (IComparable)Convert.ChangeType(range.Maximum, operandClr, Invariant);
             var minComparison = value.CompareTo(minimum);
             var maxComparison = value.CompareTo(maximum);
             var belowMin = range.MinimumExclusive ? minComparison <= 0 : minComparison < 0;
-            var aboveMax = range.MaximumExclusive ? maxComparison >= 0 : maxComparison > 0;
-            return belowMin || aboveMax;
+            if (belowMin)
+            {
+                return true;
+            }
+
+            return range.MaximumExclusive ? maxComparison >= 0 : maxComparison > 0;
         }
         catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException or ArgumentException)
         {
@@ -238,10 +264,17 @@ internal static class DataAnnotationsConstraints
         var values = new List<TypedConstant>();
         foreach (var argument in attribute.ConstructorArguments)
         {
-            if (argument.Kind == TypedConstantKind.Array)
+            if (argument.Kind != TypedConstantKind.Array)
             {
-                values.AddRange(argument.Values);
+                continue;
             }
+
+            if (argument.Values.IsDefault)
+            {
+                continue;
+            }
+
+            values.AddRange(argument.Values);
         }
 
         return values;
@@ -249,9 +282,17 @@ internal static class DataAnnotationsConstraints
 
     private static bool ValuesEqual(object converted, ITypeSymbol convertedType, TypedConstant allowed)
     {
-        return allowed.Type is not null &&
-               SymbolEqualityComparer.Default.Equals(UnwrapNullable(allowed.Type), UnwrapNullable(convertedType)) &&
-               Equals(converted, allowed.Value);
+        if (allowed.Type is null)
+        {
+            return false;
+        }
+
+        if (!SymbolEqualityComparer.Default.Equals(UnwrapNullable(allowed.Type), UnwrapNullable(convertedType)))
+        {
+            return false;
+        }
+
+        return Equals(converted, allowed.Value);
     }
 
     private static bool TryConvertPropertyValue(
@@ -261,8 +302,12 @@ internal static class DataAnnotationsConstraints
         out ITypeSymbol convertedType)
     {
         converted = null!;
-        var isNullable = targetType is INamedTypeSymbol nullable &&
-            nullable.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
+        var isNullable = false;
+        if (targetType is INamedTypeSymbol namedTarget)
+        {
+            isNullable = namedTarget.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
+        }
+
         convertedType = UnwrapNullable(targetType);
         if (isNullable && rawValue.Length == 0)
         {
@@ -291,49 +336,49 @@ internal static class DataAnnotationsConstraints
                 return TryParseInteger(
                     rawValue,
                     s => sbyte.TryParse(s, IntegerStyles, Invariant, out var value) ? value : null,
-                    s => sbyte.TryParse(s, NumberStyles.HexNumber, Invariant, out var hex) ? hex : null,
+                    s => TryParseHex<sbyte>(s, sbyte.TryParse),
                     out converted);
             case SpecialType.System_Byte:
                 return TryParseInteger(
                     rawValue,
                     s => byte.TryParse(s, IntegerStyles, Invariant, out var value) ? value : null,
-                    s => byte.TryParse(s, NumberStyles.HexNumber, Invariant, out var hex) ? hex : null,
+                    s => TryParseHex<byte>(s, byte.TryParse),
                     out converted);
             case SpecialType.System_Int16:
                 return TryParseInteger(
                     rawValue,
                     s => short.TryParse(s, IntegerStyles, Invariant, out var value) ? value : null,
-                    s => short.TryParse(s, NumberStyles.HexNumber, Invariant, out var hex) ? hex : null,
+                    s => TryParseHex<short>(s, short.TryParse),
                     out converted);
             case SpecialType.System_UInt16:
                 return TryParseInteger(
                     rawValue,
                     s => ushort.TryParse(s, IntegerStyles, Invariant, out var value) ? value : null,
-                    s => ushort.TryParse(s, NumberStyles.HexNumber, Invariant, out var hex) ? hex : null,
+                    s => TryParseHex<ushort>(s, ushort.TryParse),
                     out converted);
             case SpecialType.System_Int32:
                 return TryParseInteger(
                     rawValue,
                     s => int.TryParse(s, IntegerStyles, Invariant, out var value) ? value : null,
-                    s => int.TryParse(s, NumberStyles.HexNumber, Invariant, out var hex) ? hex : null,
+                    s => TryParseHex<int>(s, int.TryParse),
                     out converted);
             case SpecialType.System_UInt32:
                 return TryParseInteger(
                     rawValue,
                     s => uint.TryParse(s, IntegerStyles, Invariant, out var value) ? value : null,
-                    s => uint.TryParse(s, NumberStyles.HexNumber, Invariant, out var hex) ? hex : null,
+                    s => TryParseHex<uint>(s, uint.TryParse),
                     out converted);
             case SpecialType.System_Int64:
                 return TryParseInteger(
                     rawValue,
                     s => long.TryParse(s, IntegerStyles, Invariant, out var value) ? value : null,
-                    s => long.TryParse(s, NumberStyles.HexNumber, Invariant, out var hex) ? hex : null,
+                    s => TryParseHex<long>(s, long.TryParse),
                     out converted);
             case SpecialType.System_UInt64:
                 return TryParseInteger(
                     rawValue,
                     s => ulong.TryParse(s, IntegerStyles, Invariant, out var value) ? value : null,
-                    s => ulong.TryParse(s, NumberStyles.HexNumber, Invariant, out var hex) ? hex : null,
+                    s => TryParseHex<ulong>(s, ulong.TryParse),
                     out converted);
             case SpecialType.System_Single:
                 if (float.TryParse(rawValue, FloatStyles, Invariant, out var single))
@@ -395,6 +440,19 @@ internal static class DataAnnotationsConstraints
         return false;
     }
 
+    private static object? TryParseHex<T>(string value, TryParseNumber<T> parse)
+        where T : struct
+    {
+        if (parse(value, NumberStyles.HexNumber, Invariant, out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+
+    private delegate bool TryParseNumber<T>(string s, NumberStyles styles, IFormatProvider provider, out T value);
+
     private static string? StripHexPrefix(string value)
     {
         if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase) && value.Length > 2)
@@ -418,54 +476,102 @@ internal static class DataAnnotationsConstraints
     private static bool TryConvertEnum(INamedTypeSymbol enumType, string rawValue, out object converted)
     {
         converted = null!;
-        var members = enumType.GetMembers().OfType<IFieldSymbol>().Where(field => field.IsConst).ToArray();
-        foreach (var token in rawValue.Split(','))
+        // Enum.Parse bitwise-ORs comma-separated tokens (including without [Flags]). Combining
+        // underlying values here would need a proven integral conversion; staying quiet keeps
+        // CFG010 from warning on a runtime-valid flags combination such as "Read, Write".
+        if (rawValue.IndexOf(',') >= 0)
         {
-            var trimmed = token.Trim();
-            if (trimmed.Length == 0)
-            {
-                return false;
-            }
-
-            var member = members.FirstOrDefault(field =>
-                string.Equals(field.Name, trimmed, StringComparison.OrdinalIgnoreCase));
-            if (member?.ConstantValue is not null)
-            {
-                converted = member.ConstantValue;
-                continue;
-            }
-
-            if (!TryParseEnumNumeric(enumType, trimmed, out converted))
-            {
-                return false;
-            }
+            return false;
         }
 
-        return true;
+        var trimmed = rawValue.Trim();
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        var members = enumType.GetMembers().OfType<IFieldSymbol>().Where(field => field.IsConst).ToArray();
+        var member = members.FirstOrDefault(field =>
+            string.Equals(field.Name, trimmed, StringComparison.OrdinalIgnoreCase));
+        if (member?.ConstantValue is not null)
+        {
+            converted = member.ConstantValue;
+            return true;
+        }
+
+        return TryParseEnumNumeric(enumType, trimmed, out converted);
     }
 
     private static bool TryParseEnumNumeric(INamedTypeSymbol enumType, string value, out object converted)
     {
         converted = null!;
-        var ok = enumType.EnumUnderlyingType?.SpecialType switch
+        var specialType = enumType.EnumUnderlyingType!.SpecialType;
+        if (specialType == SpecialType.System_SByte)
         {
-            SpecialType.System_SByte => sbyte.TryParse(value, IntegerStyles, Invariant, out var sbyteValue) && Assign(sbyteValue, out converted),
-            SpecialType.System_Byte => byte.TryParse(value, IntegerStyles, Invariant, out var byteValue) && Assign(byteValue, out converted),
-            SpecialType.System_Int16 => short.TryParse(value, IntegerStyles, Invariant, out var shortValue) && Assign(shortValue, out converted),
-            SpecialType.System_UInt16 => ushort.TryParse(value, IntegerStyles, Invariant, out var ushortValue) && Assign(ushortValue, out converted),
-            SpecialType.System_Int32 => int.TryParse(value, IntegerStyles, Invariant, out var intValue) && Assign(intValue, out converted),
-            SpecialType.System_UInt32 => uint.TryParse(value, IntegerStyles, Invariant, out var uintValue) && Assign(uintValue, out converted),
-            SpecialType.System_Int64 => long.TryParse(value, IntegerStyles, Invariant, out var longValue) && Assign(longValue, out converted),
-            SpecialType.System_UInt64 => ulong.TryParse(value, IntegerStyles, Invariant, out var ulongValue) && Assign(ulongValue, out converted),
-            _ => false,
-        };
-        return ok;
-    }
+            if (sbyte.TryParse(value, IntegerStyles, Invariant, out var sbyteValue))
+            {
+                converted = sbyteValue;
+                return true;
+            }
+        }
+        else if (specialType == SpecialType.System_Byte)
+        {
+            if (byte.TryParse(value, IntegerStyles, Invariant, out var byteValue))
+            {
+                converted = byteValue;
+                return true;
+            }
+        }
+        else if (specialType == SpecialType.System_Int16)
+        {
+            if (short.TryParse(value, IntegerStyles, Invariant, out var shortValue))
+            {
+                converted = shortValue;
+                return true;
+            }
+        }
+        else if (specialType == SpecialType.System_UInt16)
+        {
+            if (ushort.TryParse(value, IntegerStyles, Invariant, out var ushortValue))
+            {
+                converted = ushortValue;
+                return true;
+            }
+        }
+        else if (specialType == SpecialType.System_Int32)
+        {
+            if (int.TryParse(value, IntegerStyles, Invariant, out var intValue))
+            {
+                converted = intValue;
+                return true;
+            }
+        }
+        else if (specialType == SpecialType.System_UInt32)
+        {
+            if (uint.TryParse(value, IntegerStyles, Invariant, out var uintValue))
+            {
+                converted = uintValue;
+                return true;
+            }
+        }
+        else if (specialType == SpecialType.System_Int64)
+        {
+            if (long.TryParse(value, IntegerStyles, Invariant, out var longValue))
+            {
+                converted = longValue;
+                return true;
+            }
+        }
+        else if (specialType == SpecialType.System_UInt64)
+        {
+            if (ulong.TryParse(value, IntegerStyles, Invariant, out var ulongValue))
+            {
+                converted = ulongValue;
+                return true;
+            }
+        }
 
-    private static bool Assign(object value, out object converted)
-    {
-        converted = value;
-        return true;
+        return false;
     }
 
     private static Type? GetClrType(ITypeSymbol type)
@@ -503,17 +609,19 @@ internal static class DataAnnotationsConstraints
         return type;
     }
 
-    private static bool OverridesIsValid(INamedTypeSymbol? attributeClass)
+    private static bool OverridesIsValid(INamedTypeSymbol attributeClass)
     {
-        for (var current = attributeClass; current is not null && !IsFrameworkConstraintName(current); current = current.BaseType)
+        if (IsFrameworkConstraintName(attributeClass))
         {
-            if (current.GetMembers("IsValid").OfType<IMethodSymbol>().Any(method => method.IsOverride))
-            {
-                return true;
-            }
+            return false;
         }
 
-        return false;
+        if (attributeClass.GetMembers("IsValid").OfType<IMethodSymbol>().Any(method => method.IsOverride))
+        {
+            return true;
+        }
+
+        return OverridesIsValid(attributeClass.BaseType!);
     }
 
     private static bool IsFrameworkConstraintName(INamedTypeSymbol attributeClass)

@@ -1109,9 +1109,9 @@ public sealed class DataAnnotationsConstraintsTests
     }
 
     [Fact]
-    public void AllowedValues_reports_enum_comma_list_last_member()
+    public void AllowedValues_stays_quiet_for_enum_comma_list()
     {
-        AssertFailure(
+        AssertQuiet(
             """
             using System.ComponentModel.DataAnnotations;
 
@@ -1125,8 +1125,29 @@ public sealed class DataAnnotationsConstraintsTests
             """,
             "Tint",
             ScalarKind.String,
-            "Red, Blue",
-            "AllowedValues");
+            "Red, Blue");
+    }
+
+    [Fact]
+    public void AllowedValues_stays_quiet_for_flags_enum_comma_list()
+    {
+        AssertQuiet(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            [Flags]
+            public enum Perms { Read = 1, Write = 2, ReadWrite = 3 }
+
+            public sealed class AccessOptions
+            {
+                [AllowedValues(Perms.ReadWrite)]
+                public Perms Access { get; set; }
+            }
+            """,
+            "Access",
+            ScalarKind.String,
+            "Read, Write");
     }
 
     [Fact]
@@ -1147,6 +1168,24 @@ public sealed class DataAnnotationsConstraintsTests
             "Tint",
             ScalarKind.String,
             "Green");
+    }
+
+    [Fact]
+    public void Unparseable_invariant_range_bounds_stay_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ServerOptions
+            {
+                [Range(typeof(int), "abc", "10", ParseLimitsInInvariantCulture = true)]
+                public int Port { get; set; }
+            }
+            """,
+            "Port",
+            ScalarKind.Number,
+            "5");
     }
 
     [Fact]
@@ -1195,6 +1234,175 @@ public sealed class DataAnnotationsConstraintsTests
             ScalarKind.Number,
             "2",
             "AllowedValues");
+    }
+
+    [Theory]
+    [InlineData("sbyte")]
+    [InlineData("byte")]
+    [InlineData("short")]
+    [InlineData("ushort")]
+    [InlineData("uint")]
+    [InlineData("long")]
+    [InlineData("ulong")]
+    public void Invalid_hex_stays_quiet_for_each_integral_type(string clrType)
+    {
+        AssertQuiet(
+            $$"""
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class NumericOptions
+            {
+                [Range(typeof({{clrType}}), "1", "32", ParseLimitsInInvariantCulture = true)]
+                public {{clrType}} Amount { get; set; }
+            }
+            """,
+            "Amount",
+            ScalarKind.String,
+            "0xGG");
+    }
+
+    [Theory]
+    [InlineData("byte")]
+    [InlineData("sbyte")]
+    [InlineData("short")]
+    [InlineData("ushort")]
+    [InlineData("uint")]
+    [InlineData("long")]
+    [InlineData("ulong")]
+    public void Unknown_numeric_enum_token_stays_quiet_for_each_backing_type(string backing)
+    {
+        AssertQuiet(
+            $$"""
+            using System.ComponentModel.DataAnnotations;
+
+            public enum Color : {{backing}} { Red = 1, Blue = 2 }
+
+            public sealed class TintOptions
+            {
+                [AllowedValues(Color.Red)]
+                public Color Tint { get; set; }
+            }
+            """,
+            "Tint",
+            ScalarKind.String,
+            "nope");
+    }
+
+    [Fact]
+    public void Typeof_range_with_null_minimum_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ServerOptions
+            {
+                [Range(typeof(int), null, "10", ParseLimitsInInvariantCulture = true)]
+                public int Port { get; set; }
+            }
+            """,
+            "Port",
+            ScalarKind.Number,
+            "0");
+    }
+
+    [Fact]
+    public void Typeof_range_with_null_maximum_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ServerOptions
+            {
+                [Range(typeof(int), "1", null, ParseLimitsInInvariantCulture = true)]
+                public int Port { get; set; }
+            }
+            """,
+            "Port",
+            ScalarKind.Number,
+            "100");
+    }
+
+    [Fact]
+    public void AllowedValues_subclass_with_extra_constructor_argument_still_reports()
+    {
+        AssertFailure(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class TaggedAllowedAttribute : AllowedValuesAttribute
+            {
+                public TaggedAllowedAttribute(int tag, params object[] values) : base(values)
+                {
+                }
+            }
+
+            public sealed class EnvOptions
+            {
+                [TaggedAllowed(1, "dev", "prod")]
+                public string Environment { get; set; } = "";
+            }
+            """,
+            "Environment",
+            ScalarKind.String,
+            "staging",
+            "AllowedValues");
+    }
+
+    [Fact]
+    public void AllowedValues_reports_when_list_types_do_not_match_property()
+    {
+        AssertFailure(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class EnvOptions
+            {
+                [AllowedValues(1, 2)]
+                public string Environment { get; set; } = "";
+            }
+            """,
+            "Environment",
+            ScalarKind.String,
+            "1",
+            "AllowedValues");
+    }
+
+    [Fact]
+    public void AllowedValues_null_entry_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class EnvOptions
+            {
+                [AllowedValues(null)]
+                public string Environment { get; set; } = "";
+            }
+            """,
+            "Environment",
+            ScalarKind.String,
+            "prod");
+    }
+
+    [Fact]
+    public void Array_property_type_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class NameOptions
+            {
+                [MaxLength(2)]
+                public string[] Tags { get; set; } = [];
+            }
+            """,
+            "Tags",
+            ScalarKind.String,
+            "abc");
     }
 
     private static void AssertFailure(

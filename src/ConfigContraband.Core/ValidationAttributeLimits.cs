@@ -28,23 +28,34 @@ internal static class ValidationAttributeLimits
         ref bool maximumExclusive)
     {
         var arguments = attribute.ConstructorArguments;
-        if (arguments.Length == 2)
+        switch (arguments.Length)
         {
-            // Range(int, int) or Range(double, double).
-            minimum = FormatNumericConstant(arguments[0]) ?? minimum;
-            maximum = FormatNumericConstant(arguments[1]) ?? maximum;
-        }
-        else if (arguments.Length == 3)
-        {
-            // Range(Type, string, string): the operand type plus numeric strings. Bounds are parsed with the
-            // invariant culture, NOT the current culture. RangeAttribute defaults to the current culture, but
-            // a build-time schema generator cannot know the app's runtime culture, and parsing with the build
-            // machine's culture would make the committed schema non-deterministic (breaking `--check` across
-            // machines). Invariant parsing is deterministic; a culture-specific bound that does not parse is
-            // dropped (the safe under-enforcing direction), matching the recommended ParseLimitsInInvariantCulture.
-            var boundType = arguments[0].Value as ITypeSymbol;
-            minimum = NormalizeNumericLiteral(arguments[1].Value as string, boundType) ?? minimum;
-            maximum = NormalizeNumericLiteral(arguments[2].Value as string, boundType) ?? maximum;
+            case 2:
+                // Range(int, int) or Range(double, double).
+                var formattedMinimum = FormatNumericConstant(arguments[0]);
+                if (formattedMinimum is not null)
+                {
+                    minimum = formattedMinimum;
+                }
+
+                var formattedMaximum = FormatNumericConstant(arguments[1]);
+                if (formattedMaximum is not null)
+                {
+                    maximum = formattedMaximum;
+                }
+
+                break;
+            case 3:
+                // Range(Type, string, string): the operand type plus numeric strings. Bounds are parsed with the
+                // invariant culture, NOT the current culture. RangeAttribute defaults to the current culture, but
+                // a build-time schema generator cannot know the app's runtime culture, and parsing with the build
+                // machine's culture would make the committed schema non-deterministic (breaking `--check` across
+                // machines). Invariant parsing is deterministic; a culture-specific bound that does not parse is
+                // dropped (the safe under-enforcing direction), matching the recommended ParseLimitsInInvariantCulture.
+                var boundType = arguments[0].Value as ITypeSymbol;
+                minimum = NormalizeNumericLiteral(arguments[1].Value as string, boundType) ?? minimum;
+                maximum = NormalizeNumericLiteral(arguments[2].Value as string, boundType) ?? maximum;
+                break;
         }
 
         ReadExclusiveFlags(attribute, ref minimumExclusive, ref maximumExclusive);
@@ -177,13 +188,14 @@ internal static class ValidationAttributeLimits
     {
         foreach (var named in attribute.NamedArguments)
         {
-            if (string.Equals(named.Key, "MinimumIsExclusive", StringComparison.Ordinal) && named.Value.Value is bool minExclusive)
+            if (string.Equals(named.Key, "MinimumIsExclusive", StringComparison.Ordinal))
             {
-                minimumExclusive = minExclusive;
+                minimumExclusive = named.Value.Value is true;
             }
-            else if (string.Equals(named.Key, "MaximumIsExclusive", StringComparison.Ordinal) && named.Value.Value is bool maxExclusive)
+
+            if (string.Equals(named.Key, "MaximumIsExclusive", StringComparison.Ordinal))
             {
-                maximumExclusive = maxExclusive;
+                maximumExclusive = named.Value.Value is true;
             }
         }
     }
@@ -196,11 +208,26 @@ internal static class ValidationAttributeLimits
         string? formatted = argument.Value switch
         {
             int value => value.ToString(Invariant),
-            double value when !double.IsNaN(value) && !double.IsInfinity(value) => value.ToString("R", Invariant),
+            double value => FormatFiniteDouble(value),
             _ => null,
         };
 
-        return formatted is not null && IsJsonNumber(formatted) ? formatted : null;
+        return formatted;
+    }
+
+    private static string? FormatFiniteDouble(double value)
+    {
+        if (double.IsNaN(value))
+        {
+            return null;
+        }
+
+        if (double.IsInfinity(value))
+        {
+            return null;
+        }
+
+        return value.ToString("R", Invariant);
     }
 
     private static string? NormalizeNumericLiteral(string? literal, ITypeSymbol? boundType)
@@ -216,7 +243,7 @@ internal static class ValidationAttributeLimits
         // schema mirrors runtime rounding and ranges. RangeAttribute parses "+1", ".5", "1.", "01" with the
         // invariant culture; unparseable or non-finite bounds (e.g. "abc", "NaN") are dropped so an invalid
         // JSON number is never emitted.
-        switch (boundType?.SpecialType)
+        switch (boundType!.SpecialType)
         {
             case SpecialType.System_Byte:
             case SpecialType.System_SByte:
@@ -233,27 +260,57 @@ internal static class ValidationAttributeLimits
                     return signed.ToString(Invariant);
                 }
 
-                return ulong.TryParse(trimmed, NumberStyles.Integer, Invariant, out var unsigned)
-                    ? unsigned.ToString(Invariant)
-                    : null;
+                if (ulong.TryParse(trimmed, NumberStyles.Integer, Invariant, out var unsigned))
+                {
+                    return unsigned.ToString(Invariant);
+                }
+
+                return null;
 
             case SpecialType.System_Single:
-                return float.TryParse(trimmed, NumberStyles.Float, Invariant, out var single) &&
-                       !float.IsNaN(single) && !float.IsInfinity(single)
-                    ? ValidJsonNumberOrNull(single.ToString("R", Invariant))
-                    : null;
+                if (!float.TryParse(trimmed, NumberStyles.Float, Invariant, out var single))
+                {
+                    return null;
+                }
+
+                if (float.IsNaN(single))
+                {
+                    return null;
+                }
+
+                if (float.IsInfinity(single))
+                {
+                    return null;
+                }
+
+                return ValidJsonNumberOrNull(single.ToString("R", Invariant));
 
             case SpecialType.System_Double:
-                return double.TryParse(trimmed, NumberStyles.Float, Invariant, out var dbl) &&
-                       !double.IsNaN(dbl) && !double.IsInfinity(dbl)
-                    ? ValidJsonNumberOrNull(dbl.ToString("R", Invariant))
-                    : null;
+                if (!double.TryParse(trimmed, NumberStyles.Float, Invariant, out var dbl))
+                {
+                    return null;
+                }
+
+                if (double.IsNaN(dbl))
+                {
+                    return null;
+                }
+
+                if (double.IsInfinity(dbl))
+                {
+                    return null;
+                }
+
+                return ValidJsonNumberOrNull(dbl.ToString("R", Invariant));
 
             case SpecialType.System_Decimal:
                 // decimal preserves the authored scale (so "100.0" stays "100.0").
-                return decimal.TryParse(trimmed, NumberStyles.Float, Invariant, out var dec)
-                    ? ValidJsonNumberOrNull(dec.ToString(Invariant))
-                    : null;
+                if (!decimal.TryParse(trimmed, NumberStyles.Float, Invariant, out var dec))
+                {
+                    return null;
+                }
+
+                return ValidJsonNumberOrNull(dec.ToString(Invariant));
 
             default:
                 // Unknown operand type: only emit a value already shaped as a valid JSON number.
@@ -261,7 +318,15 @@ internal static class ValidationAttributeLimits
         }
     }
 
-    private static string? ValidJsonNumberOrNull(string value) => IsJsonNumber(value) ? value : null;
+    private static string? ValidJsonNumberOrNull(string value)
+    {
+        if (IsJsonNumber(value))
+        {
+            return value;
+        }
+
+        return null;
+    }
 
     /// <summary>Validates a string against the RFC 8259 JSON number grammar.</summary>
     private static bool IsJsonNumber(string value)
@@ -288,10 +353,16 @@ internal static class ValidationAttributeLimits
         {
             index++;
         }
-        else if (value[index] >= '1' && value[index] <= '9')
+        else if (IsDigit1To9(value[index]))
         {
-            while (index < length && value[index] >= '0' && value[index] <= '9')
+            index++;
+            while (index < length)
             {
+                if (!IsDigit(value[index]))
+                {
+                    break;
+                }
+
                 index++;
             }
         }
@@ -301,45 +372,103 @@ internal static class ValidationAttributeLimits
         }
 
         // frac = "." 1*digit
-        if (index < length && value[index] == '.')
+        if (index < length)
         {
-            index++;
-            var fractionDigits = 0;
-            while (index < length && value[index] >= '0' && value[index] <= '9')
+            if (value[index] == '.')
             {
                 index++;
-                fractionDigits++;
-            }
+                var fractionDigits = 0;
+                while (index < length)
+                {
+                    if (!IsDigit(value[index]))
+                    {
+                        break;
+                    }
 
-            if (fractionDigits == 0)
-            {
-                return false;
+                    index++;
+                    fractionDigits++;
+                }
+
+                if (fractionDigits == 0)
+                {
+                    return false;
+                }
             }
         }
 
         // exp = ("e" | "E") ["+" | "-"] 1*digit
-        if (index < length && (value[index] == 'e' || value[index] == 'E'))
+        if (index < length)
         {
-            index++;
-            if (index < length && (value[index] == '+' || value[index] == '-'))
+            var exponent = value[index];
+            if (exponent == 'e')
             {
                 index++;
+                if (!TryReadExponentRest(value, ref index, length))
+                {
+                    return false;
+                }
             }
-
-            var exponentDigits = 0;
-            while (index < length && value[index] >= '0' && value[index] <= '9')
+            else if (exponent == 'E')
             {
                 index++;
-                exponentDigits++;
-            }
-
-            if (exponentDigits == 0)
-            {
-                return false;
+                if (!TryReadExponentRest(value, ref index, length))
+                {
+                    return false;
+                }
             }
         }
 
         return index == length;
+    }
+
+    private static bool TryReadExponentRest(string value, ref int index, int length)
+    {
+        if (index < length)
+        {
+            var sign = value[index];
+            if (sign == '+')
+            {
+                index++;
+            }
+            else if (sign == '-')
+            {
+                index++;
+            }
+        }
+
+        var exponentDigits = 0;
+        while (index < length)
+        {
+            if (!IsDigit(value[index]))
+            {
+                break;
+            }
+
+            index++;
+            exponentDigits++;
+        }
+
+        return exponentDigits > 0;
+    }
+
+    private static bool IsDigit1To9(char value)
+    {
+        if (value < '1')
+        {
+            return false;
+        }
+
+        return value <= '9';
+    }
+
+    private static bool IsDigit(char value)
+    {
+        if (value < '0')
+        {
+            return false;
+        }
+
+        return value <= '9';
     }
 }
 
