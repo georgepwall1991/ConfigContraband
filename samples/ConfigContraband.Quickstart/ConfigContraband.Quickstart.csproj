@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- Top-level sample types are intentional for a minimal copy-paste example. -->
+    <NoWarn>$(NoWarn);CA1050;IDE0005</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reference both the analyzer and its Core dependency as analyzers so the analyzer load context
+         can resolve ConfigContraband.Core at design/build time (the NuGet package bundles both DLLs). -->
+    <ProjectReference Include="..\..\src\ConfigContraband.Core\ConfigContraband.Core.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <ProjectReference Include="..\..\src\ConfigContraband\ConfigContraband.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <AdditionalFiles Include="appsettings.json;appsettings.*.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>

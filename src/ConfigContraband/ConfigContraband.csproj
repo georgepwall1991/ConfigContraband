@@ -14,10 +14,13 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.26</Version>
+    <Version>0.7.27</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband — Options and appsettings validation analyzer</Title>
     <Description>Compile-time Options validation for .NET: a Roslyn analyzer that checks BindConfiguration, ValidateOnStart, ValidateDataAnnotations, and appsettings.json against your IOptions types so broken configuration fails in the editor and CI—not production.</Description>
+    <!-- NuGet search/detail cards: short summary separate from the longer Description. -->
+    <PackageSummary>Compile-time Options and appsettings validation analyzer for .NET (BindConfiguration, ValidateOnStart, ValidateDataAnnotations).</PackageSummary>
+    <Summary>$(PackageSummary)</Summary>
     <PackageTags>configuration;options;appsettings;validation;ValidateOnStart;ValidateDataAnnotations;BindConfiguration;IOptions;options-pattern;DataAnnotations;roslyn;roslyn-analyzer;analyzers;static-analysis;aspnetcore;csharp;dotnet</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageIcon>assets/configcontraband-icon.png</PackageIcon>
@@ -25,7 +28,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Discoverability release: keyword-rich package title, description, and tags for Options validation (ValidateOnStart, ValidateDataAnnotations, BindConfiguration, IOptions); conversion-funnel README with product-flow visuals for IDE diagnostics, code fixes, and the analyzer+schema loop; packs assets for NuGet README rendering; adds discoverability metadata tests and package verification. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Conversion and trust release: short NuGet-only README, package summary, green Quickstart sample with zero-CFG CI proof, issue templates, SemVer/path-to-1.0 note, and tool package icon/release-notes parity. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
@@ -54,7 +57,7 @@
     <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     <None Include="$(OutputPath)\ConfigContraband.Core.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     <None Include="buildTransitive\ConfigContraband.props" Pack="true" PackagePath="buildTransitive\ConfigContraband.props" />
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\docs\nuget-analyzer.md" Pack="true" PackagePath="\README.md" />
     <None Include="..\..\assets\**\*" Pack="true" PackagePath="assets\" />
   </ItemGroup>
 

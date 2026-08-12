@@ -20,8 +20,10 @@ cmp src/ConfigContraband/bin/Release/netstandard2.0/ConfigContraband.dll \
   <(unzip -p "$analyzer_package" analyzers/dotnet/cs/ConfigContraband.dll)
 cmp src/ConfigContraband.Core/bin/Release/netstandard2.0/ConfigContraband.Core.dll \
   <(unzip -p "$analyzer_package" analyzers/dotnet/cs/ConfigContraband.Core.dll)
-cmp README.md <(unzip -p "$analyzer_package" README.md)
-cmp README.md <(unzip -p "$tool_package" README.md)
+
+# Packages ship short NuGet-only READMEs (not the full GitHub reference README).
+cmp docs/nuget-analyzer.md <(unzip -p "$analyzer_package" README.md)
+cmp docs/nuget-tool.md <(unzip -p "$tool_package" README.md)
 
 # Product-flow visuals referenced by PackageReadmeFile must ship inside both packages.
 for asset in \
@@ -52,4 +54,13 @@ for term in appsettings.schema.json ValidateDataAnnotations BindConfiguration js
   }
 done
 
-echo "Verified package versions, analyzer payloads, README, assets, and discoverability metadata for $analyzer_version."
+# Tool package must ship the shared icon for NuGet gallery parity with the analyzer.
+printf '%s' "$tool_nuspec" | grep -Fq "configcontraband-icon.png" || {
+  echo "Tool nuspec missing PackageIcon." >&2
+  exit 1
+}
+
+# PackageSummary is asserted in DiscoverabilityMetadataTests (csproj). Modern NuGet pack
+# does not emit a <summary> element; Description remains the gallery card text.
+
+echo "Verified package versions, analyzer payloads, short NuGet READMEs, assets, and discoverability metadata for $analyzer_version."

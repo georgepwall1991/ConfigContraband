@@ -16,16 +16,20 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>configcontraband</ToolCommandName>
     <PackageId>ConfigContraband.Tool</PackageId>
-    <Version>0.7.26</Version>
+    <Version>0.7.27</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband.Tool — appsettings JSON Schema generator</Title>
     <Description>Generate appsettings.schema.json from .NET Options types for editor IntelliSense, type checking, and required-key hints that match ValidateDataAnnotations and BindConfiguration.</Description>
+    <PackageSummary>Generate appsettings.schema.json from .NET Options types for IntelliSense that matches ValidateDataAnnotations and BindConfiguration.</PackageSummary>
+    <Summary>$(PackageSummary)</Summary>
     <PackageTags>configuration;options;appsettings;json-schema;schema;intellisense;ValidateDataAnnotations;IOptions;BindConfiguration;tool;aspnetcore;csharp;dotnet</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>assets/configcontraband-icon.png</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PackageReleaseNotes>Conversion and trust release: short tool-focused NuGet README, package summary, package icon parity with the analyzer, and SemVer/path-to-1.0 docs. Use with ConfigContraband 0.7.27.</PackageReleaseNotes>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
 
@@ -47,7 +51,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\docs\nuget-tool.md" Pack="true" PackagePath="\README.md" />
     <None Include="..\..\assets\**\*" Pack="true" PackagePath="assets\" />
   </ItemGroup>
 
