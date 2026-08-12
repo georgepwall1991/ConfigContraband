@@ -153,6 +153,45 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_stays_quiet_for_direct_configure_when_options_name_is_not_constant()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            var name = "tenant";
+            services.Configure<AppOptions>(name, configuration.GetSection("App"));
+            services.AddOptions<AppOptions>("tenant")
+                .ValidateDataAnnotations();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_stays_quiet_when_unrelated_builder_binds_in_the_same_block()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<AppOptions>(configuration.GetSection("App"));
+            var other = services.AddOptions<OtherOptions>();
+            other.BindConfiguration("Other");
+            services.AddOptions<AppOptions>()
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+
+            public sealed class OtherOptions
+            {
+                public string Value { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
     public async Task Cfg003_does_not_report_direct_configure_when_same_block_calls_validate_on_start()
     {
         var source = OptionsSource("""
@@ -491,6 +530,236 @@ public sealed partial class ConfigContrabandAnalyzerTests
                 [Required]
                 public string ConnectionString { get; set; } = "";
             }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_reports_direct_configure_when_same_block_add_options_with_validate_on_start_lacks_data_annotations()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<AppOptions>(configuration.GetSection("App"));
+            {|#0:services.AddOptionsWithValidateOnStart<AppOptions>()|};
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_does_not_duplicate_when_split_local_initializer_already_binds()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<AppOptions>(configuration.GetSection("App"));
+            var builder = {|#0:services.AddOptions<AppOptions>().BindConfiguration("App")|};
+            builder.ValidateDataAnnotations();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_does_not_duplicate_when_split_local_later_statement_already_binds()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<AppOptions>(configuration.GetSection("App"));
+            var builder = services.AddOptions<AppOptions>();
+            {|#0:builder.BindConfiguration("App")|};
+            builder.ValidateDataAnnotations();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_stays_quiet_for_direct_configure_when_unrelated_invocation_is_not_member_access()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            Touch();
+            services.Configure<AppOptions>(configuration.GetSection("App"));
+            services.AddOptions<AppOptions>()
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", extraMembers: """
+            private static void Touch()
+            {
+            }
+            """, optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_once_when_validation_is_in_local_initializer()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<AppOptions>(configuration.GetSection("App"));
+            var builder = {|#0:services.AddOptions<AppOptions>().ValidateDataAnnotations()|};
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_when_parameter_builder_validates_without_validate_on_start()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            Register(services, configuration, services.AddOptions<AppOptions>());
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\nusing Microsoft.Extensions.Options;\n", extraMembers: """
+            private static void Register(
+                IServiceCollection services,
+                IConfiguration configuration,
+                OptionsBuilder<AppOptions> builder)
+            {
+                services.Configure<AppOptions>(configuration.GetSection("App"));
+                {|#0:builder.ValidateDataAnnotations()|};
+            }
+            """, optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_stays_quiet_when_field_builder_validates_without_validate_on_start()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<AppOptions>(configuration.GetSection("App"));
+            builder.ValidateDataAnnotations();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\nusing Microsoft.Extensions.Options;\n", extraMembers: """
+            private readonly OptionsBuilder<AppOptions> builder = null!;
+            """, optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_stays_quiet_when_builder_local_has_no_initializer()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            OptionsBuilder<AppOptions> builder;
+            services.Configure<AppOptions>(configuration.GetSection("App"));
+            builder = services.AddOptions<AppOptions>();
+            builder.ValidateDataAnnotations();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\nusing Microsoft.Extensions.Options;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_stays_quiet_when_same_block_configure_targets_a_different_options_type()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<OtherOptions>(configuration.GetSection("Other"));
+            services.AddOptions<AppOptions>()
+                .ValidateDataAnnotations();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+
+            public sealed class OtherOptions
+            {
+                public string Value { get; set; } = "";
+            }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_stays_quiet_when_named_configure_does_not_match_parameter_builder()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            Register(services, configuration, services.AddOptions<AppOptions>());
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\nusing Microsoft.Extensions.Options;\n", extraMembers: """
+            private static void Register(
+                IServiceCollection services,
+                IConfiguration configuration,
+                OptionsBuilder<AppOptions> builder)
+            {
+                services.Configure<AppOptions>("tenant", configuration.GetSection("App"));
+                builder.ValidateDataAnnotations();
+            }
+            """, optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg004_stays_quiet_for_direct_configure_when_same_block_only_calls_validate_on_start()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<AppOptions>(configuration.GetSection("App"));
+            services.AddOptions<AppOptions>()
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg004_reports_direct_configure_when_chained_add_options_with_validate_on_start_lacks_data_annotations()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<AppOptions>(configuration.GetSection("App"));
+            {|#0:services.AddOptionsWithValidateOnStart<AppOptions>()
+                .Validate(_ => true)|};
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
             """);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)

@@ -475,7 +475,7 @@ services.AddOptions<StripeOptions>()
 
 The analyzer recognizes `ValidateDataAnnotations()` on the same fluent chain before or after the binding call. The code fix preserves existing fluent-chain formatting, adds `ValidateDataAnnotations()`, and only adds `ValidateOnStart()` when startup validation is not already present, including registrations started with `AddOptionsWithValidateOnStart<TOptions>()`.
 
-The same `CFG004` signal applies when a same-block `Configure<T>(GetSection(...))` / `GetRequiredSection(...)` is paired with `AddOptions<T>().Validate(...)` (or `ValidateOnStart()` / `AddOptionsWithValidateOnStart<TOptions>()`) and the options type has DataAnnotations but that OptionsBuilder chain never calls `ValidateDataAnnotations()`. The diagnostic and code fix target the OptionsBuilder chain. `Configure<T>` with DataAnnotations and no same-block validation registration stays quiet — proving absence across methods and assemblies is not conservative.
+The same `CFG004` signal applies when a same-block `Configure<T>(GetSection(...))` / `GetRequiredSection(...)` is paired with `AddOptions<T>().Validate(...)`, `ValidateDataAnnotations()`, or `AddOptionsWithValidateOnStart<TOptions>()` and the options type has DataAnnotations but that OptionsBuilder chain never calls `ValidateDataAnnotations()`. `AddOptions<T>().ValidateOnStart()` alone does not count as validation for this pairing — the same `IsValidationMethod` gate the bind-path already uses. The diagnostic and code fix target the OptionsBuilder chain. `Configure<T>` with DataAnnotations and no same-block validation registration stays quiet — proving absence across methods and assemblies is not conservative.
 
 Like `CFG003`, `CFG004` symbol-checks the framework validation extension methods. A project-local helper named `ValidateDataAnnotations(...)` does not satisfy the rule by name alone.
 
@@ -647,7 +647,7 @@ ConfigContraband currently focuses on:
 - `appsettings.json` and `appsettings.*.json` files.
 - `AddOptions<T>().BindConfiguration("Section")` registrations.
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
-- Direct `Configure<T>(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations for section and JSON-key drift, and for `CFG003`/`CFG004`/`CFG005` when the same executable scope also registers matching `AddOptions<T>().Validate*` / `ValidateDataAnnotations()` (Configure-only stays quiet).
+- Direct `Configure<T>(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations for section and JSON-key drift, and for `CFG003`/`CFG004`/`CFG005` when the same executable scope also registers matching `AddOptions<T>().Validate*` / `ValidateDataAnnotations()` / `AddOptionsWithValidateOnStart<T>()` (Configure-only stays quiet; `AddOptions<T>().ValidateOnStart()` alone does not enable CFG004/CFG005 on this pairing).
 - Direct framework generic `ConfigurationBinder.GetValue<T>` and non-generic `GetValue(typeof(T), ...)` reads for provable scalar conversion failures (`CFG008`).
 - Direct configuration reads: standalone `GetRequiredSection(...)`, suggestion-gated `GetSection(...).Get<T>()`/`.Bind(instance)`, keyed `Bind("key", instance)`, and suggestion-gated `GetConnectionString(...)` (`CFG009`).
 - Strict `ErrorOnUnknownConfiguration` binder options for unknown-key failures.

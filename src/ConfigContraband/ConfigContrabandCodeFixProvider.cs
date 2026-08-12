@@ -275,14 +275,31 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         return optionsBuilderType is not null &&
                invocationType is not null &&
                TryGetOptionsBuilderType(invocationType, optionsBuilderType, out var appendBuilderType) &&
-               TryGetRegistrationOptionsType(
+               AllowsAppendForRegistration(
                    outermost,
                    semanticModel,
                    optionsBuilderType,
-                   out var boundOptionsType) &&
-               SymbolEqualityComparer.Default.Equals(
-                   appendBuilderType.TypeArguments[0],
-                   boundOptionsType);
+                   appendBuilderType);
+    }
+
+    private static bool AllowsAppendForRegistration(
+        InvocationExpressionSyntax outermost,
+        SemanticModel semanticModel,
+        INamedTypeSymbol optionsBuilderType,
+        INamedTypeSymbol appendBuilderType)
+    {
+        if (!TryGetBoundOptionsType(
+                outermost,
+                semanticModel,
+                optionsBuilderType,
+                out var boundOptionsType))
+        {
+            return true;
+        }
+
+        return SymbolEqualityComparer.Default.Equals(
+            appendBuilderType.TypeArguments[0],
+            boundOptionsType);
     }
 
     private static bool TryGetOptionsBuilderType(
@@ -318,69 +335,6 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         }
 
         constructedOptionsBuilderType = null!;
-        return false;
-    }
-
-    private static bool TryGetRegistrationOptionsType(
-        InvocationExpressionSyntax outermost,
-        SemanticModel semanticModel,
-        INamedTypeSymbol optionsBuilderType,
-        out ITypeSymbol boundOptionsType)
-    {
-        if (TryGetBoundOptionsType(outermost, semanticModel, optionsBuilderType, out boundOptionsType))
-        {
-            return true;
-        }
-
-        var current = outermost;
-        while (true)
-        {
-            var symbol = semanticModel.GetSymbolInfo(current).Symbol as IMethodSymbol;
-            var original = symbol?.ReducedFrom ?? symbol;
-            if (original is not null &&
-                (string.Equals(original.Name, "AddOptions", StringComparison.Ordinal) ||
-                 string.Equals(original.Name, "AddOptionsWithValidateOnStart", StringComparison.Ordinal)) &&
-                string.Equals(
-                    original.ContainingType.ToDisplayString(),
-                    "Microsoft.Extensions.DependencyInjection.OptionsServiceCollectionExtensions",
-                    StringComparison.Ordinal) &&
-                symbol?.TypeArguments.Length == 1)
-            {
-                boundOptionsType = symbol.TypeArguments[0];
-                return true;
-            }
-
-            if (current.Expression is not MemberAccessExpressionSyntax memberAccess)
-            {
-                break;
-            }
-
-            if (memberAccess.Expression is InvocationExpressionSyntax receiverInvocation)
-            {
-                current = receiverInvocation;
-                continue;
-            }
-
-            if (semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol is ILocalSymbol localSymbol)
-            {
-                var declaration = localSymbol.DeclaringSyntaxReferences
-                    .Select(static reference => reference.GetSyntax())
-                    .OfType<VariableDeclaratorSyntax>()
-                    .FirstOrDefault();
-                if (declaration?.Initializer?.Value is InvocationExpressionSyntax initializer)
-                {
-                    return TryGetRegistrationOptionsType(
-                        initializer,
-                        semanticModel,
-                        optionsBuilderType,
-                        out boundOptionsType);
-                }
-            }
-
-            break;
-        }
-
-        boundOptionsType = null!;
         return false;
     }
 

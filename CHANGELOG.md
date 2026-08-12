@@ -13,7 +13,7 @@ All notable changes to ConfigContraband will be documented in this file.
 - Reuses CFG002's named-options matching (`default` / empty-string / `"tenant"` / `ConfigureAll`) and same-block executable-scope scan; nested local functions, conditionals, named mismatches, and custom same-name helpers stay quiet.
 - Reports on the bind-less `AddOptions<T>().Validate*` chain (not on `Configure`, which returns `IServiceCollection` and cannot receive the existing append fix). Duplicate CFG003/CFG004 is skipped when the matching chain already `Bind`s / `BindConfiguration`s.
 - CFG005 on Configure requires same-block `ValidateDataAnnotations()`; Configure-only nested annotations stay quiet.
-- Bindless CFG004 honors `BindNonPublicProperties` on the matching `Configure` call; custom extensions that retarget `OptionsBuilder<T>` stay quiet; split-local `AddOptions` + `Validate*` reports once and the fixer appends to the validation statement.
+- Bindless CFG004 honors `BindNonPublicProperties` on the matching `Configure` call; custom extensions that retarget `OptionsBuilder<T>` stay quiet; split-local `AddOptions` + `Validate*` reports once and the fixer appends to the validation statement; parameter-typed `OptionsBuilder<T>` receivers in the same block are included; `AddOptions<T>().ValidateOnStart()` alone does not enable CFG004.
 - Diagnostic IDs and severities are unchanged.
 
 ## 0.7.28 - 2026-08-12

@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Globalization;
 using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
@@ -49,7 +48,6 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             var providerSemantics = GetConfigurationProviderSemantics(compilationContext.Compilation);
             var nestedValidationReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
             var unknownKeysReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
-            var validationReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
 
             compilationContext.RegisterSyntaxNodeAction(
                 syntaxContext =>
@@ -88,7 +86,6 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         syntaxContext.ReportDiagnostic,
                         registration,
                         compilation,
-                        validationReported,
                         syntaxContext.CancellationToken);
                     if (registration.ReportNestedValidation)
                     {
@@ -169,7 +166,6 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         Action<Diagnostic> reportDiagnostic,
         OptionsRegistration registration,
         Compilation compilation,
-        ConcurrentDictionary<string, byte> validationReported,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -181,15 +177,10 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         var location = registration.ValidationInvocation.GetLocation();
         if (registration.HasValidation && !registration.HasValidateOnStart)
         {
-            TryReportValidationDiagnostic(
-                reportDiagnostic,
-                validationReported,
-                DiagnosticIds.ValidationNotOnStart,
+            reportDiagnostic(Diagnostic.Create(
+                DiagnosticDescriptors.ValidationNotOnStart,
                 location,
-                () => Diagnostic.Create(
-                    DiagnosticDescriptors.ValidationNotOnStart,
-                    location,
-                    registration.OptionsType.Name));
+                registration.OptionsType.Name));
         }
 
         var metadata = OptionsTypeMetadata.Create(
@@ -202,36 +193,12 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             var properties = ImmutableDictionary<string, string?>.Empty
                 .Add(HasValidateOnStartPropertyName, registration.HasValidateOnStart ? "true" : "false");
 
-            TryReportValidationDiagnostic(
-                reportDiagnostic,
-                validationReported,
-                DiagnosticIds.DataAnnotationsNotEnabled,
+            reportDiagnostic(Diagnostic.Create(
+                DiagnosticDescriptors.DataAnnotationsNotEnabled,
                 location,
-                () => Diagnostic.Create(
-                    DiagnosticDescriptors.DataAnnotationsNotEnabled,
-                    location,
-                    properties,
-                    registration.OptionsType.Name));
+                properties,
+                registration.OptionsType.Name));
         }
-    }
-
-    private static void TryReportValidationDiagnostic(
-        Action<Diagnostic> reportDiagnostic,
-        ConcurrentDictionary<string, byte> validationReported,
-        string diagnosticId,
-        Location location,
-        Func<Diagnostic> createDiagnostic)
-    {
-        var key = diagnosticId + "\0" +
-                  (location.SourceTree?.FilePath ?? string.Empty) + "\0" +
-                  location.SourceSpan.Start.ToString(CultureInfo.InvariantCulture) + "\0" +
-                  location.SourceSpan.End.ToString(CultureInfo.InvariantCulture);
-        if (!validationReported.TryAdd(key, 0))
-        {
-            return;
-        }
-
-        reportDiagnostic(createDiagnostic());
     }
 
     private static void AnalyzeOptionType(
