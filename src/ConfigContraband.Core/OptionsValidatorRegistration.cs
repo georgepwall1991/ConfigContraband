@@ -372,27 +372,28 @@ internal static class OptionsValidatorRegistration
             return false;
         }
 
-        foreach (var argument in operation.Arguments)
+        var thisValue = operation.Arguments[0].Value;
+        for (var index = 0; index < operation.Arguments.Length; index++)
         {
-            if (argument.Parameter is not { Ordinal: 0 })
+            var argument = operation.Arguments[index];
+            if (argument.Parameter is { Ordinal: 0 })
             {
-                continue;
+                thisValue = argument.Value;
+                break;
             }
+        }
 
-            var value = UnwrapConversion(argument.Value);
-            if (value is ILocalReferenceOperation local)
-            {
-                collection = local.Local;
-                return true;
-            }
+        var value = UnwrapConversion(thisValue);
+        if (value is ILocalReferenceOperation local)
+        {
+            collection = local.Local;
+            return true;
+        }
 
-            if (value is IParameterReferenceOperation parameter)
-            {
-                collection = parameter.Parameter;
-                return true;
-            }
-
-            return false;
+        if (value is IParameterReferenceOperation parameter)
+        {
+            collection = parameter.Parameter;
+            return true;
         }
 
         return false;
