@@ -73,17 +73,20 @@ internal static class ValidationAttributeLimits
             return true;
         }
 
-        if (arguments.Length == 3 && arguments[0].Value is ITypeSymbol operandType)
+        if (arguments.Length == 3)
         {
-            operands = new RangeOperands(
-                arguments[1].Value as string,
-                arguments[2].Value as string,
-                operandType,
-                minimumExclusive,
-                maximumExclusive,
-                isTypeStringOverload: true,
-                parseLimitsInInvariantCulture: parseInvariant);
-            return true;
+            if (arguments[0].Value is ITypeSymbol operandType)
+            {
+                operands = new RangeOperands(
+                    arguments[1].Value as string,
+                    arguments[2].Value as string,
+                    operandType,
+                    minimumExclusive,
+                    maximumExclusive,
+                    isTypeStringOverload: true,
+                    parseLimitsInInvariantCulture: parseInvariant);
+                return true;
+            }
         }
 
         return false;

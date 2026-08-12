@@ -521,6 +521,56 @@ public sealed class DataAnnotationsConstraintsTests
     }
 
     [Fact]
+    public void TryReadRangeOperands_is_false_for_parameterless_range_subclass()
+    {
+        var (property, _) = GetProperty(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class PortRangeAttribute : RangeAttribute
+            {
+                public PortRangeAttribute() : base(1, 65535)
+                {
+                }
+            }
+
+            public sealed class ServerOptions
+            {
+                [PortRange]
+                public int Port { get; set; }
+            }
+            """,
+            "Port");
+
+        Assert.False(ValidationAttributeLimits.TryReadRangeOperands(property.GetAttributes()[0], out _));
+    }
+
+    [Fact]
+    public void TryReadRangeOperands_is_false_when_three_arguments_are_not_a_type_overload()
+    {
+        var (property, _) = GetProperty(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class TripleRangeAttribute : RangeAttribute
+            {
+                public TripleRangeAttribute(int minimum, int maximum, int unused) : base(minimum, maximum)
+                {
+                }
+            }
+
+            public sealed class ServerOptions
+            {
+                [TripleRange(1, 65535, 0)]
+                public int Port { get; set; }
+            }
+            """,
+            "Port");
+
+        Assert.False(ValidationAttributeLimits.TryReadRangeOperands(property.GetAttributes()[0], out _));
+    }
+
+    [Fact]
     public void Unconvertible_value_stays_quiet_for_cfg008()
     {
         AssertQuiet(

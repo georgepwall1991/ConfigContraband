@@ -134,11 +134,7 @@ internal static class DataAnnotationsConstraints
 
     private static bool FailsRange(AttributeData attribute, object converted)
     {
-        if (!ValidationAttributeLimits.TryReadRangeOperands(attribute, out var range))
-        {
-            return false;
-        }
-
+        ValidationAttributeLimits.TryReadRangeOperands(attribute, out var range);
         if (range.Minimum is null)
         {
             return false;
