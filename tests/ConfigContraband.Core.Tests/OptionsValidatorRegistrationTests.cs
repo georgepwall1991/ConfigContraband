@@ -382,6 +382,87 @@ public sealed class OptionsValidatorRegistrationTests
     }
 
     [Fact]
+    public void Does_not_prove_a_dynamic_invocation()
+    {
+        var source = """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    dynamic d = services;
+                    d.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+                }
+            }
+            """ + StripeValidatorTypes;
+
+        var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator)
+            .Select(path => MetadataReference.CreateFromFile(path));
+        var tree = CSharpSyntaxTree.ParseText(source);
+        var compilation = CSharpCompilation.Create(
+            "OptionsValidatorRegistrationTests",
+            [tree],
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var model = compilation.GetSemanticModel(tree);
+        var invocation = tree.GetRoot()
+            .DescendantNodes()
+            .OfType<InvocationExpressionSyntax>()
+            .Single(node => node.ToString().Contains("AddSingleton", StringComparison.Ordinal));
+
+        Assert.False(OptionsValidatorRegistration.TryGetValidatedOptionsType(invocation, model, out _));
+    }
+
+    [Fact]
+    public void Does_not_prove_an_implementation_that_does_not_implement_ivalidate_options()
+    {
+        var source = """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddSingleton<IValidateOptions<StripeOptions>, string>();
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                public string ApiKey { get; set; } = "";
+            }
+            """;
+
+        var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator)
+            .Select(path => MetadataReference.CreateFromFile(path));
+        var tree = CSharpSyntaxTree.ParseText(source);
+        var compilation = CSharpCompilation.Create(
+            "OptionsValidatorRegistrationTests",
+            [tree],
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var model = compilation.GetSemanticModel(tree);
+        var invocation = tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>().Single();
+
+        Assert.False(OptionsValidatorRegistration.TryGetValidatedOptionsType(invocation, model, out _));
+    }
+
+    [Fact]
+    public void Proves_try_add_enumerable_when_the_descriptor_is_explicitly_cast()
+    {
+        var result = TryProve(
+            "services.TryAddEnumerable((ServiceDescriptor)ServiceDescriptor.Singleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>());");
+
+        Assert.True(result.Proved);
+        Assert.Equal("StripeOptions", result.OptionsTypeName);
+    }
+
+    [Fact]
     public void Service_collection_registration_includes_factory_add_singleton_but_does_not_prove_it()
     {
         var result = TryProve("services.AddSingleton<IValidateOptions<StripeOptions>>(_ => new ValidateStripeOptions());");

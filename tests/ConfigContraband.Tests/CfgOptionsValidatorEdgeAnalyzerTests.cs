@@ -111,6 +111,43 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_still_reports_for_constructor_initializer_bind_without_a_chained_validator()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public abstract class StartupBase
+            {
+                protected StartupBase(OptionsBuilder<StripeOptions> builder)
+                {
+                }
+            }
+
+            public sealed class Startup : StartupBase
+            {
+                public Startup(IServiceCollection services)
+                    : base({|#0:services.AddOptions<StripeOptions>().BindConfiguration("Stripe")|})
+                {
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_when_options_validator_is_registered_before_bind()
     {
         var source = OptionsSource("""
