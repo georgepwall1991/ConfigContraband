@@ -557,6 +557,43 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg003_fix_appends_validate_on_start_when_options_validator_is_registered()
+    {
+        const string validatorTypes = """
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+
+            [OptionsValidator]
+            public sealed class ValidateStripeOptions : IValidateOptions<StripeOptions>
+            {
+                public ValidateOptionsResult Validate(string? name, StripeOptions options) => ValidateOptionsResult.Success;
+            }
+            """;
+
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: validatorTypes);
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateOnStart();
+            services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: validatorTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_fix_appends_validate_on_start_to_same_block_direct_configure_validation()
     {
         var source = """

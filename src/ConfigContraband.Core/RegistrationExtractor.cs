@@ -282,9 +282,11 @@ internal static class RegistrationExtractor
         SemanticModel model)
     {
         // Look for an OptionsBuilder<T>.ValidateDataAnnotations() for the same options instance (type and
-        // name) within the enclosing method body (or top-level statements). Matching the name avoids
-        // marking a "B" registration validated just because "A" of the same type is validated, while
-        // still covering the split "Configure<T>(...); AddOptions<T>().ValidateDataAnnotations();" pattern.
+        // name) within the enclosing method body (or top-level statements), or a same-scope
+        // [OptionsValidator] IValidateOptions<T> DI registration. Matching the name avoids marking a
+        // "B" registration validated just because "A" of the same type is validated, while still
+        // covering the split "Configure<T>(...); AddOptions<T>().ValidateDataAnnotations();" pattern.
+        // IValidateOptions<T> applies to every name of T, so the OptionsValidator path matches on type.
         SyntaxNode? scope = invocation.FirstAncestorOrSelf<BlockSyntax>();
         scope ??= invocation.FirstAncestorOrSelf<GlobalStatementSyntax>()?.Parent;
         scope ??= invocation.FirstAncestorOrSelf<ArrowExpressionClauseSyntax>();
@@ -296,9 +298,20 @@ internal static class RegistrationExtractor
 
         foreach (var candidate in scope.DescendantNodes(ExecutionScope.ShouldDescend).OfType<InvocationExpressionSyntax>())
         {
+            if (!IsDirectlyExecutedInScope(candidate, scope))
+            {
+                continue;
+            }
+
+            if (OptionsValidatorRegistration.TryGetValidatedOptionsType(candidate, model, out var validatorOptionsType) &&
+                SymbolEqualityComparer.Default.Equals(validatorOptionsType, optionsType) &&
+                OptionsValidatorRegistration.SameServiceCollectionOrUnproven(invocation, candidate, model))
+            {
+                return true;
+            }
+
             if (candidate.Expression is MemberAccessExpressionSyntax memberAccess &&
                 memberAccess.Name.Identifier.Text == "ValidateDataAnnotations" &&
-                IsDirectlyExecutedInScope(candidate, scope) &&
                 IsFrameworkDataAnnotationsValidation(candidate, model) &&
                 GetOptionsBuilderTypeArgument(candidate, model) is { } validatedType &&
                 SymbolEqualityComparer.Default.Equals(validatedType, optionsType) &&
@@ -344,36 +357,7 @@ internal static class RegistrationExtractor
 
     private static bool IsUnconditionallyEvaluatedWithin(SyntaxNode candidate, SyntaxNode boundary)
     {
-        foreach (var ancestor in candidate.Ancestors())
-        {
-            if (ancestor.Span == boundary.Span && ancestor.RawKind == boundary.RawKind)
-            {
-                return true;
-            }
-
-            if (ancestor is ConditionalExpressionSyntax or
-                ConditionalAccessExpressionSyntax or
-                SwitchExpressionSyntax)
-            {
-                return false;
-            }
-
-            if (ancestor is BinaryExpressionSyntax binary &&
-                (binary.IsKind(SyntaxKind.LogicalAndExpression) ||
-                 binary.IsKind(SyntaxKind.LogicalOrExpression) ||
-                 binary.IsKind(SyntaxKind.CoalesceExpression)))
-            {
-                return false;
-            }
-
-            if (ancestor is AssignmentExpressionSyntax assignment &&
-                assignment.IsKind(SyntaxKind.CoalesceAssignmentExpression))
-            {
-                return false;
-            }
-        }
-
-        return false;
+        return ExecutionScope.IsUnconditionallyEvaluatedWithin(candidate, boundary);
     }
 
     private static bool IsFrameworkDataAnnotationsValidation(
