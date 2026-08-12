@@ -40,7 +40,7 @@ When the analyzer cannot prove a configuration shape statically, it **stays quie
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.7.26" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.7.27" PrivateAssets="all" />
 ```
 
 Or:
@@ -80,6 +80,8 @@ services.AddOptions<StripeOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 ```
+
+   Copy-paste the same green shape from [`samples/ConfigContraband.Quickstart`](samples/ConfigContraband.Quickstart).
 
 3. Build in the IDE or with `ContinuousIntegrationBuild=true` on the command line so analyzers run.
 4. Fix any `CFG00x` warnings (many have code fixes).
@@ -122,15 +124,29 @@ The ConfigContraband analyzer package targets `netstandard2.0` and compiles agai
 
 `ConfigContraband.Tool` targets .NET 10 and requires a .NET 10 SDK. That runtime requirement is separate from the analyzer package's .NET 8 compiler-host compatibility floor.
 
-## Try the showcase
+## Versioning
 
-The repository includes a showcase project with one intentional example for each rule:
+ConfigContraband follows SemVer for the public package surface:
+
+- **Diagnostic IDs** (`CFG001`–`CFG009`) are stable. Removing or reassigning an ID is a breaking change.
+- **Pre-1.0** (`0.x`): message text, quiet boundaries, and supported registration shapes may still tighten when a runtime or documentation mismatch is proved. Changes are called out in `CHANGELOG.md`.
+- **1.0** when the monitor posture holds (all rules healthy), the analyzer + tool package surface is stable, and no known P1 release-readiness gaps remain. This repository is not at 1.0 yet.
+
+## Try the samples
+
+**Quickstart (green path)** — copy-paste a correct Options registration and expect zero `CFG` diagnostics:
+
+```bash
+dotnet build samples/ConfigContraband.Quickstart/ConfigContraband.Quickstart.csproj --configuration Release --no-incremental -p:ContinuousIntegrationBuild=true
+```
+
+**Showcase (intentional failures)** — one diagnostic for each rule:
 
 ```bash
 dotnet build samples/ConfigContraband.Showcase/ConfigContraband.Showcase.csproj --configuration Release --no-incremental -p:ContinuousIntegrationBuild=true
 ```
 
-The `ContinuousIntegrationBuild` property is required because normal local command-line builds disable analyzer execution for fast feedback. The sample stays out of the main solution so normal development builds remain clean.
+The `ContinuousIntegrationBuild` property is required because normal local command-line builds disable analyzer execution for fast feedback. Both samples stay out of the main solution so normal development builds remain clean.
 
 ---
 

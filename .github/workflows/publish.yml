@@ -41,6 +41,9 @@ jobs:
       - name: Verify showcase diagnostic contract
         run: bash scripts/verify-showcase.sh
 
+      - name: Verify quickstart zero-CFG contract
+        run: bash scripts/verify-quickstart.sh
+
       - name: Verify formatting
         run: dotnet format ConfigContraband.slnx --verify-no-changes --no-restore --verbosity minimal
 

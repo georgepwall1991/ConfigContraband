@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose analyzer coverage, code-fix, schema, or docs improvements
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the runtime or documentation mismatch you want ConfigContraband to catch.
+        High-signal, conservative designs are preferred — when the analyzer cannot prove a shape, it stays quiet.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What broken configuration still compiles today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed signal
+      description: Which rule family (CFG00x), new diagnostic, code fix, or schema behavior?
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: Registration / config shape
+      description: Minimal C# + appsettings example of the gap.
+      render: csharp
+    validations:
+      required: true
+  - type: textarea
+    id: false-positive
+    attributes:
+      label: False-positive risk
+      description: Shapes that must stay quiet if this is added.
+    validations:
+      required: false

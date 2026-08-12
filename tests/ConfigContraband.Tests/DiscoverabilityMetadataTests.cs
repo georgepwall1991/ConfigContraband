@@ -19,6 +19,7 @@ public sealed class DiscoverabilityMetadataTests
             Path.Combine(RepositoryRoot, "src", "ConfigContraband", "ConfigContraband.csproj"));
 
         var description = Assert.Single(csproj.Descendants("Description")).Value;
+        var summary = Assert.Single(csproj.Descendants("PackageSummary")).Value;
         var tags = Assert.Single(csproj.Descendants("PackageTags")).Value;
         var title = Assert.Single(csproj.Descendants("Title")).Value;
         var readmeFile = Assert.Single(csproj.Descendants("PackageReadmeFile")).Value;
@@ -26,6 +27,9 @@ public sealed class DiscoverabilityMetadataTests
         Assert.Equal("README.md", readmeFile);
         Assert.Contains("Options", title, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("appsettings", title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Options", summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ValidateOnStart", summary, StringComparison.Ordinal);
+        Assert.True(summary.Length < description.Length, "PackageSummary should be shorter than Description.");
 
         foreach (var term in new[]
                  {
@@ -60,6 +64,12 @@ public sealed class DiscoverabilityMetadataTests
                 tags.Contains(tag, StringComparison.Ordinal),
                 $"Analyzer PackageTags must include '{tag}'.");
         }
+
+        Assert.Contains(
+            csproj.Descendants("None"),
+            n => string.Equals(n.Attribute("Include")?.Value, @"..\..\docs\nuget-analyzer.md", StringComparison.Ordinal)
+                && string.Equals(n.Attribute("Pack")?.Value, "true", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(n.Attribute("PackagePath")?.Value, @"\README.md", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -69,13 +79,20 @@ public sealed class DiscoverabilityMetadataTests
             Path.Combine(RepositoryRoot, "src", "ConfigContraband.Tool", "ConfigContraband.Tool.csproj"));
 
         var description = Assert.Single(csproj.Descendants("Description")).Value;
+        var summary = Assert.Single(csproj.Descendants("PackageSummary")).Value;
         var tags = Assert.Single(csproj.Descendants("PackageTags")).Value;
         var title = Assert.Single(csproj.Descendants("Title")).Value;
+        var icon = Assert.Single(csproj.Descendants("PackageIcon")).Value;
+        var releaseNotes = Assert.Single(csproj.Descendants("PackageReleaseNotes")).Value;
 
         Assert.Contains("schema", title, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("appsettings.schema.json", description, StringComparison.Ordinal);
         Assert.Contains("ValidateDataAnnotations", description, StringComparison.Ordinal);
         Assert.Contains("BindConfiguration", description, StringComparison.Ordinal);
+        Assert.Contains("schema", summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("assets/configcontraband-icon.png", icon);
+        Assert.False(string.IsNullOrWhiteSpace(releaseNotes));
+        Assert.True(summary.Length < description.Length, "PackageSummary should be shorter than Description.");
 
         foreach (var tag in new[]
                  {
@@ -92,6 +109,12 @@ public sealed class DiscoverabilityMetadataTests
                 tags.Contains(tag, StringComparison.Ordinal),
                 $"Tool PackageTags must include '{tag}'.");
         }
+
+        Assert.Contains(
+            csproj.Descendants("None"),
+            n => string.Equals(n.Attribute("Include")?.Value, @"..\..\docs\nuget-tool.md", StringComparison.Ordinal)
+                && string.Equals(n.Attribute("Pack")?.Value, "true", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(n.Attribute("PackagePath")?.Value, @"\README.md", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -109,16 +132,32 @@ public sealed class DiscoverabilityMetadataTests
                      "## 30-second path",
                      "## Feature snapshot",
                      "## Rule Details",
+                     "## Versioning",
                  })
         {
             Assert.Contains(section, readme, StringComparison.Ordinal);
         }
 
         Assert.Contains("PrivateAssets=\"all\"", readme, StringComparison.Ordinal);
-        Assert.Contains("Version=\"0.7.26\"", readme, StringComparison.Ordinal);
+        Assert.Contains("Version=\"0.7.27\"", readme, StringComparison.Ordinal);
         Assert.Contains("CFG001", readme, StringComparison.Ordinal);
         Assert.Contains("CFG009", readme, StringComparison.Ordinal);
         Assert.Contains("stays quiet", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ConfigContraband.Quickstart", readme, StringComparison.Ordinal);
+
+        var analyzerVersion = Assert.Single(
+                XDocument.Load(Path.Combine(RepositoryRoot, "src", "ConfigContraband", "ConfigContraband.csproj"))
+                    .Descendants("Version"))
+            .Value;
+        var nugetAnalyzerReadme = File.ReadAllText(Path.Combine(RepositoryRoot, "docs", "nuget-analyzer.md"));
+        Assert.Contains(
+            $"Version=\"{analyzerVersion}\"",
+            nugetAnalyzerReadme,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            $"Version=\"{analyzerVersion}\"",
+            readme,
+            StringComparison.Ordinal);
 
         // NuGet.org requires absolute HTTPS image URLs in PackageReadmeFile content.
         // GitHub raw URLs keep both NuGet and GitHub README rendering working.
@@ -154,6 +193,50 @@ public sealed class DiscoverabilityMetadataTests
             Assert.True(
                 imageRef.StartsWith("https://", StringComparison.OrdinalIgnoreCase),
                 $"README image must use absolute HTTPS for NuGet rendering: {imageRef}");
+        }
+    }
+
+    [Fact]
+    public void NuGet_package_readmes_are_short_conversion_funnels_with_absolute_image_urls()
+    {
+        const string rawBase =
+            "https://raw.githubusercontent.com/georgepwall1991/ConfigContraband/main/";
+
+        var analyzerReadme = File.ReadAllText(Path.Combine(RepositoryRoot, "docs", "nuget-analyzer.md"));
+        var toolReadme = File.ReadAllText(Path.Combine(RepositoryRoot, "docs", "nuget-tool.md"));
+        var githubReadme = File.ReadAllText(Path.Combine(RepositoryRoot, "README.md"));
+
+        Assert.True(analyzerReadme.Length < githubReadme.Length / 2,
+            "Analyzer NuGet README should be much shorter than the GitHub reference README.");
+        Assert.True(toolReadme.Length < githubReadme.Length / 2,
+            "Tool NuGet README should be much shorter than the GitHub reference README.");
+
+        Assert.Contains("## Install", analyzerReadme, StringComparison.Ordinal);
+        Assert.Contains("ValidateOnStart", analyzerReadme, StringComparison.Ordinal);
+        Assert.Contains("ValidateDataAnnotations", analyzerReadme, StringComparison.Ordinal);
+        Assert.Contains("ConfigContraband.Quickstart", analyzerReadme, StringComparison.Ordinal);
+        Assert.DoesNotContain("## Rule Details", analyzerReadme, StringComparison.Ordinal);
+
+        Assert.Contains("dotnet tool install", toolReadme, StringComparison.Ordinal);
+        Assert.Contains("appsettings.schema.json", toolReadme, StringComparison.Ordinal);
+        Assert.Contains("configcontraband schema", toolReadme, StringComparison.Ordinal);
+
+        foreach (var readme in new[] { analyzerReadme, toolReadme })
+        {
+            Assert.Contains(rawBase + "assets/configcontraband-icon.png", readme, StringComparison.Ordinal);
+
+            var imageRefs = Regex.Matches(readme, @"!\[[^\]]*\]\(([^)]+)\)")
+                .Select(m => m.Groups[1].Value)
+                .Concat(Regex.Matches(readme, @"<img[^>]+src=""([^""]+)""")
+                    .Select(m => m.Groups[1].Value))
+                .Distinct(StringComparer.Ordinal);
+
+            foreach (var imageRef in imageRefs)
+            {
+                Assert.True(
+                    imageRef.StartsWith("https://", StringComparison.OrdinalIgnoreCase),
+                    $"NuGet README image must use absolute HTTPS: {imageRef}");
+            }
         }
     }
 

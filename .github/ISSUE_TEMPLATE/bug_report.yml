@@ -1,0 +1,64 @@
+name: Bug report
+description: Report incorrect CFG diagnostics or package/tool failures
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Prefer a minimal repro that builds with `ContinuousIntegrationBuild=true`.
+        Check [analyzer-health.md](https://github.com/georgepwall1991/ConfigContraband/blob/main/analyzer-health.md) Known gaps before assuming a deliberate quiet boundary is a defect.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen (diagnostic ID, message, or quiet)?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Options registration, options type, and relevant appsettings.json (or a link to a branch).
+      render: csharp
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      placeholder: "0.7.27"
+    validations:
+      required: true
+  - type: input
+    id: sdk
+    attributes:
+      label: .NET SDK / IDE
+      placeholder: "SDK 10.0.x / VS 2022 17.x"
+    validations:
+      required: false
+  - type: dropdown
+    id: rule
+    attributes:
+      label: Related rule (if any)
+      options:
+        - CFG001
+        - CFG002
+        - CFG003
+        - CFG004
+        - CFG005
+        - CFG006
+        - CFG007
+        - CFG008
+        - CFG009
+        - Schema tool
+        - Packaging / other
+    validations:
+      required: false

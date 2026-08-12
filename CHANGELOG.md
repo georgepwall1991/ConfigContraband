@@ -2,6 +2,23 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.27 - 2026-08-12
+
+### What's new
+
+- **Shorter NuGet READMEs** for the analyzer and tool packages (install → signal → one visual → GitHub docs) instead of packing the full rule-reference README.
+- **`PackageSummary` metadata** on both csproj files for discoverability tests (modern NuGet pack does not emit a nuspec `<summary>`; Description remains the gallery card text).
+- **Quickstart sample** (`samples/ConfigContraband.Quickstart`) — a green Options registration with CI proof of zero `CFG` diagnostics.
+- **Trust hygiene** — bug/feature issue templates, SemVer / path-to-1.0 note in the README, and tool package icon + release-notes parity with the analyzer.
+
+### Details
+
+- Packs `docs/nuget-analyzer.md` / `docs/nuget-tool.md` as each package's `PackageReadmeFile`; root `README.md` remains the GitHub reference.
+- Adds `PackageSummary` on both csproj files for discoverability tests (modern NuGet pack does not emit a nuspec `<summary>`; Description remains the gallery card text).
+- Adds `scripts/verify-quickstart.sh` and wires it into CI and publish next to the showcase contract.
+- Extends discoverability metadata tests and `scripts/verify-packages.sh` for short READMEs and tool icon metadata.
+- Diagnostic IDs and severities are unchanged.
+
 ## 0.7.26 - 2026-07-26
 
 - Improved NuGet and GitHub discoverability for Options / appsettings validation: package

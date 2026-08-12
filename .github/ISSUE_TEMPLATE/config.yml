@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Rule docs and scope
+    url: https://github.com/georgepwall1991/ConfigContraband#rule-details
+    about: CFG001–CFG009 behavior and Current Scope before filing a gap.
+  - name: Analyzer health (known gaps)
+    url: https://github.com/georgepwall1991/ConfigContraband/blob/main/analyzer-health.md
+    about: Precision/recall scores and deliberate quiet boundaries.
