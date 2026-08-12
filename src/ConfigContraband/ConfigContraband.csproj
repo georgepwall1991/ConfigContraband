@@ -14,7 +14,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.27</Version>
+    <Version>0.7.28</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband — Options and appsettings validation analyzer</Title>
     <Description>Compile-time Options validation for .NET: a Roslyn analyzer that checks BindConfiguration, ValidateOnStart, ValidateDataAnnotations, and appsettings.json against your IOptions types so broken configuration fails in the editor and CI—not production.</Description>
@@ -28,7 +28,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Conversion and trust release: short NuGet-only README, package summary, green Quickstart sample with zero-CFG CI proof, issue templates, SemVer/path-to-1.0 note, and tool package icon/release-notes parity. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>CFG001 host-provenance hardening: Bind(GetSection)/Configure(GetSection) stay quiet for concrete custom IConfiguration implementations and locally built ConfigurationBuilder/ConfigurationManager roots, matching CFG009's non-host gate. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

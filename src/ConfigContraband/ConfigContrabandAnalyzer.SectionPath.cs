@@ -77,6 +77,16 @@ public sealed partial class ConfigContrabandAnalyzer
             return false;
         }
 
+        // Reject only proven non-host roots. Concrete custom IConfiguration implementations and
+        // locally built managers are not the project's appsettings-backed host configuration.
+        // Ambiguous DI stubs such as `IConfiguration configuration = null!;` keep reporting so
+        // existing Bind/Configure coverage stays intact (stricter than CFG009's Contract-only gate).
+        if (ClassifyConfigurationReceiver(receiver, semanticModel) is
+            ConfigurationReceiverProvenance.Custom or ConfigurationReceiverProvenance.Local)
+        {
+            return false;
+        }
+
         sectionPath = currentSectionPath;
         sectionExpression = keyExpression;
         sectionExpressionContainsFullPath = true;
@@ -180,6 +190,13 @@ public sealed partial class ConfigContrabandAnalyzer
         }
 
         if (!IsConfigurationType(receiverType))
+        {
+            return false;
+        }
+
+        // Same non-host root gate as the receiver/key overload: custom/local roots stay quiet.
+        if (ClassifyConfigurationReceiver(memberAccess.Expression, semanticModel) is
+            ConfigurationReceiverProvenance.Custom or ConfigurationReceiverProvenance.Local)
         {
             return false;
         }

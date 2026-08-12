@@ -40,7 +40,7 @@ When the analyzer cannot prove a configuration shape statically, it **stays quie
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.7.27" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.7.28" PrivateAssets="all" />
 ```
 
 Or:
@@ -370,7 +370,7 @@ services.AddOptions<StripeOptions>()
 
 For nested typos, the fix keeps the parent path and replaces only the bad leaf section. If the code says `Features:Strpie` and the file contains `Features:Stripe`, the fix changes it to `Features:Stripe`.
 
-The analyzer checks every visible `appsettings.json` and `appsettings.*.json` additional file for section existence, including commented files, JSON string escapes, colon-delimited keys such as `"Features:Stripe"`, and duplicate JSON object members with disjoint nested paths. A file is ignored entirely when a scalar or null value repeats a case-insensitive flattened path already written by a scalar, null, or empty container, because the runtime JSON provider rejects that file before binding. Lookalike files such as `appsettingsBackup.json` are ignored. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime.
+The analyzer checks every visible `appsettings.json` and `appsettings.*.json` additional file for section existence, including commented files, JSON string escapes, colon-delimited keys such as `"Features:Stripe"`, and duplicate JSON object members with disjoint nested paths. A file is ignored entirely when a scalar or null value repeats a case-insensitive flattened path already written by a scalar, null, or empty container, because the runtime JSON provider rejects that file before binding. Lookalike files such as `appsettingsBackup.json` are ignored. It stays quiet when no appsettings files are available because it cannot prove what configuration exists at runtime. Options `Bind(GetSection(...))` / `Configure(GetSection(...))` also stay quiet for proven non-host roots — concrete custom `IConfiguration` implementations and locally built `ConfigurationBuilder` / `ConfigurationManager` instances — because those providers are not the project's appsettings set; host `IConfiguration` contracts (and common DI stubs) still report.
 
 ### `CFG002`: Required Configuration Keys Must Be Present
 
