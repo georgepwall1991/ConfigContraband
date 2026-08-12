@@ -453,6 +453,32 @@ public sealed class OptionsValidatorRegistrationTests
     }
 
     [Fact]
+    public void Proves_static_unreduced_add_singleton()
+    {
+        var result = TryProve(
+            "ServiceCollectionServiceExtensions.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>(services);");
+
+        Assert.True(result.Proved);
+        Assert.Equal("StripeOptions", result.OptionsTypeName);
+    }
+
+    [Fact]
+    public void Does_not_prove_array_service_type_arguments()
+    {
+        var result = TryProve("services.AddSingleton<string[], string[]>();");
+
+        Assert.False(result.Proved);
+    }
+
+    [Fact]
+    public void Does_not_prove_array_implementation_type_arguments()
+    {
+        var result = TryProve("services.AddSingleton<System.Collections.Generic.IList<string>, string[]>();");
+
+        Assert.False(result.Proved);
+    }
+
+    [Fact]
     public void Proves_try_add_enumerable_when_the_descriptor_is_explicitly_cast()
     {
         var result = TryProve(

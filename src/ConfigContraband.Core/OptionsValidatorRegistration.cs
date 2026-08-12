@@ -28,14 +28,41 @@ internal static class OptionsValidatorRegistration
             return IsFrameworkOptionsValidator(implementation, optionsType);
         }
 
-        return TryGetTryAddEnumerableValidator(operation, out implementation, out optionsType) &&
-               IsFrameworkOptionsValidator(implementation, optionsType);
+        if (!TryGetTryAddEnumerableValidator(operation, out implementation, out optionsType))
+        {
+            return false;
+        }
+
+        return IsFrameworkOptionsValidator(implementation, optionsType);
     }
 
     public static bool IsServiceCollectionRegistration(IMethodSymbol method)
     {
-        var original = method.ReducedFrom ?? method.OriginalDefinition;
-        return IsFrameworkAddSingleton(original) || IsFrameworkTryAddEnumerable(original);
+        var original = GetUnreducedOriginal(method);
+        if (IsFrameworkAddSingleton(original))
+        {
+            return true;
+        }
+
+        return IsFrameworkTryAddEnumerable(original);
+    }
+
+    public static bool SameServiceCollectionOrUnproven(
+        InvocationExpressionSyntax left,
+        InvocationExpressionSyntax right,
+        SemanticModel model)
+    {
+        if (!TryGetServiceCollectionRoot(left, model, out var leftCollection))
+        {
+            return true;
+        }
+
+        if (!TryGetServiceCollectionRoot(right, model, out var rightCollection))
+        {
+            return true;
+        }
+
+        return SymbolEqualityComparer.Default.Equals(leftCollection, rightCollection);
     }
 
     private static bool TryGetAddSingletonValidator(
@@ -45,15 +72,18 @@ internal static class OptionsValidatorRegistration
     {
         implementation = null!;
         optionsType = null!;
-        var original = operation.TargetMethod.ReducedFrom ?? operation.TargetMethod.OriginalDefinition;
-        if (!IsFrameworkAddSingleton(original) ||
-            original.Parameters.Length != 1 ||
-            !TryGetValidateOptionsTypeArguments(operation.TargetMethod, out implementation, out optionsType))
+        var original = GetUnreducedOriginal(operation.TargetMethod);
+        if (!IsFrameworkAddSingleton(original))
         {
             return false;
         }
 
-        return true;
+        if (original.Parameters.Length != 1)
+        {
+            return false;
+        }
+
+        return TryGetValidateOptionsTypeArguments(operation.TargetMethod, out implementation, out optionsType);
     }
 
     private static bool TryGetTryAddEnumerableValidator(
@@ -63,7 +93,7 @@ internal static class OptionsValidatorRegistration
     {
         implementation = null!;
         optionsType = null!;
-        var original = operation.TargetMethod.ReducedFrom ?? operation.TargetMethod.OriginalDefinition;
+        var original = GetUnreducedOriginal(operation.TargetMethod);
         if (!IsFrameworkTryAddEnumerable(original))
         {
             return false;
@@ -76,11 +106,18 @@ internal static class OptionsValidatorRegistration
                 continue;
             }
 
-            var descriptorOriginal = descriptorInvocation.TargetMethod.ReducedFrom ??
-                                     descriptorInvocation.TargetMethod.OriginalDefinition;
-            if (IsFrameworkServiceDescriptorSingleton(descriptorOriginal) &&
-                descriptorOriginal.Parameters.Length == 0 &&
-                TryGetValidateOptionsTypeArguments(
+            var descriptorOriginal = GetUnreducedOriginal(descriptorInvocation.TargetMethod);
+            if (!IsFrameworkServiceDescriptorSingleton(descriptorOriginal))
+            {
+                continue;
+            }
+
+            if (descriptorOriginal.Parameters.Length != 0)
+            {
+                continue;
+            }
+
+            if (TryGetValidateOptionsTypeArguments(
                     descriptorInvocation.TargetMethod,
                     out implementation,
                     out optionsType))
@@ -99,10 +136,22 @@ internal static class OptionsValidatorRegistration
     {
         implementation = null!;
         optionsType = null!;
-        if (method.TypeArguments.Length != 2 ||
-            method.TypeArguments[0] is not INamedTypeSymbol serviceType ||
-            method.TypeArguments[1] is not INamedTypeSymbol implementationType ||
-            !IsFrameworkValidateOptions(serviceType, out optionsType))
+        if (method.TypeArguments.Length != 2)
+        {
+            return false;
+        }
+
+        if (method.TypeArguments[0] is not INamedTypeSymbol serviceType)
+        {
+            return false;
+        }
+
+        if (method.TypeArguments[1] is not INamedTypeSymbol implementationType)
+        {
+            return false;
+        }
+
+        if (!IsFrameworkValidateOptions(serviceType, out optionsType))
         {
             return false;
         }
@@ -133,8 +182,12 @@ internal static class OptionsValidatorRegistration
     {
         foreach (var candidate in implementation.AllInterfaces)
         {
-            if (IsFrameworkValidateOptions(candidate, out var validatedType) &&
-                SymbolEqualityComparer.Default.Equals(validatedType, optionsType))
+            if (!IsFrameworkValidateOptions(candidate, out var validatedType))
+            {
+                continue;
+            }
+
+            if (SymbolEqualityComparer.Default.Equals(validatedType, optionsType))
             {
                 return true;
             }
@@ -146,83 +199,105 @@ internal static class OptionsValidatorRegistration
     private static bool IsFrameworkValidateOptions(INamedTypeSymbol type, out INamedTypeSymbol optionsType)
     {
         optionsType = null!;
-        if (type.Name != "IValidateOptions" ||
-            type.TypeArguments.Length != 1 ||
-            type.TypeArguments[0] is not INamedTypeSymbol argument ||
-            type.ContainingNamespace?.ToDisplayString() != "Microsoft.Extensions.Options" ||
-            type.ContainingAssembly?.Name != "Microsoft.Extensions.Options")
+        if (type.Name != "IValidateOptions")
+        {
+            return false;
+        }
+
+        if (type.TypeArguments.Length != 1)
+        {
+            return false;
+        }
+
+        if (type.TypeArguments[0] is not INamedTypeSymbol argument)
+        {
+            return false;
+        }
+
+        if (type.ContainingNamespace?.ToDisplayString() != "Microsoft.Extensions.Options")
+        {
+            return false;
+        }
+
+        if (type.ContainingAssembly?.Name != "Microsoft.Extensions.Options")
         {
             return false;
         }
 
         optionsType = argument;
-        return HasNonEmptyPublicKeyToken(type.ContainingAssembly);
+        return true;
     }
 
     private static bool IsFrameworkOptionsValidatorAttribute(INamedTypeSymbol? attributeClass)
     {
-        return attributeClass is not null &&
-               attributeClass.ToDisplayString() == "Microsoft.Extensions.Options.OptionsValidatorAttribute" &&
-               attributeClass.ContainingAssembly?.Name == "Microsoft.Extensions.Options" &&
-               HasNonEmptyPublicKeyToken(attributeClass.ContainingAssembly);
+        if (attributeClass is null)
+        {
+            return false;
+        }
+
+        if (attributeClass.ToDisplayString() != "Microsoft.Extensions.Options.OptionsValidatorAttribute")
+        {
+            return false;
+        }
+
+        return attributeClass.ContainingAssembly?.Name == "Microsoft.Extensions.Options";
     }
 
     private static bool IsFrameworkAddSingleton(IMethodSymbol method)
     {
-        return method.Name == "AddSingleton" &&
-               method.ContainingType?.ToDisplayString() ==
-                   "Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions" &&
-               (method.ContainingAssembly?.Name == "Microsoft.Extensions.DependencyInjection.Abstractions" ||
-                method.ContainingAssembly?.Name == "Microsoft.Extensions.DependencyInjection") &&
-               HasNonEmptyPublicKeyToken(method.ContainingAssembly);
+        if (method.Name != "AddSingleton")
+        {
+            return false;
+        }
+
+        return method.ContainingType?.ToDisplayString() ==
+               "Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions";
     }
 
     private static bool IsFrameworkTryAddEnumerable(IMethodSymbol method)
     {
-        return method.Name == "TryAddEnumerable" &&
-               method.ContainingType?.ToDisplayString() ==
-                   "Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions" &&
-               (method.ContainingAssembly?.Name == "Microsoft.Extensions.DependencyInjection.Abstractions" ||
-                method.ContainingAssembly?.Name == "Microsoft.Extensions.DependencyInjection") &&
-               HasNonEmptyPublicKeyToken(method.ContainingAssembly);
+        if (method.Name != "TryAddEnumerable")
+        {
+            return false;
+        }
+
+        return method.ContainingType?.ToDisplayString() ==
+               "Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions";
     }
 
     private static bool IsFrameworkServiceDescriptorSingleton(IMethodSymbol method)
     {
-        return method.Name == "Singleton" &&
-               method.ContainingType?.ToDisplayString() == "Microsoft.Extensions.DependencyInjection.ServiceDescriptor" &&
-               (method.ContainingAssembly?.Name == "Microsoft.Extensions.DependencyInjection.Abstractions" ||
-                method.ContainingAssembly?.Name == "Microsoft.Extensions.DependencyInjection") &&
-               HasNonEmptyPublicKeyToken(method.ContainingAssembly);
+        if (method.Name != "Singleton")
+        {
+            return false;
+        }
+
+        return method.ContainingType?.ToDisplayString() == "Microsoft.Extensions.DependencyInjection.ServiceDescriptor";
     }
 
-    private static bool HasNonEmptyPublicKeyToken(IAssemblySymbol? assembly)
+    private static IMethodSymbol GetUnreducedOriginal(IMethodSymbol method)
     {
-        return assembly is not null && !assembly.Identity.PublicKeyToken.IsDefaultOrEmpty;
+        if (method.ReducedFrom is { } reduced)
+        {
+            return reduced.OriginalDefinition;
+        }
+
+        return method.OriginalDefinition;
     }
 
     private static IOperation UnwrapConversion(IOperation operation)
     {
-        while (operation is IConversionOperation { OperatorMethod: null } conversion)
+        while (operation is IConversionOperation conversion)
         {
+            if (conversion.OperatorMethod is not null)
+            {
+                break;
+            }
+
             operation = conversion.Operand;
         }
 
         return operation;
-    }
-
-    public static bool SameServiceCollectionOrUnproven(
-        InvocationExpressionSyntax left,
-        InvocationExpressionSyntax right,
-        SemanticModel model)
-    {
-        if (!TryGetServiceCollectionRoot(left, model, out var leftCollection) ||
-            !TryGetServiceCollectionRoot(right, model, out var rightCollection))
-        {
-            return true;
-        }
-
-        return SymbolEqualityComparer.Default.Equals(leftCollection, rightCollection);
     }
 
     private static bool TryGetServiceCollectionRoot(
@@ -246,7 +321,13 @@ internal static class OptionsValidatorRegistration
             }
 
             var receiver = model.GetSymbolInfo(memberAccess.Expression).Symbol;
-            if (receiver is ILocalSymbol or IParameterSymbol)
+            if (receiver is ILocalSymbol)
+            {
+                collection = receiver;
+                return true;
+            }
+
+            if (receiver is IParameterSymbol)
             {
                 collection = receiver;
                 return true;

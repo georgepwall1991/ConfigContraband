@@ -984,23 +984,11 @@ public sealed partial class ConfigContrabandAnalyzer
             yield break;
         }
 
-        var expressionBody = configureInvocation.FirstAncestorOrSelf<ArrowExpressionClauseSyntax>()?.Expression;
-        if (expressionBody is not null)
+        var scopedExpression = configureInvocation.FirstAncestorOrSelf<ArrowExpressionClauseSyntax>()?.Expression ??
+                               configureInvocation.FirstAncestorOrSelf<EqualsValueClauseSyntax>()?.Value;
+        if (scopedExpression is not null)
         {
-            foreach (var invocation in expressionBody
-                         .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
-                         .OfType<InvocationExpressionSyntax>())
-            {
-                yield return invocation;
-            }
-
-            yield break;
-        }
-
-        var initializer = configureInvocation.FirstAncestorOrSelf<EqualsValueClauseSyntax>()?.Value;
-        if (initializer is not null)
-        {
-            foreach (var invocation in initializer
+            foreach (var invocation in scopedExpression
                          .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
                          .OfType<InvocationExpressionSyntax>())
             {
@@ -1246,8 +1234,12 @@ public sealed partial class ConfigContrabandAnalyzer
         InvocationExpressionSyntax invocation,
         SemanticModel semanticModel)
     {
-        return semanticModel.GetSymbolInfo(invocation).Symbol is IMethodSymbol method &&
-               OptionsValidatorRegistration.IsServiceCollectionRegistration(method);
+        if (semanticModel.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method)
+        {
+            return false;
+        }
+
+        return OptionsValidatorRegistration.IsServiceCollectionRegistration(method);
     }
 
     private static bool OptionsNamesMatch(string? configureOptionsName, string? validationOptionsName)
