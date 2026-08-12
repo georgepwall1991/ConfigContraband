@@ -997,6 +997,19 @@ public sealed partial class ConfigContrabandAnalyzer
             yield break;
         }
 
+        var initializer = configureInvocation.FirstAncestorOrSelf<EqualsValueClauseSyntax>()?.Value;
+        if (initializer is not null)
+        {
+            foreach (var invocation in initializer
+                         .DescendantNodesAndSelf(ExecutionScope.ShouldDescend)
+                         .OfType<InvocationExpressionSyntax>())
+            {
+                yield return invocation;
+            }
+
+            yield break;
+        }
+
         yield return configureInvocation;
     }
 
@@ -1209,7 +1222,7 @@ public sealed partial class ConfigContrabandAnalyzer
                     semanticModel,
                     out var validatedType) ||
                 !SymbolEqualityComparer.Default.Equals(validatedType, optionsType) ||
-                !SameServiceCollectionOrUnproven(invocation, candidate, semanticModel))
+                !OptionsValidatorRegistration.SameServiceCollectionOrUnproven(invocation, candidate, semanticModel))
             {
                 continue;
             }

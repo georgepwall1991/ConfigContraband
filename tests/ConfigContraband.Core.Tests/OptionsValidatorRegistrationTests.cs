@@ -411,6 +411,76 @@ public sealed class OptionsValidatorRegistrationTests
         Assert.False(result.SawServiceCollectionRegistration);
     }
 
+    [Fact]
+    public void Same_service_collection_or_unproven_matches_the_bind_receiver()
+    {
+        var (bind, validator, model) = GetBindAndValidator(
+            """
+            services.AddOptions<StripeOptions>().BindConfiguration("Stripe");
+            services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """);
+
+        Assert.True(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, validator, model));
+    }
+
+    [Fact]
+    public void Same_service_collection_or_unproven_rejects_a_different_local()
+    {
+        var (bind, validator, model) = GetBindAndValidator(
+            """
+            IServiceCollection other = new ServiceCollection();
+            other.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            services.AddOptions<StripeOptions>().BindConfiguration("Stripe");
+            """);
+
+        Assert.False(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, validator, model));
+    }
+
+    private static (InvocationExpressionSyntax Bind, InvocationExpressionSyntax Validator, SemanticModel Model) GetBindAndValidator(
+        string registration)
+    {
+        var source = $$"""
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    {{registration}}
+                }
+            }
+
+            {{StripeValidatorTypes}}
+            """;
+
+        var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator)
+            .Select(path => MetadataReference.CreateFromFile(path));
+        var tree = CSharpSyntaxTree.ParseText(source);
+        var compilation = CSharpCompilation.Create(
+            "OptionsValidatorRegistrationTests",
+            [tree],
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        Assert.DoesNotContain(
+            compilation.GetDiagnostics(),
+            diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+
+        var model = compilation.GetSemanticModel(tree);
+        var configure = tree.GetRoot()
+            .DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .Single(method => method.Identifier.ValueText == "Configure");
+        var invocations = configure.DescendantNodes().OfType<InvocationExpressionSyntax>().ToArray();
+        var bind = invocations.Single(invocation =>
+            invocation.Expression is MemberAccessExpressionSyntax member &&
+            member.Name.Identifier.ValueText == "BindConfiguration");
+        var validator = invocations.Single(invocation =>
+            OptionsValidatorRegistration.TryGetValidatedOptionsType(invocation, model, out _));
+        return (bind, validator, model);
+    }
+
     private static ProofResult TryProve(
         string registration,
         string extraUsings = "",

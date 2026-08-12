@@ -80,7 +80,8 @@ public sealed partial class ConfigContrabandCodeFixTests
 
     [Fact]
     public async Task Cfg003_fix_appends_validate_on_start_for_bind_get_section_when_options_validator_is_registered()
-    {        var source = """
+    {
+        var source = """
             using System.ComponentModel.DataAnnotations;
             using Microsoft.Extensions.DependencyInjection;
             using Microsoft.Extensions.Configuration;

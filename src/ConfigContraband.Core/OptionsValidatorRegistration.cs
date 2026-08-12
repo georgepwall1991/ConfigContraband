@@ -210,4 +210,49 @@ internal static class OptionsValidatorRegistration
 
         return operation;
     }
+
+    public static bool SameServiceCollectionOrUnproven(
+        InvocationExpressionSyntax left,
+        InvocationExpressionSyntax right,
+        SemanticModel model)
+    {
+        if (!TryGetServiceCollectionRoot(left, model, out var leftCollection) ||
+            !TryGetServiceCollectionRoot(right, model, out var rightCollection))
+        {
+            return true;
+        }
+
+        return SymbolEqualityComparer.Default.Equals(leftCollection, rightCollection);
+    }
+
+    private static bool TryGetServiceCollectionRoot(
+        InvocationExpressionSyntax invocation,
+        SemanticModel model,
+        out ISymbol collection)
+    {
+        collection = null!;
+        var current = invocation;
+        while (true)
+        {
+            if (current.Expression is not MemberAccessExpressionSyntax memberAccess)
+            {
+                return false;
+            }
+
+            if (memberAccess.Expression is InvocationExpressionSyntax receiverInvocation)
+            {
+                current = receiverInvocation;
+                continue;
+            }
+
+            var receiver = model.GetSymbolInfo(memberAccess.Expression).Symbol;
+            if (receiver is ILocalSymbol or IParameterSymbol)
+            {
+                collection = receiver;
+                return true;
+            }
+
+            return false;
+        }
+    }
 }

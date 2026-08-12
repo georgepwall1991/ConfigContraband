@@ -194,6 +194,31 @@ public sealed class OptionsValidatorSchemaTests
     }
 
     [Fact]
+    public void Binding_is_not_validated_when_options_validator_is_on_a_different_service_collection()
+    {
+        var section = Assert.Single(Extract("""
+            IServiceCollection other = new ServiceCollection();
+            other.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe");
+            """));
+
+        Assert.False(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
+    public void Binding_is_not_validated_by_a_logical_and_registration()
+    {
+        var section = Assert.Single(Extract("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe");
+            _ = true && services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>() is not null;
+            """));
+
+        Assert.False(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
     public void Binding_is_not_validated_when_options_validator_is_unregistered()
     {
         var section = Assert.Single(Extract("""

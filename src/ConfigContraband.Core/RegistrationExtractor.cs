@@ -304,7 +304,8 @@ internal static class RegistrationExtractor
             }
 
             if (OptionsValidatorRegistration.TryGetValidatedOptionsType(candidate, model, out var validatorOptionsType) &&
-                SymbolEqualityComparer.Default.Equals(validatorOptionsType, optionsType))
+                SymbolEqualityComparer.Default.Equals(validatorOptionsType, optionsType) &&
+                OptionsValidatorRegistration.SameServiceCollectionOrUnproven(invocation, candidate, model))
             {
                 return true;
             }
