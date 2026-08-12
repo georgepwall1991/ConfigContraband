@@ -282,12 +282,9 @@ internal static class DataAnnotationsConstraints
 
     private static bool ValuesEqual(object converted, ITypeSymbol convertedType, TypedConstant allowed)
     {
-        if (allowed.Type is null)
-        {
-            return false;
-        }
-
-        if (!SymbolEqualityComparer.Default.Equals(UnwrapNullable(allowed.Type), UnwrapNullable(convertedType)))
+        if (!SymbolEqualityComparer.Default.Equals(
+                UnwrapNullable(allowed.Type!),
+                UnwrapNullable(convertedType)))
         {
             return false;
         }
@@ -479,13 +476,13 @@ internal static class DataAnnotationsConstraints
         // Enum.Parse bitwise-ORs comma-separated tokens (including without [Flags]). Combining
         // underlying values here would need a proven integral conversion; staying quiet keeps
         // CFG010 from warning on a runtime-valid flags combination such as "Read, Write".
-        if (rawValue.IndexOf(',') >= 0)
+        var trimmed = rawValue.Trim();
+        if (trimmed.Length == 0)
         {
             return false;
         }
 
-        var trimmed = rawValue.Trim();
-        if (trimmed.Length == 0)
+        if (trimmed.IndexOf(',') >= 0)
         {
             return false;
         }

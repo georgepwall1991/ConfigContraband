@@ -32,18 +32,8 @@ internal static class ValidationAttributeLimits
         {
             case 2:
                 // Range(int, int) or Range(double, double).
-                var formattedMinimum = FormatNumericConstant(arguments[0]);
-                if (formattedMinimum is not null)
-                {
-                    minimum = formattedMinimum;
-                }
-
-                var formattedMaximum = FormatNumericConstant(arguments[1]);
-                if (formattedMaximum is not null)
-                {
-                    maximum = formattedMaximum;
-                }
-
+                ApplyNumericConstant(arguments[0], ref minimum);
+                ApplyNumericConstant(arguments[1], ref maximum);
                 break;
             case 3:
                 // Range(Type, string, string): the operand type plus numeric strings. Bounds are parsed with the
@@ -190,29 +180,34 @@ internal static class ValidationAttributeLimits
         {
             if (string.Equals(named.Key, "MinimumIsExclusive", StringComparison.Ordinal))
             {
-                minimumExclusive = named.Value.Value is true;
+                minimumExclusive = !Equals(named.Value.Value, false);
             }
 
             if (string.Equals(named.Key, "MaximumIsExclusive", StringComparison.Ordinal))
             {
-                maximumExclusive = named.Value.Value is true;
+                maximumExclusive = !Equals(named.Value.Value, false);
             }
         }
     }
 
-    private static string? FormatNumericConstant(TypedConstant argument)
+    private static void ApplyNumericConstant(TypedConstant argument, ref string? destination)
     {
         // double.PositiveInfinity / NaN are compile-time constants, so [Range(0, double.PositiveInfinity)]
-        // is legal and would format as "Infinity"/"NaN" - not valid JSON. Skip non-finite bounds, and
-        // validate every formatted token so an invalid JSON number is never written verbatim.
-        string? formatted = argument.Value switch
+        // is legal and would format as "Infinity"/"NaN" - not valid JSON. Skip non-finite bounds.
+        if (argument.Value is int intValue)
         {
-            int value => value.ToString(Invariant),
-            double value => FormatFiniteDouble(value),
-            _ => null,
-        };
+            destination = intValue.ToString(Invariant);
+            return;
+        }
 
-        return formatted;
+        if (argument.Value is double doubleValue)
+        {
+            var formatted = FormatFiniteDouble(doubleValue);
+            if (formatted is not null)
+            {
+                destination = formatted;
+            }
+        }
     }
 
     private static string? FormatFiniteDouble(double value)
@@ -400,15 +395,7 @@ internal static class ValidationAttributeLimits
         if (index < length)
         {
             var exponent = value[index];
-            if (exponent == 'e')
-            {
-                index++;
-                if (!TryReadExponentRest(value, ref index, length))
-                {
-                    return false;
-                }
-            }
-            else if (exponent == 'E')
+            if (exponent == 'e' || exponent == 'E')
             {
                 index++;
                 if (!TryReadExponentRest(value, ref index, length))

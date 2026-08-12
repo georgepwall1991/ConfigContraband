@@ -1138,6 +1138,26 @@ public sealed partial class JsonSchemaBuilderTests
     }
 
     [Fact]
+    public void Range_typeof_unknown_operand_keeps_fraction_then_exponent()
+    {
+        var schema = BuildSchema(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class WhenOptions
+            {
+                [Range(typeof(DateTime), "1.5e2", "1e2x")]
+                public double Amount { get; set; }
+            }
+            """,
+            "WhenOptions");
+
+        Assert.Contains("\"minimum\": 1.5e2", schema);
+        Assert.DoesNotContain("1e2x", schema);
+    }
+
+    [Fact]
     public void Range_typeof_unknown_operand_drops_incomplete_fraction()
     {
         var schema = BuildSchema(

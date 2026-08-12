@@ -1189,6 +1189,26 @@ public sealed class DataAnnotationsConstraintsTests
     }
 
     [Fact]
+    public void Empty_enum_value_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public enum Color { Red, Blue }
+
+            public sealed class TintOptions
+            {
+                [AllowedValues(Color.Red)]
+                public Color Tint { get; set; }
+            }
+            """,
+            "Tint",
+            ScalarKind.String,
+            "   ");
+    }
+
+    [Fact]
     public void Empty_enum_token_stays_quiet()
     {
         AssertQuiet(
