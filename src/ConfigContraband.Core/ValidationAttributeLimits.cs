@@ -197,7 +197,6 @@ internal static class ValidationAttributeLimits
         if (argument.Value is int intValue)
         {
             destination = intValue.ToString(Invariant);
-            return;
         }
 
         if (argument.Value is double doubleValue)
