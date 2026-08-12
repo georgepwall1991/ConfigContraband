@@ -436,10 +436,82 @@ public sealed class OptionsValidatorRegistrationTests
         Assert.False(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, validator, model));
     }
 
+    [Fact]
+    public void Same_service_collection_or_unproven_matches_when_a_receiver_is_a_field()
+    {
+        var source = """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public sealed class Startup
+            {
+                private readonly IServiceCollection other = new ServiceCollection();
+
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>().BindConfiguration("Stripe");
+                    other.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+                }
+            }
+            """ + StripeValidatorTypes;
+
+        var (bind, validator, model) = GetBindAndValidatorFromSource(source);
+        Assert.True(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, validator, model));
+    }
+
+    [Fact]
+    public void Same_service_collection_or_unproven_matches_a_non_member_access_invocation()
+    {
+        var source = """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>().BindConfiguration("Stripe");
+                    Register();
+                }
+
+                static void Register() {}
+            }
+            """ + StripeValidatorTypes;
+
+        var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator)
+            .Select(path => MetadataReference.CreateFromFile(path));
+        var tree = CSharpSyntaxTree.ParseText(source);
+        var compilation = CSharpCompilation.Create(
+            "OptionsValidatorRegistrationTests",
+            [tree],
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        Assert.DoesNotContain(
+            compilation.GetDiagnostics(),
+            diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+
+        var model = compilation.GetSemanticModel(tree);
+        var configure = tree.GetRoot()
+            .DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .Single(method => method.Identifier.ValueText == "Configure");
+        var invocations = configure.DescendantNodes().OfType<InvocationExpressionSyntax>().ToArray();
+        var bind = invocations.Single(invocation =>
+            invocation.Expression is MemberAccessExpressionSyntax member &&
+            member.Name.Identifier.ValueText == "BindConfiguration");
+        var register = invocations.Single(invocation =>
+            invocation.Expression is IdentifierNameSyntax identifier &&
+            identifier.Identifier.ValueText == "Register");
+
+        Assert.True(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, register, model));
+    }
+
     private static (InvocationExpressionSyntax Bind, InvocationExpressionSyntax Validator, SemanticModel Model) GetBindAndValidator(
         string registration)
     {
-        var source = $$"""
+        return GetBindAndValidatorFromSource(
+            $$"""
             using Microsoft.Extensions.DependencyInjection;
             using Microsoft.Extensions.Options;
 
@@ -452,7 +524,12 @@ public sealed class OptionsValidatorRegistrationTests
             }
 
             {{StripeValidatorTypes}}
-            """;
+            """);
+    }
+
+    private static (InvocationExpressionSyntax Bind, InvocationExpressionSyntax Validator, SemanticModel Model) GetBindAndValidatorFromSource(
+        string source)
+    {
 
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)

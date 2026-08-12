@@ -43,6 +43,58 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_reports_when_options_validator_is_chained_in_an_expression_bodied_member()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public sealed class Startup
+            {
+                public OptionsBuilder<StripeOptions> Add(IServiceCollection services) =>
+                    {|#0:services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>()
+                        .AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe")|};
+            }
+
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+
+            [OptionsValidator]
+            public sealed class ValidateStripeOptions : IValidateOptions<StripeOptions>
+            {
+                public ValidateOptionsResult Validate(string? name, StripeOptions options) => ValidateOptionsResult.Success;
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, StripeAppsettings, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_still_reports_when_options_validator_registration_is_short_circuited_with_or()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            _ = false || services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>() is not null;
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: OptionsValidatorTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg004_still_reports_when_options_validator_registration_is_short_circuited()
     {
         var source = OptionsSource("""
