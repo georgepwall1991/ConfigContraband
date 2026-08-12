@@ -2,6 +2,19 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.8.0 - 2026-08-12
+
+### What's new
+
+- **CFG010: bound value fails DataAnnotations.** A present, convertible appsettings scalar that still fails `[Range]`, length, or `[AllowedValues]`/`[DeniedValues]` at `ValidateDataAnnotations()` time now warns at build time. `"Port": 0` binds as `int`; startup then throws `OptionsValidationException`. CFG008 already owned conversion failures; this is the constraint-failure class the schema tool already emitted as `minimum`/`maximum`.
+
+### Details
+
+- Gated on the same DataAnnotations proof as CFG002: `ValidateDataAnnotations()` on the OptionsBuilder chain, or same-block `Configure<T>(GetSection)` paired with matching `AddOptions<T>().ValidateDataAnnotations()`.
+- Reports after CFG008 conversion succeeds. Nested and collection members require `[ValidateObjectMembers]` / `[ValidateEnumeratedItems]`. Dictionary values, direct `Get`/`Bind`/`GetValue`, Configure-only, culture-dependent `Range(typeof(T), …)`, custom `ValidationAttribute` subclasses, regex/email/url/phone/credit-card attributes, and `IValidatableObject` stay quiet.
+- Shared `ValidationAttributeLimits` readers keep JSON Schema bounds and CFG010 proofs from drifting. No code fix — the diagnostic points at a JSON additional file.
+- Showcase contract is now exactly one each of CFG001–CFG010.
+
 ## 0.7.29 - 2026-08-12
 
 ### What's new

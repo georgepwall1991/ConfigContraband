@@ -19,12 +19,13 @@ Expected diagnostics:
 | `CFG007` | `ErrorOnUnknownConfiguration` is enabled, so the unknown `WebookSecret` key will fail binding. |
 | `CFG008` | The scalar value `"eighty"` cannot be converted to the bound `int Port` property. |
 | `CFG009` | `GetRequiredSection("Strpie")` reads a path that is absent from visible appsettings files. |
+| `CFG010` | `"Port": 0` binds as `int` but fails `[Range(1, 65535)]` when `ValidateDataAnnotations()` runs. |
 
 The `ContinuousIntegrationBuild` property is required because normal local command-line builds disable
 analyzers for fast feedback. The sample is not included in the main solution, so normal package and test
 builds stay clean. Its local `.globalconfig` promotes `CFG006` from `Info` to `warning` so it is visible
 with the other showcase diagnostics. CI runs `bash scripts/verify-showcase.sh` and fails unless this
-project emits exactly one diagnostic for every ID from `CFG001` through `CFG009`.
+project emits exactly one diagnostic for every ID from `CFG001` through `CFG010`.
 
 ## Generated schema
 

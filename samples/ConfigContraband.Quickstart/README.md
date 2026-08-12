@@ -21,4 +21,4 @@ services.AddOptions<StripeOptions>()
 
 For intentional failures (one diagnostic per rule), see [ConfigContraband.Showcase](../ConfigContraband.Showcase/).
 
-CI runs `bash scripts/verify-quickstart.sh` and fails if any `CFG001`–`CFG009` diagnostic appears.
+CI runs `bash scripts/verify-quickstart.sh` and fails if any `CFG001`–`CFG010` diagnostic appears.

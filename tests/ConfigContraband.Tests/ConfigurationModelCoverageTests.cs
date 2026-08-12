@@ -358,6 +358,7 @@ public sealed class ConfigurationModelCoverageTests
         Assert.Equal(ScalarKind.String, apiKey.ScalarKind);
         Assert.Equal("secret", apiKey.ScalarValue);
         Assert.NotNull(apiKey.ValueLocation);
+        Assert.Equal(apiKey.ValueLocation, apiKey.GetReportedLocation());
     }
 
     [Fact]
@@ -431,6 +432,7 @@ public sealed class ConfigurationModelCoverageTests
         Assert.Equal(ScalarKind.None, stripe.ScalarKind);
         Assert.Null(stripe.ScalarValue);
         Assert.Null(stripe.ValueLocation);
+        Assert.Equal(stripe.Location, stripe.GetReportedLocation());
     }
 
     [Fact]

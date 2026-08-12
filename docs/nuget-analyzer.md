@@ -9,7 +9,7 @@
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.7.29" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.8.0" PrivateAssets="all" />
 ```
 
 ```bash
@@ -24,7 +24,7 @@ No runtime dependency. Analyzers run at build time and in supported IDEs. Visibl
 - Missing `[Required]` keys in visible appsettings
 - Validation without `ValidateOnStart()` or `ValidateDataAnnotations()`
 - Nested options that look validated but are skipped
-- Misspelled JSON keys, strict unknown-key failures, and scalar conversion errors
+- Misspelled JSON keys, strict unknown-key failures, scalar conversion errors, and DataAnnotations constraint failures
 - Direct `IConfiguration` reads whose path is missing from visible appsettings
 
 When the analyzer cannot prove a configuration shape statically, it **stays quiet**.
@@ -36,5 +36,5 @@ When the analyzer cannot prove a configuration shape statically, it **stays quie
 ## Next steps
 
 - Copy-paste green sample: [ConfigContraband.Quickstart](https://github.com/georgepwall1991/ConfigContraband/tree/main/samples/ConfigContraband.Quickstart)
-- Full rule reference (`CFG001`–`CFG009`): [README on GitHub](https://github.com/georgepwall1991/ConfigContraband#rule-details)
+- Full rule reference (`CFG001`–`CFG010`): [README on GitHub](https://github.com/georgepwall1991/ConfigContraband#rule-details)
 - Optional IntelliSense schema tool: [ConfigContraband.Tool](https://www.nuget.org/packages/ConfigContraband.Tool)

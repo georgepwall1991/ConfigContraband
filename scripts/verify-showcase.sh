@@ -36,11 +36,12 @@ expected="$(
     CFG006 \
     CFG007 \
     CFG008 \
-    CFG009
+    CFG009 \
+    CFG010
 )"
 
 if [[ "$actual" != "$expected" ]]; then
-  echo "Showcase diagnostics did not match the exact CFG001-CFG009 contract." >&2
+  echo "Showcase diagnostics did not match the exact CFG001-CFG010 contract." >&2
   echo "Expected:" >&2
   printf '%s\n' "$expected" >&2
   echo "Actual:" >&2
@@ -48,4 +49,4 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-echo "Showcase diagnostic contract passed: exactly one each of CFG001-CFG009."
+echo "Showcase diagnostic contract passed: exactly one each of CFG001-CFG010."

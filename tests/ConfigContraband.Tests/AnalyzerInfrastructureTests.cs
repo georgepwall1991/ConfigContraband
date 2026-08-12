@@ -93,6 +93,7 @@ public sealed partial class ConfigContrabandAnalyzerTests
                 "CFG007",
                 "CFG008",
                 "CFG009",
+                "CFG010",
             ],
             showcaseWarningsNotAsErrors.Value.Split(';'));
 
@@ -137,6 +138,8 @@ public sealed partial class ConfigContrabandAnalyzerTests
                 ("cfg008-configuration-values-that-cannot-bind-to-their-target-type", "### `CFG008`: Configuration Values That Cannot Bind To Their Target Type"),
             [DiagnosticIds.ConfigurationKeyNotFound] =
                 ("cfg009-direct-configuration-paths-unavailable-from-visible-appsettings-files", "### `CFG009`: Direct Configuration Paths Unavailable from Visible Appsettings Files"),
+            [DiagnosticIds.ConfigurationValueFailsValidation] =
+                ("cfg010-bound-values-must-satisfy-dataannotations", "### `CFG010`: Bound Values Must Satisfy DataAnnotations"),
         };
         var supportedDiagnostics = new ConfigContrabandAnalyzer().SupportedDiagnostics;
         var repositoryRoot = Path.GetFullPath(
@@ -173,7 +176,7 @@ public sealed partial class ConfigContrabandAnalyzerTests
 
         var verifierContents = File.ReadAllText(verifier);
         Assert.Contains("-tl:off", verifierContents, StringComparison.Ordinal);
-        foreach (var ruleId in Enumerable.Range(1, 9).Select(number => $"CFG{number:000}"))
+        foreach (var ruleId in Enumerable.Range(1, 10).Select(number => $"CFG{number:000}"))
         {
             Assert.Contains(ruleId, verifierContents, StringComparison.Ordinal);
         }
@@ -236,7 +239,7 @@ public sealed partial class ConfigContrabandAnalyzerTests
         Assert.Contains(".nupkg.metadata", verifier, StringComparison.Ordinal);
         Assert.Contains("metadata.get(\"source\")", verifier, StringComparison.Ordinal);
         Assert.Contains(
-            "<ConfigContrabandVersion Condition=\"'$(ConfigContrabandVersion)' == ''\">0.7.29</ConfigContrabandVersion>",
+            "<ConfigContrabandVersion Condition=\"'$(ConfigContrabandVersion)' == ''\">0.8.0</ConfigContrabandVersion>",
             consumerProject,
             StringComparison.Ordinal);
         Assert.Contains(

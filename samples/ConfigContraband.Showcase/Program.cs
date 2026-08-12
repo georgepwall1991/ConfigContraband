@@ -45,6 +45,12 @@ services.AddOptions<StrictUnknownKeyOptions>()
 services.AddOptions<ConversionOptions>()
     .BindConfiguration("Conversion");
 
+// CFG010: 0 binds as int but fails [Range(1, 65535)] when ValidateDataAnnotations() runs.
+services.AddOptions<ConstraintOptions>()
+    .BindConfiguration("Constraints")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
 _ = services;
 
 // CFG009: a direct read of a section path that is not in appsettings.json throws at runtime.
@@ -107,5 +113,11 @@ public sealed class StrictUnknownKeyOptions
 
 public sealed class ConversionOptions
 {
+    public int Port { get; set; }
+}
+
+public sealed class ConstraintOptions
+{
+    [Range(1, 65535)]
     public int Port { get; set; }
 }

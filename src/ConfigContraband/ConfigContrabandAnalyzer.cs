@@ -29,7 +29,8 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         DiagnosticDescriptors.UnknownConfigurationKey,
         DiagnosticDescriptors.UnknownConfigurationKeyWillThrow,
         DiagnosticDescriptors.ConfigurationValueTypeMismatch,
-        DiagnosticDescriptors.ConfigurationKeyNotFound);
+        DiagnosticDescriptors.ConfigurationKeyNotFound,
+        DiagnosticDescriptors.ConfigurationValueFailsValidation);
 
     public override void Initialize(AnalysisContext context)
     {
