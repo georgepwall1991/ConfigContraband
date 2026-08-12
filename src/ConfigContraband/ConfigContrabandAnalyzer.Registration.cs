@@ -1203,7 +1203,8 @@ public sealed partial class ConfigContrabandAnalyzer
     {
         foreach (var candidate in GetSameExecutableScopeInvocations(invocation))
         {
-            if (!OptionsValidatorRegistration.TryGetValidatedOptionsType(
+            if (!IsUnconditionallyEvaluatedCandidate(candidate) ||
+                !OptionsValidatorRegistration.TryGetValidatedOptionsType(
                     candidate,
                     semanticModel,
                     out var validatedType) ||
@@ -1217,6 +1218,15 @@ public sealed partial class ConfigContrabandAnalyzer
         }
 
         return false;
+    }
+
+    private static bool IsUnconditionallyEvaluatedCandidate(InvocationExpressionSyntax candidate)
+    {
+        SyntaxNode? boundary = candidate.FirstAncestorOrSelf<StatementSyntax>() ??
+                               (SyntaxNode?)candidate.FirstAncestorOrSelf<ArrowExpressionClauseSyntax>() ??
+                               candidate.FirstAncestorOrSelf<EqualsValueClauseSyntax>();
+        return boundary is not null &&
+               ExecutionScope.IsUnconditionallyEvaluatedWithin(candidate, boundary);
     }
 
     private static bool IsOptionsValidatorServiceCollectionRegistration(

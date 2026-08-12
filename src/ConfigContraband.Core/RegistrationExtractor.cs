@@ -356,36 +356,7 @@ internal static class RegistrationExtractor
 
     private static bool IsUnconditionallyEvaluatedWithin(SyntaxNode candidate, SyntaxNode boundary)
     {
-        foreach (var ancestor in candidate.Ancestors())
-        {
-            if (ancestor.Span == boundary.Span && ancestor.RawKind == boundary.RawKind)
-            {
-                return true;
-            }
-
-            if (ancestor is ConditionalExpressionSyntax or
-                ConditionalAccessExpressionSyntax or
-                SwitchExpressionSyntax)
-            {
-                return false;
-            }
-
-            if (ancestor is BinaryExpressionSyntax binary &&
-                (binary.IsKind(SyntaxKind.LogicalAndExpression) ||
-                 binary.IsKind(SyntaxKind.LogicalOrExpression) ||
-                 binary.IsKind(SyntaxKind.CoalesceExpression)))
-            {
-                return false;
-            }
-
-            if (ancestor is AssignmentExpressionSyntax assignment &&
-                assignment.IsKind(SyntaxKind.CoalesceAssignmentExpression))
-            {
-                return false;
-            }
-        }
-
-        return false;
+        return ExecutionScope.IsUnconditionallyEvaluatedWithin(candidate, boundary);
     }
 
     private static bool IsFrameworkDataAnnotationsValidation(

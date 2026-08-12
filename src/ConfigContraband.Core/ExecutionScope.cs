@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace ConfigContraband;
@@ -16,5 +17,39 @@ internal static class ExecutionScope
     {
         return node is not AnonymousFunctionExpressionSyntax and
                not LocalFunctionStatementSyntax;
+    }
+
+    public static bool IsUnconditionallyEvaluatedWithin(SyntaxNode candidate, SyntaxNode boundary)
+    {
+        foreach (var ancestor in candidate.Ancestors())
+        {
+            if (ancestor.Span == boundary.Span && ancestor.RawKind == boundary.RawKind)
+            {
+                return true;
+            }
+
+            if (ancestor is ConditionalExpressionSyntax or
+                ConditionalAccessExpressionSyntax or
+                SwitchExpressionSyntax)
+            {
+                return false;
+            }
+
+            if (ancestor is BinaryExpressionSyntax binary &&
+                (binary.IsKind(SyntaxKind.LogicalAndExpression) ||
+                 binary.IsKind(SyntaxKind.LogicalOrExpression) ||
+                 binary.IsKind(SyntaxKind.CoalesceExpression)))
+            {
+                return false;
+            }
+
+            if (ancestor is AssignmentExpressionSyntax assignment &&
+                assignment.IsKind(SyntaxKind.CoalesceAssignmentExpression))
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 }
