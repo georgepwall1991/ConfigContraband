@@ -2,6 +2,18 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.9.0 - 2026-08-12
+
+### What's new
+
+- **`[OptionsValidator]` is DataAnnotations validation.** Microsoft's .NET 8+ source-generator pattern — `AddSingleton<IValidateOptions<T>, TImpl>()` (or `TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<T>, TImpl>())`) where `TImpl` has the framework `[OptionsValidator]` attribute — is now treated as equivalent to `ValidateDataAnnotations()`. CFG004 stays quiet (and no longer suggests the reflection API the generator replaces). CFG002 and CFG010 run against appsettings. CFG003 reports when `ValidateOnStart()` / `AddOptionsWithValidateOnStart<T>()` is missing. The schema tool emits the same `required` / constraint surface.
+
+### Details
+
+- Same executable scope as the Configure + `AddOptions<T>().Validate*` pairing. Named options match on type: `IValidateOptions<T>` applies to every name of `T`.
+- Handwritten `IValidateOptions<T>` without `[OptionsValidator]`, unregistered validator classes, lookalike attributes, different `T`, nested local functions, conditionals, factory/instance overloads, and a different `IServiceCollection` local stay quiet for this proof.
+- Diagnostic IDs and severities are unchanged.
+
 ## 0.8.0 - 2026-08-12
 
 ### What's new

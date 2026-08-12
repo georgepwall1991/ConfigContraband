@@ -104,8 +104,16 @@ public sealed partial class ConfigContrabandAnalyzer
 
         var chain = InvocationChain.Create(invocation, semanticModel, methodName);
         var hasAddOptionsWithValidateOnStart = HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel);
+        var hasOptionsValidator = HasSameBlockOptionsValidatorRegistration(
+            invocation,
+            optionsType,
+            semanticModel);
+        var hasValidateDataAnnotations = chain.MethodNames.Contains("ValidateDataAnnotations") ||
+                                         hasOptionsValidator;
         var hasValidateOnStart = chain.MethodNames.Contains("ValidateOnStart") || hasAddOptionsWithValidateOnStart;
-        var hasValidation = chain.MethodNames.Any(IsValidationMethod) || hasAddOptionsWithValidateOnStart;
+        var hasValidation = chain.MethodNames.Any(IsValidationMethod) ||
+                            hasAddOptionsWithValidateOnStart ||
+                            hasOptionsValidator;
         var bindsNonPublicProperties = HasBindNonPublicPropertiesEnabled(invocation, semanticModel);
         var errorsOnUnknownConfiguration = HasErrorOnUnknownConfigurationEnabled(invocation, semanticModel);
         var supportsValidationRules = true;
@@ -117,12 +125,12 @@ public sealed partial class ConfigContrabandAnalyzer
             chain.OutermostInvocation,
             supportsValidationRules,
             sectionExpressionContainsFullPath,
-            chain.MethodNames.Contains("ValidateDataAnnotations"),
+            hasValidateDataAnnotations,
             hasValidateOnStart,
             hasValidation,
             bindsNonPublicProperties,
             errorsOnUnknownConfiguration,
-            chain.MethodNames.Contains("ValidateDataAnnotations"),
+            hasValidateDataAnnotations,
             sectionExpression.GetLocation(),
             RequiresRuntimeSection(sectionExpression, semanticModel));
         return true;
@@ -213,16 +221,22 @@ public sealed partial class ConfigContrabandAnalyzer
             var reportNestedValidation = false;
             if (hasKnownOptionsName)
             {
-                isDataAnnotationsEnabled = HasSameBlockDataAnnotationsValidation(
+                var hasOptionsValidator = HasSameBlockOptionsValidatorRegistration(
                     invocation,
                     optionsType,
-                    optionsName,
                     semanticModel);
-                reportNestedValidation = HasSameBlockBindlessDataAnnotationsValidation(
-                    invocation,
-                    optionsType,
-                    optionsName,
-                    semanticModel);
+                isDataAnnotationsEnabled = hasOptionsValidator ||
+                    HasSameBlockDataAnnotationsValidation(
+                        invocation,
+                        optionsType,
+                        optionsName,
+                        semanticModel);
+                reportNestedValidation = hasOptionsValidator ||
+                    HasSameBlockBindlessDataAnnotationsValidation(
+                        invocation,
+                        optionsType,
+                        optionsName,
+                        semanticModel);
             }
 
             registration = new OptionsRegistration(
@@ -290,7 +304,11 @@ public sealed partial class ConfigContrabandAnalyzer
             hasAddOptionsWithValidateOnStart = HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel);
         }
 
-        var hasValidateDataAnnotations = chain.MethodNames.Contains("ValidateDataAnnotations");
+        var hasValidateDataAnnotations = chain.MethodNames.Contains("ValidateDataAnnotations") ||
+                                         HasSameBlockOptionsValidatorRegistration(
+                                             invocation,
+                                             optionsType,
+                                             semanticModel);
         var hasValidateOnStart = chain.MethodNames.Contains("ValidateOnStart") || hasAddOptionsWithValidateOnStart;
         var hasValidation = chain.MethodNames.Any(IsValidationMethod) || hasAddOptionsWithValidateOnStart;
         if (!hasValidation)
@@ -404,7 +422,8 @@ public sealed partial class ConfigContrabandAnalyzer
         {
             if (IsAddOptionsWithValidateOnStart(current, semanticModel) ||
                 TryGetAddOptionsFactoryTarget(current, semanticModel, out _, out _) ||
-                IsOptionsConfigurationConfigureInvocation(current, semanticModel))
+                IsOptionsConfigurationConfigureInvocation(current, semanticModel) ||
+                IsOptionsValidatorServiceCollectionRegistration(current, semanticModel))
             {
                 var memberAccess = (MemberAccessExpressionSyntax)current.Expression;
                 var receiver = semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol;
@@ -1175,6 +1194,37 @@ public sealed partial class ConfigContrabandAnalyzer
 
         optionsName = null;
         return false;
+    }
+
+    private static bool HasSameBlockOptionsValidatorRegistration(
+        InvocationExpressionSyntax invocation,
+        INamedTypeSymbol optionsType,
+        SemanticModel semanticModel)
+    {
+        foreach (var candidate in GetSameExecutableScopeInvocations(invocation))
+        {
+            if (!OptionsValidatorRegistration.TryGetValidatedOptionsType(
+                    candidate,
+                    semanticModel,
+                    out var validatedType) ||
+                !SymbolEqualityComparer.Default.Equals(validatedType, optionsType) ||
+                !SameServiceCollectionOrUnproven(invocation, candidate, semanticModel))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsOptionsValidatorServiceCollectionRegistration(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        return semanticModel.GetSymbolInfo(invocation).Symbol is IMethodSymbol method &&
+               OptionsValidatorRegistration.IsServiceCollectionRegistration(method);
     }
 
     private static bool OptionsNamesMatch(string? configureOptionsName, string? validationOptionsName)

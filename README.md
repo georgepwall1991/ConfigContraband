@@ -41,7 +41,7 @@ When the analyzer cannot prove a configuration shape statically, it **stays quie
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.8.0" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.9.0" PrivateAssets="all" />
 ```
 
 Or:
@@ -378,7 +378,7 @@ The analyzer checks every visible `appsettings.json` and `appsettings.*.json` ad
 
 ### `CFG002`: Required Configuration Keys Must Be Present
 
-`CFG002` runs when a supported binding has a visible DataAnnotations validation path. That includes `OptionsBuilder<TOptions>` chains with `ValidateDataAnnotations()` and direct `Configure<TOptions>(GetSection(...))` or `Configure<TOptions>(GetRequiredSection(...))` calls when the same top-level block also registers matching `AddOptions<TOptions>().ValidateDataAnnotations()`. It reports `[Required]` reference, string, or nullable value properties that are missing from every visible `appsettings.json` and `appsettings.*.json` section for that binding.
+`CFG002` runs when a supported binding has a visible DataAnnotations validation path. That includes `OptionsBuilder<TOptions>` chains with `ValidateDataAnnotations()`, same-block `[OptionsValidator]` `IValidateOptions<TOptions>` registrations (`AddSingleton<IValidateOptions<T>, TImpl>()` or `TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<T>, TImpl>())` where `TImpl` carries the framework `[OptionsValidator]` attribute), and direct `Configure<TOptions>(GetSection(...))` or `Configure<TOptions>(GetRequiredSection(...))` calls when the same top-level block also registers matching `AddOptions<TOptions>().ValidateDataAnnotations()` or that OptionsValidator shape. It reports `[Required]` reference, string, or nullable value properties that are missing from every visible `appsettings.json` and `appsettings.*.json` section for that binding.
 
 Before:
 
@@ -441,7 +441,7 @@ The analyzer tracks validation calls on the same fluent chain whether they appea
 
 A same-block `Configure<T>(GetSection(...))` / `GetRequiredSection(...)` paired with `AddOptions<T>().ValidateDataAnnotations()` or `.Validate(...)` and no `ValidateOnStart()` is the same production failure: validation is registered and will not run at startup. `CFG003` reports on the OptionsBuilder chain so the existing code fix can append `ValidateOnStart()`. `Configure<T>` alone stays quiet, as do nested local functions, conditionals, and named-options mismatches — the same conservative same-block boundary `CFG002` already uses. When the matching `AddOptions<T>()` chain also `Bind`s/`BindConfiguration`s, the OptionsBuilder registration carries `CFG003` and `Configure` does not duplicate it.
 
-`CFG003` only treats the framework `OptionsBuilder<TOptions>.Validate(...)`, `ValidateDataAnnotations()`, and `ValidateOnStart()` APIs as validation signals. Custom extension methods with the same names are ignored unless they call the framework APIs in a shape the analyzer can see.
+`CFG003` only treats the framework `OptionsBuilder<TOptions>.Validate(...)`, `ValidateDataAnnotations()`, and `ValidateOnStart()` APIs as validation signals, plus a same-scope framework `[OptionsValidator]` `IValidateOptions<T>` DI registration. Custom extension methods with the same names, and handwritten `IValidateOptions<T>` implementations without `[OptionsValidator]`, are ignored unless they call the framework APIs in a shape the analyzer can see. When `[OptionsValidator]` is proven on a bind chain, missing `ValidateOnStart()` / `AddOptionsWithValidateOnStart<T>()` still reports — generated validators run on first use unless startup validation is registered.
 
 ### `CFG004`: DataAnnotations Must Be Switched On
 
@@ -481,7 +481,7 @@ The analyzer recognizes `ValidateDataAnnotations()` on the same fluent chain bef
 
 The same `CFG004` signal applies when a same-block `Configure<T>(GetSection(...))` / `GetRequiredSection(...)` is paired with `AddOptions<T>().Validate(...)`, `ValidateDataAnnotations()`, or `AddOptionsWithValidateOnStart<TOptions>()` and the options type has DataAnnotations but that OptionsBuilder chain never calls `ValidateDataAnnotations()`. `AddOptions<T>().ValidateOnStart()` alone does not count as validation for this pairing — the same `IsValidationMethod` gate the bind-path already uses. The diagnostic and code fix target the OptionsBuilder chain. `Configure<T>` with DataAnnotations and no same-block validation registration stays quiet — proving absence across methods and assemblies is not conservative.
 
-Like `CFG003`, `CFG004` symbol-checks the framework validation extension methods. A project-local helper named `ValidateDataAnnotations(...)` does not satisfy the rule by name alone.
+Like `CFG003`, `CFG004` symbol-checks the framework validation extension methods. A project-local helper named `ValidateDataAnnotations(...)` does not satisfy the rule by name alone. A same-scope framework `[OptionsValidator]` registration (`AddSingleton<IValidateOptions<T>, TImpl>()` or `TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<T>, TImpl>())` where `TImpl` has `[OptionsValidator]`) is DataAnnotations-enabled, so `CFG004` stays quiet and does not suggest adding `ValidateDataAnnotations()` — Microsoft's source generator replaces that call. Handwritten `IValidateOptions<T>` without `[OptionsValidator]`, a validator class that is never registered, lookalike attributes, named-type mismatches, nested local functions, conditionals, factory/instance overloads, and a different `IServiceCollection` local stay quiet for this proof.
 
 ### `CFG005`: Nested Options Need Recursive Validation
 
@@ -659,7 +659,7 @@ services.AddOptions<ServerOptions>()
 The rule reports only when all of these are proven:
 
 - a supported options binding (`BindConfiguration`, `Bind(GetSection/GetRequiredSection)`, `Configure<T>(GetSection/GetRequiredSection)`)
-- DataAnnotations validation is enabled — the same gate as `CFG002`: `ValidateDataAnnotations()` on the OptionsBuilder chain, or same-block `Configure<T>` paired with matching `AddOptions<T>().ValidateDataAnnotations()`
+- DataAnnotations validation is enabled — the same gate as `CFG002`: `ValidateDataAnnotations()` on the OptionsBuilder chain, a same-scope `[OptionsValidator]` `IValidateOptions<T>` registration, or same-block `Configure<T>` paired with matching `AddOptions<T>().ValidateDataAnnotations()` or that OptionsValidator shape
 - the scalar is present and convertible (`CFG008` already owns conversion failures)
 - a framework constraint is a provable `IsValid` failure
 
@@ -688,9 +688,9 @@ ConfigContraband currently focuses on:
 - `appsettings.json` and `appsettings.*.json` files.
 - `AddOptions<T>().BindConfiguration("Section")` registrations.
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
-- Direct `Configure<T>(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations for section and JSON-key drift, and for `CFG003`/`CFG004`/`CFG005` when the same executable scope also registers matching `AddOptions<T>().Validate*` / `ValidateDataAnnotations()` / `AddOptionsWithValidateOnStart<T>()` (Configure-only stays quiet; `AddOptions<T>().ValidateOnStart()` alone does not enable CFG004/CFG005 on this pairing).
+- Direct `Configure<T>(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations for section and JSON-key drift, and for `CFG003`/`CFG004`/`CFG005` when the same executable scope also registers matching `AddOptions<T>().Validate*` / `ValidateDataAnnotations()` / `AddOptionsWithValidateOnStart<T>()` (Configure-only stays quiet; `AddOptions<T>().ValidateOnStart()` alone does not enable CFG004/CFG005 on this pairing). Same-scope framework `[OptionsValidator]` `IValidateOptions<T>` registrations count as DataAnnotations-enabled for `CFG002`/`CFG004`/`CFG010` and as validation for `CFG003` on OptionsBuilder bind chains.
 - Direct framework generic `ConfigurationBinder.GetValue<T>` and non-generic `GetValue(typeof(T), ...)` reads for provable scalar conversion failures (`CFG008`).
-- Bound scalars that convert but fail DataAnnotations `[Range]`, length, or allow/deny-list constraints when `ValidateDataAnnotations()` is proven (`CFG010`).
+- Bound scalars that convert but fail DataAnnotations `[Range]`, length, or allow/deny-list constraints when `ValidateDataAnnotations()` or a same-scope `[OptionsValidator]` registration is proven (`CFG010`).
 - Direct configuration reads: standalone `GetRequiredSection(...)`, suggestion-gated `GetSection(...).Get<T>()`/`.Bind(instance)`, keyed `Bind("key", instance)`, and suggestion-gated `GetConnectionString(...)` (`CFG009`).
 - Strict `ErrorOnUnknownConfiguration` binder options for unknown-key failures.
 - Compile-time constant section names, including literals, `const` values, and `nameof` expressions.

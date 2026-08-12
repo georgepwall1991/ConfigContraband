@@ -299,6 +299,124 @@ public sealed class RegistrationExtractorTests
     }
 
     [Fact]
+    public void Bind_configuration_is_validated_when_options_validator_is_registered()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe");
+                    services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+                }
+            }
+
+            [OptionsValidator]
+            public sealed class ValidateStripeOptions : IValidateOptions<StripeOptions>
+            {
+                public ValidateOptionsResult Validate(string? name, StripeOptions options) => ValidateOptionsResult.Success;
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.Equal("Stripe", section.SectionPath);
+        Assert.True(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
+    public void Bind_configuration_is_validated_when_options_validator_uses_try_add_enumerable()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.DependencyInjection.Extensions;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe");
+                    services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>());
+                }
+            }
+
+            [OptionsValidator]
+            public sealed class ValidateStripeOptions : IValidateOptions<StripeOptions>
+            {
+                public ValidateOptionsResult Validate(string? name, StripeOptions options) => ValidateOptionsResult.Success;
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.True(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
+    public void Direct_configure_is_validated_when_options_validator_is_registered()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services, IConfiguration configuration)
+                {
+                    services.Configure<BillingOptions>(configuration.GetSection("Billing"));
+                    services.AddSingleton<IValidateOptions<BillingOptions>, ValidateBillingOptions>();
+                }
+            }
+
+            [OptionsValidator]
+            public sealed class ValidateBillingOptions : IValidateOptions<BillingOptions>
+            {
+                public ValidateOptionsResult Validate(string? name, BillingOptions options) => ValidateOptionsResult.Success;
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.Equal("Billing", section.SectionPath);
+        Assert.True(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
+    public void Bind_configuration_is_not_validated_for_handwritten_ivalidate_options()
+    {
+        var sections = Extract(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration("Stripe");
+                    services.AddSingleton<IValidateOptions<StripeOptions>, AppValidator>();
+                }
+            }
+
+            public sealed class AppValidator : IValidateOptions<StripeOptions>
+            {
+                public ValidateOptionsResult Validate(string? name, StripeOptions options) => ValidateOptionsResult.Success;
+            }
+            """);
+
+        var section = Assert.Single(sections);
+        Assert.False(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
     public void Detects_strict_error_on_unknown_configuration()
     {
         var sections = Extract(

@@ -9,7 +9,7 @@
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.8.0" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.9.0" PrivateAssets="all" />
 ```
 
 ```bash
@@ -22,7 +22,7 @@ No runtime dependency. Analyzers run at build time and in supported IDEs. Visibl
 
 - Section typos in `BindConfiguration(...)` / `Configure<T>(GetSection(...))`
 - Missing `[Required]` keys in visible appsettings
-- Validation without `ValidateOnStart()` or `ValidateDataAnnotations()`
+- Validation without `ValidateOnStart()` or `ValidateDataAnnotations()` (including Microsoft's `[OptionsValidator]` source-generator path)
 - Nested options that look validated but are skipped
 - Misspelled JSON keys, strict unknown-key failures, scalar conversion errors, and DataAnnotations constraint failures
 - Direct `IConfiguration` reads whose path is missing from visible appsettings

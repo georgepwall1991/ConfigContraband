@@ -239,7 +239,7 @@ public sealed partial class ConfigContrabandAnalyzerTests
         Assert.Contains(".nupkg.metadata", verifier, StringComparison.Ordinal);
         Assert.Contains("metadata.get(\"source\")", verifier, StringComparison.Ordinal);
         Assert.Contains(
-            "<ConfigContrabandVersion Condition=\"'$(ConfigContrabandVersion)' == ''\">0.8.0</ConfigContrabandVersion>",
+            "<ConfigContrabandVersion Condition=\"'$(ConfigContrabandVersion)' == ''\">0.9.0</ConfigContrabandVersion>",
             consumerProject,
             StringComparison.Ordinal);
         Assert.Contains(

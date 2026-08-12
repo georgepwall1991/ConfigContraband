@@ -14,21 +14,21 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.8.0</Version>
+    <Version>0.9.0</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband — Options and appsettings validation analyzer</Title>
     <Description>Compile-time Options validation for .NET: a Roslyn analyzer that checks BindConfiguration, ValidateOnStart, ValidateDataAnnotations, and appsettings.json against your IOptions types so broken configuration fails in the editor and CI—not production.</Description>
     <!-- NuGet search/detail cards: short summary separate from the longer Description. -->
     <PackageSummary>Compile-time Options and appsettings validation analyzer for .NET (BindConfiguration, ValidateOnStart, ValidateDataAnnotations).</PackageSummary>
     <Summary>$(PackageSummary)</Summary>
-    <PackageTags>configuration;options;appsettings;validation;ValidateOnStart;ValidateDataAnnotations;BindConfiguration;IOptions;options-pattern;DataAnnotations;roslyn;roslyn-analyzer;analyzers;static-analysis;aspnetcore;csharp;dotnet</PackageTags>
+    <PackageTags>configuration;options;appsettings;validation;ValidateOnStart;ValidateDataAnnotations;OptionsValidator;BindConfiguration;IOptions;options-pattern;DataAnnotations;roslyn;roslyn-analyzer;analyzers;static-analysis;aspnetcore;csharp;dotnet</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageIcon>assets/configcontraband-icon.png</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>Added CFG010: bound appsettings scalars that convert but fail DataAnnotations ([Range], length, AllowedValues/DeniedValues) now warn at build time when ValidateDataAnnotations() is proven.</PackageReleaseNotes>
+    <PackageReleaseNotes>Honor Microsoft's [OptionsValidator] IValidateOptions source-generator registration as DataAnnotations validation: CFG004 stays quiet, CFG002/CFG010 run, and CFG003 reports missing ValidateOnStart().</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
