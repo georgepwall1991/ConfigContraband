@@ -366,7 +366,8 @@ public sealed partial class ConfigContrabandAnalyzer
                 }
 
                 if (TryGetConfigureOptionsName(candidate, argument, semanticModel, out var configureName) &&
-                    OptionsNamesMatch(configureName, optionsName))
+                    OptionsNamesMatch(configureName, optionsName) &&
+                    SameServiceCollectionOrUnproven(validationInvocation, candidate, semanticModel))
                 {
                     return true;
                 }
@@ -376,6 +377,71 @@ public sealed partial class ConfigContrabandAnalyzer
         }
 
         return false;
+    }
+
+    private static bool SameServiceCollectionOrUnproven(
+        InvocationExpressionSyntax left,
+        InvocationExpressionSyntax right,
+        SemanticModel semanticModel)
+    {
+        if (!TryGetServiceCollectionReceiver(left, semanticModel, out var leftCollection) ||
+            !TryGetServiceCollectionReceiver(right, semanticModel, out var rightCollection))
+        {
+            return true;
+        }
+
+        return SymbolEqualityComparer.Default.Equals(leftCollection, rightCollection);
+    }
+
+    private static bool TryGetServiceCollectionReceiver(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        out ISymbol collection)
+    {
+        collection = null!;
+        var current = invocation;
+        while (true)
+        {
+            if (IsAddOptionsWithValidateOnStart(current, semanticModel) ||
+                TryGetAddOptionsFactoryTarget(current, semanticModel, out _, out _) ||
+                IsOptionsConfigurationConfigureInvocation(current, semanticModel))
+            {
+                var memberAccess = (MemberAccessExpressionSyntax)current.Expression;
+                var receiver = semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol;
+                if (receiver is ILocalSymbol)
+                {
+                    collection = receiver;
+                    return true;
+                }
+
+                if (receiver is IParameterSymbol)
+                {
+                    collection = receiver;
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (current.Expression is MemberAccessExpressionSyntax chainAccess &&
+                chainAccess.Expression is InvocationExpressionSyntax receiverInvocation)
+            {
+                current = receiverInvocation;
+                continue;
+            }
+
+            return false;
+        }
+    }
+
+    private static bool IsOptionsConfigurationConfigureInvocation(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+        return symbol is not null &&
+               string.Equals(symbol.Name, "Configure", StringComparison.Ordinal) &&
+               IsOptionsConfigurationConfigureMethod(symbol);
     }
 
     private static bool MatchingConfigureBindsNonPublicProperties(
@@ -417,7 +483,8 @@ public sealed partial class ConfigContrabandAnalyzer
 
                 if (TryGetConfigureOptionsName(candidate, argument, semanticModel, out var configureName) &&
                     OptionsNamesMatch(configureName, optionsName) &&
-                    HasBindNonPublicPropertiesEnabled(candidate, semanticModel))
+                    HasBindNonPublicPropertiesEnabled(candidate, semanticModel) &&
+                    SameServiceCollectionOrUnproven(validationInvocation, candidate, semanticModel))
                 {
                     return true;
                 }
@@ -642,7 +709,8 @@ public sealed partial class ConfigContrabandAnalyzer
                     out _,
                     out _) ||
                 !isDataAnnotations ||
-                OptionsBuilderInstanceBinds(invocation, semanticModel))
+                OptionsBuilderInstanceBinds(invocation, semanticModel) ||
+                !SameServiceCollectionOrUnproven(configureInvocation, invocation, semanticModel))
             {
                 continue;
             }
@@ -780,7 +848,11 @@ public sealed partial class ConfigContrabandAnalyzer
         var current = GetOutermostFluentInvocation(invocation);
         while (true)
         {
-            var memberAccess = (MemberAccessExpressionSyntax)current.Expression;
+            if (current.Expression is not MemberAccessExpressionSyntax memberAccess)
+            {
+                return false;
+            }
+
             var methodName = memberAccess.Name.Identifier.ValueText;
             if (IsOptionsBuilderBindMethodName(methodName) &&
                 IsOptionsBuilderConfigurationMethod(current, semanticModel, methodName))

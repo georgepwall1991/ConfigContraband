@@ -662,6 +662,44 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg003_stays_quiet_when_configure_and_validation_use_different_service_collections()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            var first = new ServiceCollection();
+            var second = new ServiceCollection();
+            first.Configure<AppOptions>(configuration.GetSection("App"));
+            second.AddOptions<AppOptions>()
+                .ValidateDataAnnotations();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
+
+    [Fact]
+    public async Task Cfg003_reports_when_service_collection_receiver_is_not_a_local_or_parameter()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            CreateServices().Configure<AppOptions>(configuration.GetSection("App"));
+            {|#0:CreateServices().AddOptions<AppOptions>()
+                .ValidateDataAnnotations()|};
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", extraMembers: """
+            private static IServiceCollection CreateServices() => new ServiceCollection();
+            """, optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_stays_quiet_when_field_builder_validates_without_validate_on_start()
     {
         var source = OptionsSource("""
