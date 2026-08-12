@@ -87,7 +87,7 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         registration,
                         compilation,
                         syntaxContext.CancellationToken);
-                    if (registration.SupportsValidationRules)
+                    if (registration.ReportNestedValidation)
                     {
                         AnalyzeOptionType(
                             syntaxContext.ReportDiagnostic,
@@ -97,7 +97,7 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                             syntaxContext.CancellationToken);
                     }
 
-                    if (configuration.HasFiles)
+                    if (configuration.HasFiles && registration.HasBoundSection)
                     {
                         var strictUnknownConfigurationKeySuppressed = IsDiagnosticSuppressed(
                             syntaxContext.Options,
@@ -174,11 +174,12 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return;
         }
 
+        var location = registration.ValidationInvocation.GetLocation();
         if (registration.HasValidation && !registration.HasValidateOnStart)
         {
             reportDiagnostic(Diagnostic.Create(
                 DiagnosticDescriptors.ValidationNotOnStart,
-                registration.OutermostInvocation.GetLocation(),
+                location,
                 registration.OptionsType.Name));
         }
 
@@ -194,7 +195,7 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
             reportDiagnostic(Diagnostic.Create(
                 DiagnosticDescriptors.DataAnnotationsNotEnabled,
-                registration.OutermostInvocation.GetLocation(),
+                location,
                 properties,
                 registration.OptionsType.Name));
         }
@@ -361,7 +362,10 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             bool errorsOnUnknownConfiguration,
             bool isDataAnnotationsEnabled,
             Location bindLocation,
-            bool requiresRuntimeSection)
+            bool requiresRuntimeSection,
+            InvocationExpressionSyntax? validationInvocation = null,
+            bool? reportNestedValidation = null,
+            bool hasBoundSection = true)
         {
             OptionsType = optionsType;
             SectionPath = sectionPath;
@@ -377,6 +381,9 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             IsDataAnnotationsEnabled = isDataAnnotationsEnabled;
             BindLocation = bindLocation;
             RequiresRuntimeSection = requiresRuntimeSection;
+            ValidationInvocation = validationInvocation ?? outermostInvocation;
+            ReportNestedValidation = reportNestedValidation ?? supportsValidationRules;
+            HasBoundSection = hasBoundSection;
         }
 
         public INamedTypeSymbol OptionsType { get; }
@@ -393,6 +400,9 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         public bool IsDataAnnotationsEnabled { get; }
         public Location BindLocation { get; }
         public bool RequiresRuntimeSection { get; }
+        public InvocationExpressionSyntax ValidationInvocation { get; }
+        public bool ReportNestedValidation { get; }
+        public bool HasBoundSection { get; }
     }
 
     private sealed class InvocationChain
@@ -427,6 +437,17 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             AddSubsequentLocalInvocations(bindInvocation, semanticModel, methods);
 
             return new InvocationChain(outermost, methods.ToImmutable());
+        }
+
+        public static InvocationChain CreateFrom(
+            InvocationExpressionSyntax invocation,
+            SemanticModel semanticModel)
+        {
+            var methods = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
+            AddRecognizedOptionsBuilderMethod(invocation, semanticModel, methods);
+            AddReceiverInvocations(invocation, semanticModel, methods);
+            AddSubsequentLocalInvocations(invocation, semanticModel, methods);
+            return new InvocationChain(invocation, methods.ToImmutable());
         }
 
         private static void AddReceiverInvocations(

@@ -275,10 +275,31 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         return optionsBuilderType is not null &&
                invocationType is not null &&
                TryGetOptionsBuilderType(invocationType, optionsBuilderType, out var appendBuilderType) &&
-               TryGetBoundOptionsType(outermost, semanticModel, optionsBuilderType, out var boundOptionsType) &&
-               SymbolEqualityComparer.Default.Equals(
-                   appendBuilderType.TypeArguments[0],
-                   boundOptionsType);
+               AllowsAppendForRegistration(
+                   outermost,
+                   semanticModel,
+                   optionsBuilderType,
+                   appendBuilderType);
+    }
+
+    private static bool AllowsAppendForRegistration(
+        InvocationExpressionSyntax outermost,
+        SemanticModel semanticModel,
+        INamedTypeSymbol optionsBuilderType,
+        INamedTypeSymbol appendBuilderType)
+    {
+        if (!TryGetBoundOptionsType(
+                outermost,
+                semanticModel,
+                optionsBuilderType,
+                out var boundOptionsType))
+        {
+            return true;
+        }
+
+        return SymbolEqualityComparer.Default.Equals(
+            appendBuilderType.TypeArguments[0],
+            boundOptionsType);
     }
 
     private static bool TryGetOptionsBuilderType(

@@ -557,6 +557,264 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg003_fix_appends_validate_on_start_to_same_block_direct_configure_validation()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    services.Configure<AppOptions>(configuration.GetSection("App"));
+                    {|#0:services.AddOptions<AppOptions>()
+                        .ValidateDataAnnotations()|};
+                }
+            }
+
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """;
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    services.Configure<AppOptions>(configuration.GetSection("App"));
+                    services.AddOptions<AppOptions>()
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_fix_appends_validate_on_start_to_split_local_direct_configure_validation()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    services.Configure<AppOptions>(configuration.GetSection("App"));
+                    var builder = services.AddOptions<AppOptions>();
+                    {|#0:builder.ValidateDataAnnotations()|};
+                }
+            }
+
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """;
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    services.Configure<AppOptions>(configuration.GetSection("App"));
+                    var builder = services.AddOptions<AppOptions>();
+                    builder.ValidateDataAnnotations().ValidateOnStart();
+                }
+            }
+
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_fix_appends_validate_on_start_to_parameter_builder_direct_configure_validation()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.Options;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    Register(services, configuration, services.AddOptions<AppOptions>());
+                }
+
+                private static void Register(
+                    IServiceCollection services,
+                    IConfiguration configuration,
+                    OptionsBuilder<AppOptions> builder)
+                {
+                    services.Configure<AppOptions>(configuration.GetSection("App"));
+                    {|#0:builder.ValidateDataAnnotations()|};
+                }
+            }
+
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """;
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+            using Microsoft.Extensions.Options;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    Register(services, configuration, services.AddOptions<AppOptions>());
+                }
+
+                private static void Register(
+                    IServiceCollection services,
+                    IConfiguration configuration,
+                    OptionsBuilder<AppOptions> builder)
+                {
+                    services.Configure<AppOptions>(configuration.GetSection("App"));
+                    builder.ValidateDataAnnotations().ValidateOnStart();
+                }
+            }
+
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_fix_appends_validate_on_start_to_local_initializer_direct_configure_validation()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    services.Configure<AppOptions>(configuration.GetSection("App"));
+                    var builder = {|#0:services.AddOptions<AppOptions>().ValidateDataAnnotations()|};
+                }
+            }
+
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """;
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    services.Configure<AppOptions>(configuration.GetSection("App"));
+                    var builder = services.AddOptions<AppOptions>().ValidateDataAnnotations().ValidateOnStart();
+                }
+            }
+
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_fix_appends_data_annotations_to_same_block_direct_configure_validate()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    services.Configure<AppOptions>(configuration.GetSection("App"));
+                    {|#0:services.AddOptions<AppOptions>()
+                        .Validate(_ => true)
+                        .ValidateOnStart()|};
+                }
+            }
+
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """;
+
+        var fixedSource = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Configuration;
+
+            public sealed class Startup
+            {
+                public void Configure(IServiceCollection services)
+                {
+                    IConfiguration configuration = null!;
+                    services.Configure<AppOptions>(configuration.GetSection("App"));
+                    services.AddOptions<AppOptions>()
+                        .Validate(_ => true)
+                        .ValidateOnStart()
+                        .ValidateDataAnnotations();
+                }
+            }
+
+            public class AppOptions { [Required] public string ConnectionString { get; set; } = ""; }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_fix_all_appends_validate_on_start_to_each_registration()
     {
         var source = """

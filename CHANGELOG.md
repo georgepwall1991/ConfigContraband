@@ -2,6 +2,20 @@
 
 All notable changes to ConfigContraband will be documented in this file.
 
+## 0.7.29 - 2026-08-12
+
+### What's new
+
+- **CFG003/CFG004/CFG005 for same-block `Configure<T>(GetSection)` + `AddOptions<T>().Validate*`**: when the same executable scope registers matching OptionsBuilder validation, missing `ValidateOnStart()` / `ValidateDataAnnotations()` and nested recursive-validation gaps now report. Diagnostics and code fixes target the OptionsBuilder chain so `.ValidateOnStart()` / `.ValidateDataAnnotations()` can be appended. Configure-only registrations stay quiet.
+
+### Details
+
+- Reuses CFG002's named-options matching (`default` / empty-string / `"tenant"` / `ConfigureAll`) and same-block executable-scope scan; nested local functions, conditionals, named mismatches, and custom same-name helpers stay quiet.
+- Reports on the bind-less `AddOptions<T>().Validate*` chain (not on `Configure`, which returns `IServiceCollection` and cannot receive the existing append fix). Duplicate CFG003/CFG004 is skipped when the matching chain already `Bind`s / `BindConfiguration`s.
+- CFG005 on Configure requires same-block `ValidateDataAnnotations()`; Configure-only nested annotations stay quiet.
+- Bindless CFG004 honors `BindNonPublicProperties` on the matching `Configure` call; custom extensions that retarget `OptionsBuilder<T>` stay quiet; split-local `AddOptions` + `Validate*` reports once and the fixer appends to the validation statement; parameter-typed `OptionsBuilder<T>` receivers in the same block are included; `AddOptions<T>().ValidateOnStart()` alone does not enable CFG004; Configure and `AddOptions` on different service-collection locals stay quiet.
+- Diagnostic IDs and severities are unchanged.
+
 ## 0.7.28 - 2026-08-12
 
 ### What's new

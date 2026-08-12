@@ -23,7 +23,12 @@ public sealed partial class ConfigContrabandAnalyzer
             return true;
         }
 
-        return TryCreateConfigureRegistration(invocation, semanticModel, out registration);
+        if (TryCreateConfigureRegistration(invocation, semanticModel, out registration))
+        {
+            return true;
+        }
+
+        return TryCreateBindlessValidationRegistration(invocation, semanticModel, out registration);
     }
 
     private static bool TryCreateOptionsBuilderRegistration(
@@ -204,8 +209,21 @@ public sealed partial class ConfigContrabandAnalyzer
                 argument,
                 semanticModel,
                 out var optionsName);
-            var isDataAnnotationsEnabled = hasKnownOptionsName &&
-                HasSameBlockDataAnnotationsValidation(invocation, optionsType, optionsName, semanticModel);
+            var isDataAnnotationsEnabled = false;
+            var reportNestedValidation = false;
+            if (hasKnownOptionsName)
+            {
+                isDataAnnotationsEnabled = HasSameBlockDataAnnotationsValidation(
+                    invocation,
+                    optionsType,
+                    optionsName,
+                    semanticModel);
+                reportNestedValidation = HasSameBlockBindlessDataAnnotationsValidation(
+                    invocation,
+                    optionsType,
+                    optionsName,
+                    semanticModel);
+            }
 
             registration = new OptionsRegistration(
                 optionsType,
@@ -221,11 +239,270 @@ public sealed partial class ConfigContrabandAnalyzer
                 errorsOnUnknownConfiguration: HasErrorOnUnknownConfigurationEnabled(invocation, semanticModel),
                 isDataAnnotationsEnabled: isDataAnnotationsEnabled,
                 bindLocation: sectionExpression.GetLocation(),
-                requiresRuntimeSection: RequiresRuntimeSection(sectionExpression, semanticModel));
+                requiresRuntimeSection: RequiresRuntimeSection(sectionExpression, semanticModel),
+                validationInvocation: null,
+                reportNestedValidation: reportNestedValidation);
             return true;
         }
 
         return false;
+    }
+
+    private static bool TryCreateBindlessValidationRegistration(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        out OptionsRegistration registration)
+    {
+        registration = null!;
+
+        if (!ReferenceEquals(GetOutermostFluentInvocation(invocation), invocation))
+        {
+            return false;
+        }
+
+        var isFactoryWithValidateOnStart = IsAddOptionsWithValidateOnStart(invocation, semanticModel);
+        if (!isFactoryWithValidateOnStart)
+        {
+            var isDataAnnotations = IsOptionsBuilderValidateDataAnnotationsInvocation(invocation, semanticModel);
+            var isValidateOnStart = IsOptionsBuilderValidateOnStartInvocation(invocation, semanticModel);
+            var isValidate = IsOptionsBuilderValidateInvocation(invocation, semanticModel);
+            if (!isDataAnnotations && !isValidateOnStart && !isValidate)
+            {
+                return false;
+            }
+        }
+
+        if (!TryGetOptionsBuilderFactoryTarget(invocation, semanticModel, out var optionsType, out var optionsName) ||
+            !OptionsBuilderInvocationTypeMatches(invocation, optionsType, semanticModel))
+        {
+            return false;
+        }
+
+        if (OptionsBuilderInstanceBinds(invocation, semanticModel))
+        {
+            return false;
+        }
+
+        var chain = InvocationChain.CreateFrom(invocation, semanticModel);
+        var hasAddOptionsWithValidateOnStart = isFactoryWithValidateOnStart;
+        if (!hasAddOptionsWithValidateOnStart)
+        {
+            hasAddOptionsWithValidateOnStart = HasAddOptionsWithValidateOnStartReceiver(invocation, semanticModel);
+        }
+
+        var hasValidateDataAnnotations = chain.MethodNames.Contains("ValidateDataAnnotations");
+        var hasValidateOnStart = chain.MethodNames.Contains("ValidateOnStart") || hasAddOptionsWithValidateOnStart;
+        var hasValidation = chain.MethodNames.Any(IsValidationMethod) || hasAddOptionsWithValidateOnStart;
+        if (!hasValidation)
+        {
+            return false;
+        }
+
+        if (!HasSameBlockMatchingConfigure(invocation, optionsType, optionsName, semanticModel))
+        {
+            return false;
+        }
+
+        registration = new OptionsRegistration(
+            optionsType,
+            sectionPath: string.Empty,
+            sectionExpression: invocation,
+            invocation,
+            supportsValidationRules: true,
+            sectionExpressionContainsFullPath: true,
+            hasValidateDataAnnotations,
+            hasValidateOnStart,
+            hasValidation,
+            bindsNonPublicProperties: MatchingConfigureBindsNonPublicProperties(
+                invocation,
+                optionsType,
+                optionsName,
+                semanticModel),
+            errorsOnUnknownConfiguration: false,
+            isDataAnnotationsEnabled: hasValidateDataAnnotations,
+            bindLocation: invocation.GetLocation(),
+            requiresRuntimeSection: false,
+            validationInvocation: invocation,
+            reportNestedValidation: false,
+            hasBoundSection: false);
+        return true;
+    }
+
+    private static bool HasSameBlockMatchingConfigure(
+        InvocationExpressionSyntax validationInvocation,
+        INamedTypeSymbol optionsType,
+        string? optionsName,
+        SemanticModel semanticModel)
+    {
+        foreach (var candidate in GetSameExecutableScopeInvocations(validationInvocation))
+        {
+            if (candidate == validationInvocation ||
+                candidate.Expression is not MemberAccessExpressionSyntax memberAccess ||
+                !string.Equals(memberAccess.Name.Identifier.ValueText, "Configure", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var symbol = semanticModel.GetSymbolInfo(candidate).Symbol as IMethodSymbol;
+            if (symbol is null ||
+                symbol.TypeArguments.Length != 1 ||
+                symbol.TypeArguments[0] is not INamedTypeSymbol configureType ||
+                !SymbolEqualityComparer.Default.Equals(configureType, optionsType) ||
+                !IsOptionsConfigurationConfigureMethod(symbol))
+            {
+                continue;
+            }
+
+            foreach (var argument in candidate.ArgumentList.Arguments)
+            {
+                if (!TryGetConfigurationSectionPath(
+                        argument.Expression,
+                        semanticModel,
+                        out _,
+                        out _,
+                        out _))
+                {
+                    continue;
+                }
+
+                if (TryGetConfigureOptionsName(candidate, argument, semanticModel, out var configureName) &&
+                    OptionsNamesMatch(configureName, optionsName) &&
+                    SameServiceCollectionOrUnproven(validationInvocation, candidate, semanticModel))
+                {
+                    return true;
+                }
+
+                break;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool SameServiceCollectionOrUnproven(
+        InvocationExpressionSyntax left,
+        InvocationExpressionSyntax right,
+        SemanticModel semanticModel)
+    {
+        if (!TryGetServiceCollectionReceiver(left, semanticModel, out var leftCollection) ||
+            !TryGetServiceCollectionReceiver(right, semanticModel, out var rightCollection))
+        {
+            return true;
+        }
+
+        return SymbolEqualityComparer.Default.Equals(leftCollection, rightCollection);
+    }
+
+    private static bool TryGetServiceCollectionReceiver(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        out ISymbol collection)
+    {
+        collection = null!;
+        var current = invocation;
+        while (true)
+        {
+            if (IsAddOptionsWithValidateOnStart(current, semanticModel) ||
+                TryGetAddOptionsFactoryTarget(current, semanticModel, out _, out _) ||
+                IsOptionsConfigurationConfigureInvocation(current, semanticModel))
+            {
+                var memberAccess = (MemberAccessExpressionSyntax)current.Expression;
+                var receiver = semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol;
+                if (receiver is ILocalSymbol)
+                {
+                    collection = receiver;
+                    return true;
+                }
+
+                if (receiver is IParameterSymbol)
+                {
+                    collection = receiver;
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (current.Expression is MemberAccessExpressionSyntax chainAccess &&
+                chainAccess.Expression is InvocationExpressionSyntax receiverInvocation)
+            {
+                current = receiverInvocation;
+                continue;
+            }
+
+            return false;
+        }
+    }
+
+    private static bool IsOptionsConfigurationConfigureInvocation(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+        return symbol is not null &&
+               string.Equals(symbol.Name, "Configure", StringComparison.Ordinal) &&
+               IsOptionsConfigurationConfigureMethod(symbol);
+    }
+
+    private static bool MatchingConfigureBindsNonPublicProperties(
+        InvocationExpressionSyntax validationInvocation,
+        INamedTypeSymbol optionsType,
+        string? optionsName,
+        SemanticModel semanticModel)
+    {
+        foreach (var candidate in GetSameExecutableScopeInvocations(validationInvocation))
+        {
+            if (candidate == validationInvocation ||
+                candidate.Expression is not MemberAccessExpressionSyntax memberAccess ||
+                !string.Equals(memberAccess.Name.Identifier.ValueText, "Configure", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var symbol = semanticModel.GetSymbolInfo(candidate).Symbol as IMethodSymbol;
+            if (symbol is null ||
+                symbol.TypeArguments.Length != 1 ||
+                symbol.TypeArguments[0] is not INamedTypeSymbol configureType ||
+                !SymbolEqualityComparer.Default.Equals(configureType, optionsType) ||
+                !IsOptionsConfigurationConfigureMethod(symbol))
+            {
+                continue;
+            }
+
+            foreach (var argument in candidate.ArgumentList.Arguments)
+            {
+                if (!TryGetConfigurationSectionPath(
+                        argument.Expression,
+                        semanticModel,
+                        out _,
+                        out _,
+                        out _))
+                {
+                    continue;
+                }
+
+                if (TryGetConfigureOptionsName(candidate, argument, semanticModel, out var configureName) &&
+                    OptionsNamesMatch(configureName, optionsName) &&
+                    HasBindNonPublicPropertiesEnabled(candidate, semanticModel) &&
+                    SameServiceCollectionOrUnproven(validationInvocation, candidate, semanticModel))
+                {
+                    return true;
+                }
+
+                break;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool OptionsBuilderInvocationTypeMatches(
+        InvocationExpressionSyntax invocation,
+        INamedTypeSymbol optionsType,
+        SemanticModel semanticModel)
+    {
+        var invocationType = (INamedTypeSymbol)semanticModel.GetTypeInfo(invocation).Type!;
+        return SymbolEqualityComparer.Default.Equals(invocationType.TypeArguments[0], optionsType);
     }
 
     private static bool RequiresRuntimeSection(
@@ -414,6 +691,247 @@ public sealed partial class ConfigContrabandAnalyzer
         return false;
     }
 
+    private static bool HasSameBlockBindlessDataAnnotationsValidation(
+        InvocationExpressionSyntax configureInvocation,
+        INamedTypeSymbol optionsType,
+        string? optionsName,
+        SemanticModel semanticModel)
+    {
+        foreach (var invocation in GetSameExecutableScopeInvocations(configureInvocation))
+        {
+            if (invocation == configureInvocation ||
+                !TryGetMatchingOptionsBuilderValidation(
+                    invocation,
+                    optionsType,
+                    optionsName,
+                    semanticModel,
+                    out var isDataAnnotations,
+                    out _,
+                    out _) ||
+                !isDataAnnotations ||
+                OptionsBuilderInstanceBinds(invocation, semanticModel) ||
+                !SameServiceCollectionOrUnproven(configureInvocation, invocation, semanticModel))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetMatchingOptionsBuilderValidation(
+        InvocationExpressionSyntax invocation,
+        INamedTypeSymbol optionsType,
+        string? optionsName,
+        SemanticModel semanticModel,
+        out bool isDataAnnotations,
+        out bool isValidateOnStart,
+        out bool isFactoryWithValidateOnStart)
+    {
+        isDataAnnotations = false;
+        isValidateOnStart = false;
+        isFactoryWithValidateOnStart = false;
+
+        if (IsAddOptionsWithValidateOnStart(invocation, semanticModel) &&
+            TryGetAddOptionsFactoryTarget(invocation, semanticModel, out var factoryType, out var factoryName) &&
+            SymbolEqualityComparer.Default.Equals(factoryType, optionsType) &&
+            OptionsNamesMatch(optionsName, factoryName))
+        {
+            isFactoryWithValidateOnStart = true;
+            return true;
+        }
+
+        if (invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+        {
+            return false;
+        }
+
+        isDataAnnotations = IsOptionsBuilderValidateDataAnnotationsInvocation(invocation, semanticModel);
+        isValidateOnStart = IsOptionsBuilderValidateOnStartInvocation(invocation, semanticModel);
+        var isValidate = IsOptionsBuilderValidateInvocation(invocation, semanticModel);
+        if (!isDataAnnotations && !isValidateOnStart && !isValidate)
+        {
+            return false;
+        }
+
+        return TryGetOptionsBuilderFactoryTarget(
+                   memberAccess.Expression,
+                   semanticModel,
+                   out var validationOptionsType,
+                   out var validationOptionsName) &&
+               SymbolEqualityComparer.Default.Equals(validationOptionsType, optionsType) &&
+               OptionsNamesMatch(optionsName, validationOptionsName);
+    }
+
+    private static bool IsOptionsBuilderValidateOnStartInvocation(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+        var original = symbol?.ReducedFrom ?? symbol;
+        return original is not null &&
+               string.Equals(original.Name, "ValidateOnStart", StringComparison.Ordinal) &&
+               string.Equals(
+                   original.ContainingType.ToDisplayString(),
+                   "Microsoft.Extensions.DependencyInjection.OptionsBuilderExtensions",
+                   StringComparison.Ordinal);
+    }
+
+    private static bool IsOptionsBuilderValidateInvocation(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+        var original = symbol?.ReducedFrom ?? symbol;
+        return original is not null &&
+               string.Equals(original.Name, "Validate", StringComparison.Ordinal) &&
+               string.Equals(original.ContainingType.Name, "OptionsBuilder", StringComparison.Ordinal) &&
+               string.Equals(
+                   original.ContainingType.ContainingNamespace.ToDisplayString(),
+                   "Microsoft.Extensions.Options",
+                   StringComparison.Ordinal);
+    }
+
+    private static bool OptionsBuilderInstanceBinds(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        if (FluentChainContainsBind(invocation, semanticModel))
+        {
+            return true;
+        }
+
+        if (!TryGetTrackedOptionsBuilderSymbol(invocation, semanticModel, out var builderSymbol))
+        {
+            return false;
+        }
+
+        if (builderSymbol is ILocalSymbol localSymbol)
+        {
+            foreach (var syntax in localSymbol.DeclaringSyntaxReferences.Select(static reference => reference.GetSyntax()))
+            {
+                if (syntax is VariableDeclaratorSyntax { Initializer.Value: InvocationExpressionSyntax initializer } &&
+                    FluentChainContainsBind(initializer, semanticModel))
+                {
+                    return true;
+                }
+            }
+        }
+
+        foreach (var candidate in GetSameExecutableScopeInvocations(invocation))
+        {
+            if (!IsInvocationOnSymbol(candidate, builderSymbol, semanticModel))
+            {
+                continue;
+            }
+
+            var bindAccess = (MemberAccessExpressionSyntax)candidate.Expression;
+            if (IsOptionsBuilderBindMethodName(bindAccess.Name.Identifier.ValueText) &&
+                IsOptionsBuilderConfigurationMethod(
+                    candidate,
+                    semanticModel,
+                    bindAccess.Name.Identifier.ValueText))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool FluentChainContainsBind(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel)
+    {
+        var current = GetOutermostFluentInvocation(invocation);
+        while (true)
+        {
+            if (current.Expression is not MemberAccessExpressionSyntax memberAccess)
+            {
+                return false;
+            }
+
+            var methodName = memberAccess.Name.Identifier.ValueText;
+            if (IsOptionsBuilderBindMethodName(methodName) &&
+                IsOptionsBuilderConfigurationMethod(current, semanticModel, methodName))
+            {
+                return true;
+            }
+
+            if (memberAccess.Expression is not InvocationExpressionSyntax receiver)
+            {
+                return false;
+            }
+
+            current = receiver;
+        }
+    }
+
+    private static bool IsOptionsBuilderBindMethodName(string methodName)
+    {
+        return string.Equals(methodName, "Bind", StringComparison.Ordinal) ||
+               string.Equals(methodName, "BindConfiguration", StringComparison.Ordinal);
+    }
+
+    private static InvocationExpressionSyntax GetOutermostFluentInvocation(InvocationExpressionSyntax invocation)
+    {
+        var current = invocation;
+        while (current.Parent is MemberAccessExpressionSyntax memberAccess &&
+               memberAccess.Expression == current &&
+               memberAccess.Parent is InvocationExpressionSyntax next)
+        {
+            current = next;
+        }
+
+        return current;
+    }
+
+    private static bool TryGetTrackedOptionsBuilderSymbol(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        out ISymbol builderSymbol)
+    {
+        builderSymbol = null!;
+        var memberAccess = (MemberAccessExpressionSyntax)invocation.Expression;
+        var receiver = semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol;
+        if (receiver is ILocalSymbol)
+        {
+            builderSymbol = receiver;
+            return true;
+        }
+
+        if (receiver is IParameterSymbol)
+        {
+            builderSymbol = receiver;
+            return true;
+        }
+
+        if (invocation.Parent is EqualsValueClauseSyntax equalsValue &&
+            equalsValue.Parent is VariableDeclaratorSyntax declarator)
+        {
+            if (semanticModel.GetDeclaredSymbol(declarator) is ILocalSymbol declared)
+            {
+                builderSymbol = declared;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsInvocationOnSymbol(
+        InvocationExpressionSyntax invocation,
+        ISymbol builderSymbol,
+        SemanticModel semanticModel)
+    {
+        return invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
+               SymbolEqualityComparer.Default.Equals(
+                   semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol,
+                   builderSymbol);
+    }
+
     private static IEnumerable<InvocationExpressionSyntax> GetSameExecutableScopeInvocations(
         InvocationExpressionSyntax configureInvocation)
     {
@@ -513,25 +1031,45 @@ public sealed partial class ConfigContrabandAnalyzer
                 return false;
             }
 
-            if (expression is IdentifierNameSyntax identifier &&
-                semanticModel.GetSymbolInfo(identifier).Symbol is ILocalSymbol localSymbol)
+            if (expression is IdentifierNameSyntax identifier)
             {
-                if (!visitedLocals.Add(localSymbol))
+                var symbol = semanticModel.GetSymbolInfo(identifier).Symbol;
+                if (symbol is ILocalSymbol localSymbol)
                 {
-                    return false;
+                    if (!visitedLocals.Add(localSymbol))
+                    {
+                        return false;
+                    }
+
+                    var initializer = localSymbol.DeclaringSyntaxReferences
+                        .Select(static reference => reference.GetSyntax())
+                        .OfType<VariableDeclaratorSyntax>()
+                        .Select(static declaration => declaration.Initializer?.Value)
+                        .FirstOrDefault(static value => value is not null);
+                    if (initializer is null)
+                    {
+                        return false;
+                    }
+
+                    expression = initializer;
+                    continue;
                 }
 
-                var declaration = localSymbol.DeclaringSyntaxReferences
-                    .Select(static reference => reference.GetSyntax())
-                    .OfType<VariableDeclaratorSyntax>()
-                    .FirstOrDefault();
-                if (declaration?.Initializer?.Value is null)
+                if (symbol is IParameterSymbol parameter &&
+                    parameter.Type is INamedTypeSymbol
+                    {
+                        Name: "OptionsBuilder",
+                        TypeArguments.Length: 1,
+                    } parameterType &&
+                    string.Equals(
+                        parameterType.ContainingNamespace.ToDisplayString(),
+                        "Microsoft.Extensions.Options",
+                        StringComparison.Ordinal) &&
+                    parameterType.TypeArguments[0] is INamedTypeSymbol parameterOptionsType)
                 {
-                    return false;
+                    optionsType = parameterOptionsType;
+                    return true;
                 }
-
-                expression = declaration.Initializer.Value;
-                continue;
             }
 
             return false;
