@@ -7,7 +7,7 @@ All notable changes to ConfigContraband will be documented in this file.
 ### What's new
 
 - **Shorter NuGet READMEs** for the analyzer and tool packages (install → signal → one visual → GitHub docs) instead of packing the full rule-reference README.
-- **Package summaries** on both packages for NuGet search/detail cards.
+- **`PackageSummary` metadata** on both csproj files for discoverability tests (modern NuGet pack does not emit a nuspec `<summary>`; Description remains the gallery card text).
 - **Quickstart sample** (`samples/ConfigContraband.Quickstart`) — a green Options registration with CI proof of zero `CFG` diagnostics.
 - **Trust hygiene** — bug/feature issue templates, SemVer / path-to-1.0 note in the README, and tool package icon + release-notes parity with the analyzer.
 

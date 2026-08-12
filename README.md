@@ -81,6 +81,8 @@ services.AddOptions<StripeOptions>()
     .ValidateOnStart();
 ```
 
+   Copy-paste the same green shape from [`samples/ConfigContraband.Quickstart`](samples/ConfigContraband.Quickstart).
+
 3. Build in the IDE or with `ContinuousIntegrationBuild=true` on the command line so analyzers run.
 4. Fix any `CFG00x` warnings (many have code fixes).
 5. Optional: generate JSON Schema for appsettings IntelliSense:

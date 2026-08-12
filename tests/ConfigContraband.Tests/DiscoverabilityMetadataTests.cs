@@ -145,6 +145,20 @@ public sealed class DiscoverabilityMetadataTests
         Assert.Contains("stays quiet", readme, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ConfigContraband.Quickstart", readme, StringComparison.Ordinal);
 
+        var analyzerVersion = Assert.Single(
+                XDocument.Load(Path.Combine(RepositoryRoot, "src", "ConfigContraband", "ConfigContraband.csproj"))
+                    .Descendants("Version"))
+            .Value;
+        var nugetAnalyzerReadme = File.ReadAllText(Path.Combine(RepositoryRoot, "docs", "nuget-analyzer.md"));
+        Assert.Contains(
+            $"Version=\"{analyzerVersion}\"",
+            nugetAnalyzerReadme,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            $"Version=\"{analyzerVersion}\"",
+            readme,
+            StringComparison.Ordinal);
+
         // NuGet.org requires absolute HTTPS image URLs in PackageReadmeFile content.
         // GitHub raw URLs keep both NuGet and GitHub README rendering working.
         const string rawBase =
