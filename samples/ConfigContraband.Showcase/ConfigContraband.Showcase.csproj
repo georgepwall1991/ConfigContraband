@@ -10,7 +10,7 @@
          needs documentation-file generation to run, which this non-packable showcase does not need. -->
     <NoWarn>$(NoWarn);CA1050;CA1822;IDE0005</NoWarn>
     <!-- The showcase deliberately emits exactly one of every ConfigContraband diagnostic. -->
-    <WarningsNotAsErrors>$(WarningsNotAsErrors);CFG001;CFG002;CFG003;CFG004;CFG005;CFG006;CFG007;CFG008;CFG009</WarningsNotAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CFG001;CFG002;CFG003;CFG004;CFG005;CFG006;CFG007;CFG008;CFG009;CFG010</WarningsNotAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

@@ -33,4 +33,4 @@ if [[ $build_status -ne 0 ]]; then
   exit "$build_status"
 fi
 
-echo "Quickstart contract passed: zero CFG001-CFG009 diagnostics."
+echo "Quickstart contract passed: zero CFG001-CFG010 diagnostics."

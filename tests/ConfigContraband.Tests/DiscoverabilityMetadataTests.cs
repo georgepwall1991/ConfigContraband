@@ -139,9 +139,9 @@ public sealed class DiscoverabilityMetadataTests
         }
 
         Assert.Contains("PrivateAssets=\"all\"", readme, StringComparison.Ordinal);
-        Assert.Contains("Version=\"0.7.29\"", readme, StringComparison.Ordinal);
+        Assert.Contains("Version=\"0.8.0\"", readme, StringComparison.Ordinal);
         Assert.Contains("CFG001", readme, StringComparison.Ordinal);
-        Assert.Contains("CFG009", readme, StringComparison.Ordinal);
+        Assert.Contains("CFG010", readme, StringComparison.Ordinal);
         Assert.Contains("stays quiet", readme, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ConfigContraband.Quickstart", readme, StringComparison.Ordinal);
 

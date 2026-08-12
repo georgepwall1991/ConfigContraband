@@ -33,6 +33,7 @@ ConfigContraband reports the boring production failures early:
 - misspelled JSON keys under a bound section
 - strict binding (`ErrorOnUnknownConfiguration`) that will throw on unknown keys
 - scalar values the configuration binder cannot convert to the target CLR type
+- bound values that convert but still fail DataAnnotations (`[Range]`, length, allow/deny lists)
 - direct `IConfiguration` reads whose path is unavailable from visible appsettings files
 
 When the analyzer cannot prove a configuration shape statically, it **stays quiet**. High-signal feedback, not noisy guesses.
@@ -40,7 +41,7 @@ When the analyzer cannot prove a configuration shape statically, it **stays quie
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.7.29" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.8.0" PrivateAssets="all" />
 ```
 
 Or:
@@ -55,7 +56,7 @@ The package includes `buildTransitive` props that pass visible `appsettings.json
 
 ## See it work
 
-Product-flow diagrams from the real showcase build (`CFG001`–`CFG009` diagnostics):
+Product-flow diagrams from the real showcase build (`CFG001`–`CFG010` diagnostics):
 
 ### 1. Build / IDE diagnostics (Options validation)
 
@@ -115,6 +116,7 @@ Then point your settings file at the schema:
 | JSON key drift | Reports likely misspelled keys under bound sections while staying conservative for flexible binding shapes. |
 | Strict binding | Warns when `ErrorOnUnknownConfiguration` makes an unknown key a binding failure. |
 | Value conversion | Warns when a visible appsettings scalar provably cannot convert to a bound property or direct `GetValue<T>` target type. |
+| DataAnnotations constraints | Warns when a convertible bound scalar fails `[Range]`, length, or allow/deny-list validation that `ValidateDataAnnotations()` would evaluate. |
 | Direct reads | Checks supported direct `IConfiguration` reads against visible appsettings paths. |
 | Schema / IntelliSense | Companion tool emits `appsettings.schema.json` from the same Options model for live editor completion. |
 
@@ -128,7 +130,7 @@ The ConfigContraband analyzer package targets `netstandard2.0` and compiles agai
 
 ConfigContraband follows SemVer for the public package surface:
 
-- **Diagnostic IDs** (`CFG001`–`CFG009`) are stable. Removing or reassigning an ID is a breaking change.
+- **Diagnostic IDs** (`CFG001`–`CFG010`) are stable. Removing or reassigning an ID is a breaking change.
 - **Pre-1.0** (`0.x`): message text, quiet boundaries, and supported registration shapes may still tighten when a runtime or documentation mismatch is proved. Changes are called out in `CHANGELOG.md`.
 - **1.0** when the monitor posture holds (all rules healthy), the analyzer + tool package surface is stable, and no known P1 release-readiness gaps remain. This repository is not at 1.0 yet.
 
@@ -223,6 +225,7 @@ When the analyzer cannot prove a configuration shape statically, it stays quiet.
 | `CFG007` | Unknown configuration key will throw during binding | Warning | JSON keys that do not match bindable options properties while `ErrorOnUnknownConfiguration` is enabled. |
 | `CFG008` | Configuration value cannot be bound to the target type | Warning | Scalar values that provably cannot convert to a bound property or direct generic/non-generic `GetValue` target type, e.g. `"Port": "eighty"` for an `int`. |
 | `CFG009` | Direct configuration path is unavailable from visible appsettings files | Warning | `configuration.GetRequiredSection("Strpie")` (throws at runtime), near-miss `GetSection("Strpie").Get<T>()`/`.Bind(instance)` typos (bind nothing), and provable `GetConnectionString` typos. |
+| `CFG010` | Configuration value fails DataAnnotations validation | Warning | A convertible appsettings scalar that fails `[Range]`, length, or allow/deny-list validation when `ValidateDataAnnotations()` is proven, e.g. `"Port": 0` for `[Range(1, 65535)]`. |
 
 ## appsettings IntelliSense (schema generation)
 
@@ -256,7 +259,8 @@ Now VS Code, Rider, and Visual Studio give you, live as you edit JSON:
 - **Value constraints from DataAnnotations.** `[Range]` becomes `minimum`/`maximum` (honoring
   `MinimumIsExclusive`/`MaximumIsExclusive`), and `[MaxLength]`/`[StringLength]` become `maxLength`. So an
   out-of-range port or an over-long value is flagged in the editor — the same `ValidateDataAnnotations()`
-  failure, caught while typing instead of at startup.
+  failure, caught while typing instead of at startup. `CFG010` reports that same constraint failure at
+  build time when the value is present and convertible.
 - **Hover documentation.** Your `///` XML doc comments — or `[Description]`/`[DisplayName]` — on options
   properties and types become JSON Schema `description`s, so each setting explains itself on hover.
 - **Unknown-key warnings** in the JSON itself. For bindings that set `ErrorOnUnknownConfiguration = true`,
@@ -633,6 +637,43 @@ There is no automatic code fix — like `CFG006`/`CFG007`, the diagnostic points
 
 The rule stays quiet whenever the absolute path or receiver provenance cannot be proven: non-constant keys, reads off a stored or parameter-typed `IConfigurationSection` (its own path is invisible), concrete custom `IConfiguration` implementations, locally constructed `ConfigurationBuilder`/`ConfigurationManager` roots, and receiver locals that are conditionally reassigned, mutated, escaped, or captured. Same-block straight-line assignments and aliases are followed — including harmless non-user-defined interface casts — so a local that ultimately points back to the host contract is still checked. Framework direct-read methods require the signed Microsoft symbol, so same-FQN `ConfigurationExtensions` and `ConfigurationBinder` source shadows stay quiet. Constant signed-framework `GetSection(...)` chains feeding `Get<T>()` or either section-based or keyed `Bind(...)` are reconstructed through conditional access, including a single root link, multiple nested links, or a statically known ordinary `GetSection` prefix; dynamic keys, stored sections, mixed framework methods, and other effectful or unprovable conditional shapes remain quiet. Reads that feed a recognized options registration — `services.Configure<T>(configuration.GetRequiredSection("X"))` — are left to `CFG001` so the same miss is not reported twice, and a chain whose `GetRequiredSection` parent is already missing reports only once, at the parent. Runtime section existence follows the referenced JSON provider: .NET 10 empty objects and explicit `null` are missing, while empty arrays exist; unknown version-sensitive shapes stay quiet. The `configuration["key"]` indexer remains deliberately out of scope.
 
+### `CFG010`: Bound Values Must Satisfy DataAnnotations
+
+`CFG008` asks whether the binder can convert a scalar. `CFG002` asks whether a `[Required]` key is present. Neither asks whether the converted value passes DataAnnotations. `"Port": 0` binds as `int`, then `ValidateDataAnnotations()` throws `OptionsValidationException` at startup. `CFG010` reports that at build time and points at the JSON value.
+
+```csharp
+services.AddOptions<ServerOptions>()
+    .BindConfiguration("Server")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+```
+
+```json
+{
+  "Server": {
+    "Port": 0
+  }
+}
+```
+
+The rule reports only when all of these are proven:
+
+- a supported options binding (`BindConfiguration`, `Bind(GetSection/GetRequiredSection)`, `Configure<T>(GetSection/GetRequiredSection)`)
+- DataAnnotations validation is enabled — the same gate as `CFG002`: `ValidateDataAnnotations()` on the OptionsBuilder chain, or same-block `Configure<T>` paired with matching `AddOptions<T>().ValidateDataAnnotations()`
+- the scalar is present and convertible (`CFG008` already owns conversion failures)
+- a framework constraint is a provable `IsValid` failure
+
+v1 attributes, aligned with runtime DataAnnotations:
+
+- `[Range(int, int)]` / `[Range(double, double)]`, including `MinimumIsExclusive` / `MaximumIsExclusive`
+- `[Range(typeof(T), min, max)]` only when `ParseLimitsInInvariantCulture = true` (culture-dependent bounds stay quiet)
+- `[MaxLength]` / `[MinLength]` / `[StringLength]` / `[Length]` on strings, counting UTF-16 code units the same way DataAnnotations does
+- `[AllowedValues]` / `[DeniedValues]` against the converted value
+
+Stay quiet: `[RegularExpression]` / `[EmailAddress]` / `[Url]` / `[Phone]` / `[CreditCard]`; `IValidatableObject`; custom `ValidationAttribute` subclasses that override `IsValid` or `TypeId`; JSON null (`CFG002`); conversion failures (`CFG008`); missing keys; nested or collection members without `[ValidateObjectMembers]` / `[ValidateEnumeratedItems]`; dictionary values; direct `Get` / `Bind` / `GetValue` (those APIs do not run DataAnnotations); registrations without a proven `ValidateDataAnnotations` path (`CFG004`).
+
+There is no automatic code fix — like `CFG002`/`CFG006`/`CFG007`/`CFG008`, the diagnostic points at a JSON additional file rather than at C# the analyzer can rewrite.
+
 ## Design Principles
 
 - Prefer warnings for configuration failures that are likely to break production.
@@ -649,6 +690,7 @@ ConfigContraband currently focuses on:
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
 - Direct `Configure<T>(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations for section and JSON-key drift, and for `CFG003`/`CFG004`/`CFG005` when the same executable scope also registers matching `AddOptions<T>().Validate*` / `ValidateDataAnnotations()` / `AddOptionsWithValidateOnStart<T>()` (Configure-only stays quiet; `AddOptions<T>().ValidateOnStart()` alone does not enable CFG004/CFG005 on this pairing).
 - Direct framework generic `ConfigurationBinder.GetValue<T>` and non-generic `GetValue(typeof(T), ...)` reads for provable scalar conversion failures (`CFG008`).
+- Bound scalars that convert but fail DataAnnotations `[Range]`, length, or allow/deny-list constraints when `ValidateDataAnnotations()` is proven (`CFG010`).
 - Direct configuration reads: standalone `GetRequiredSection(...)`, suggestion-gated `GetSection(...).Get<T>()`/`.Bind(instance)`, keyed `Bind("key", instance)`, and suggestion-gated `GetConnectionString(...)` (`CFG009`).
 - Strict `ErrorOnUnknownConfiguration` binder options for unknown-key failures.
 - Compile-time constant section names, including literals, `const` values, and `nameof` expressions.

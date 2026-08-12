@@ -96,4 +96,14 @@ public static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Supported paths read directly from IConfiguration (GetRequiredSection, GetSection().Get<T>()/.Bind(), GetConnectionString) should be available from a visible appsettings configuration file.",
         helpLinkUri: DocumentationBaseUrl + "cfg009-direct-configuration-paths-unavailable-from-visible-appsettings-files");
+
+    public static readonly DiagnosticDescriptor ConfigurationValueFailsValidation = new(
+        id: DiagnosticIds.ConfigurationValueFailsValidation,
+        title: "Configuration value fails DataAnnotations validation",
+        messageFormat: "Configuration value for \"{0}\" fails {1} validation for {2}",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "A scalar value in appsettings is convertible to the bound property type but fails a DataAnnotations constraint that ValidateDataAnnotations() would evaluate at startup.",
+        helpLinkUri: DocumentationBaseUrl + "cfg010-bound-values-must-satisfy-dataannotations");
 }

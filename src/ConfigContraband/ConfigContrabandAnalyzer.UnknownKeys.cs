@@ -55,7 +55,8 @@ public sealed partial class ConfigContrabandAnalyzer
                 registration.ErrorsOnUnknownConfiguration,
                 strictUnknownConfigurationKeySuppressed,
                 compilation,
-                conversionFailuresThrow: true);
+                conversionFailuresThrow: true,
+                dataAnnotationsConstraintsEnabled: registration.IsDataAnnotationsEnabled);
         }
     }
 
@@ -193,7 +194,8 @@ public sealed partial class ConfigContrabandAnalyzer
         bool errorsOnUnknownConfiguration,
         bool strictUnknownConfigurationKeySuppressed,
         Compilation compilation,
-        bool conversionFailuresThrow)
+        bool conversionFailuresThrow,
+        bool dataAnnotationsConstraintsEnabled = false)
     {
         var knownNames = metadata.GetConfigurationNames();
         foreach (var property in section.Properties)
@@ -289,6 +291,18 @@ public sealed partial class ConfigContrabandAnalyzer
                         bindableProperty.Symbol.Type,
                         property);
                 }
+
+                if (dataAnnotationsConstraintsEnabled)
+                {
+                    AnalyzeScalarValueConstraints(
+                        reportDiagnostic,
+                        unknownKeysReported,
+                        bindableProperty.Symbol,
+                        bindableProperty.Symbol.Type,
+                        metadata.TypeName,
+                        property);
+                }
+
                 continue;
             }
 
@@ -313,7 +327,9 @@ public sealed partial class ConfigContrabandAnalyzer
                     nestedErrorsOnUnknownConfiguration,
                     strictUnknownConfigurationKeySuppressed,
                     compilation,
-                    conversionFailuresThrow);
+                    conversionFailuresThrow,
+                    dataAnnotationsConstraintsEnabled: dataAnnotationsConstraintsEnabled &&
+                        bindableProperty.IsRecursiveValidationEnabled);
                 continue;
             }
 
@@ -462,7 +478,9 @@ public sealed partial class ConfigContrabandAnalyzer
                         errorsOnUnknownConfiguration,
                         strictUnknownConfigurationKeySuppressed,
                         compilation,
-                        conversionFailuresThrow: errorsOnUnknownConfiguration);
+                        conversionFailuresThrow: errorsOnUnknownConfiguration,
+                        dataAnnotationsConstraintsEnabled: dataAnnotationsConstraintsEnabled &&
+                            bindableProperty.IsRecursiveValidationEnabled);
                 }
             }
         }
@@ -938,6 +956,64 @@ public sealed partial class ConfigContrabandAnalyzer
             location,
             property.FullPath,
             targetType.ToDisplayString()));
+    }
+
+    private static void AnalyzeScalarValueConstraints(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> reportedDiagnostics,
+        IPropertySymbol propertySymbol,
+        ITypeSymbol targetType,
+        string optionsTypeName,
+        ConfigurationProperty property)
+    {
+        if (ScalarConversion.IsProvablyNotConvertible(
+                targetType,
+                property.ScalarKind,
+                property.ScalarValue))
+        {
+            return;
+        }
+
+        if (!DataAnnotationsConstraints.TryGetProvableFailure(
+                propertySymbol,
+                targetType,
+                property.ScalarKind,
+                property.ScalarValue,
+                out var attributeDisplayName))
+        {
+            return;
+        }
+
+        var location = property.ValueLocation ?? property.Location;
+        var reportKey = CreateConfigurationValueFailsValidationReportKey(
+            targetType,
+            location,
+            property.FullPath,
+            attributeDisplayName);
+        if (!reportedDiagnostics.TryAdd(reportKey, 0))
+        {
+            return;
+        }
+
+        reportDiagnostic(Diagnostic.Create(
+            DiagnosticDescriptors.ConfigurationValueFailsValidation,
+            location,
+            property.FullPath,
+            attributeDisplayName,
+            optionsTypeName));
+    }
+
+    private static string CreateConfigurationValueFailsValidationReportKey(
+        ITypeSymbol targetType,
+        Location location,
+        string fullPath,
+        string attributeDisplayName)
+    {
+        return targetType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) +
+               "|" + DiagnosticDescriptors.ConfigurationValueFailsValidation.Id +
+               "|" + location.GetLineSpan().Path +
+               "|" + fullPath +
+               "|" + attributeDisplayName;
     }
 
     private static string CreateConfigurationValueTypeMismatchReportKey(

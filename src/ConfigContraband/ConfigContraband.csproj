@@ -14,7 +14,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.7.29</Version>
+    <Version>0.8.0</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband — Options and appsettings validation analyzer</Title>
     <Description>Compile-time Options validation for .NET: a Roslyn analyzer that checks BindConfiguration, ValidateOnStart, ValidateDataAnnotations, and appsettings.json against your IOptions types so broken configuration fails in the editor and CI—not production.</Description>
@@ -28,7 +28,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>CFG003/CFG004/CFG005 now report for same-block Configure(GetSection) paired with matching AddOptions().Validate* (diagnostics and fixes on the OptionsBuilder chain). Configure-only stays quiet. Diagnostic IDs and severities are unchanged.</PackageReleaseNotes>
+    <PackageReleaseNotes>Added CFG010: bound appsettings scalars that convert but fail DataAnnotations ([Range], length, AllowedValues/DeniedValues) now warn at build time when ValidateDataAnnotations() is proven.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
