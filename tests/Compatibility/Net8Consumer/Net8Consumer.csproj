@@ -8,7 +8,7 @@
     <!-- The top-level options type is intentional in this compiler-host smoke fixture. -->
     <NoWarn>$(NoWarn);CA1050</NoWarn>
     <WarningsAsErrors>$(WarningsAsErrors);CFG001;CS9057</WarningsAsErrors>
-    <ConfigContrabandVersion Condition="'$(ConfigContrabandVersion)' == ''">0.7.28</ConfigContrabandVersion>
+    <ConfigContrabandVersion Condition="'$(ConfigContrabandVersion)' == ''">0.7.29</ConfigContrabandVersion>
     <RestoreSources>$(MSBuildThisFileDirectory)../../../artifacts/packages;https://api.nuget.org/v3/index.json</RestoreSources>
   </PropertyGroup>
 

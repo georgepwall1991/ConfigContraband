@@ -40,7 +40,7 @@ When the analyzer cannot prove a configuration shape statically, it **stays quie
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.7.28" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.7.29" PrivateAssets="all" />
 ```
 
 Or:
@@ -435,6 +435,8 @@ services.AddOptions<StripeOptions>()
 
 The analyzer tracks validation calls on the same fluent chain whether they appear before or after the binding call. The code fix appends `ValidateOnStart()` in the same style as the existing registration chain, including multiline chains and immediate same-block local `OptionsBuilder<T>` chains where binding happens in the initializer or a later local statement. For later local bind statements, adjacent validation calls on the same local are recognized from the builder initializer, before the bind, and after the bind. Registrations that start with `AddOptionsWithValidateOnStart<TOptions>()` already run validation at startup, so `CFG003` stays quiet for that shape.
 
+A same-block `Configure<T>(GetSection(...))` paired with `AddOptions<T>().ValidateDataAnnotations()` or `.Validate(...)` and no `ValidateOnStart()` is the same production failure: validation is registered and will not run at startup. `CFG003` reports on the OptionsBuilder chain so the existing code fix can append `ValidateOnStart()`. `Configure<T>` alone stays quiet, as do nested local functions, conditionals, and named-options mismatches — the same conservative same-block boundary `CFG002` already uses. When the matching `AddOptions<T>()` chain also `Bind`s/`BindConfiguration`s, the OptionsBuilder registration carries `CFG003` and `Configure` does not duplicate it.
+
 `CFG003` only treats the framework `OptionsBuilder<TOptions>.Validate(...)`, `ValidateDataAnnotations()`, and `ValidateOnStart()` APIs as validation signals. Custom extension methods with the same names are ignored unless they call the framework APIs in a shape the analyzer can see.
 
 ### `CFG004`: DataAnnotations Must Be Switched On
@@ -472,6 +474,8 @@ services.AddOptions<StripeOptions>()
 `Validate(...)` counts as validation for `CFG003`, but it does not satisfy `CFG004` when DataAnnotations attributes are present.
 
 The analyzer recognizes `ValidateDataAnnotations()` on the same fluent chain before or after the binding call. The code fix preserves existing fluent-chain formatting, adds `ValidateDataAnnotations()`, and only adds `ValidateOnStart()` when startup validation is not already present, including registrations started with `AddOptionsWithValidateOnStart<TOptions>()`.
+
+The same `CFG004` signal applies when a same-block `Configure<T>(GetSection(...))` is paired with `AddOptions<T>().Validate(...)` (or `ValidateOnStart()` / `AddOptionsWithValidateOnStart<TOptions>()`) and the options type has DataAnnotations but that OptionsBuilder chain never calls `ValidateDataAnnotations()`. The diagnostic and code fix target the OptionsBuilder chain. `Configure<T>` with DataAnnotations and no same-block validation registration stays quiet — proving absence across methods and assemblies is not conservative.
 
 Like `CFG003`, `CFG004` symbol-checks the framework validation extension methods. A project-local helper named `ValidateDataAnnotations(...)` does not satisfy the rule by name alone.
 
@@ -513,6 +517,8 @@ public sealed class DatabaseOptions
 ```
 
 For arrays and other `IEnumerable<T>` option collections, use `[ValidateEnumeratedItems]`. Constructor-bound nested records/classes are included when there is exactly one public parameterized constructor and its parameters map to public properties, including inherited public properties. The code fix updates the file that owns the options property, uses a `property:` attribute target for record constructor parameters, including `[property: ValidateEnumeratedItems]` on constructor-bound collection parameters, adds `using Microsoft.Extensions.Options;` when needed, respects namespace-local using blocks, avoids project-local attribute name conflicts, and keeps existing property comments in place. `CFG005` does not report interface-typed nested properties, dictionary value objects, or system scalar types because the Options validator cannot safely infer a concrete object graph for those shapes.
+
+A same-block `Configure<T>(GetSection(...))` paired with matching `AddOptions<T>().ValidateDataAnnotations()` is DataAnnotations-enabled, so nested graphs on that Configure registration are checked the same way. `Configure<T>` alone stays quiet — recursive attributes are meaningless until DataAnnotations run.
 
 ### `CFG006`: Config Keys Should Match Options Properties
 
@@ -641,7 +647,7 @@ ConfigContraband currently focuses on:
 - `appsettings.json` and `appsettings.*.json` files.
 - `AddOptions<T>().BindConfiguration("Section")` registrations.
 - `AddOptions<T>().Bind(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations.
-- Direct `Configure<T>(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations for section and JSON-key drift.
+- Direct `Configure<T>(configuration.GetSection("Section"))` and `GetRequiredSection(...)` registrations for section and JSON-key drift, and for `CFG003`/`CFG004`/`CFG005` when the same executable scope also registers matching `AddOptions<T>().Validate*` / `ValidateDataAnnotations()` (Configure-only stays quiet).
 - Direct framework generic `ConfigurationBinder.GetValue<T>` and non-generic `GetValue(typeof(T), ...)` reads for provable scalar conversion failures (`CFG008`).
 - Direct configuration reads: standalone `GetRequiredSection(...)`, suggestion-gated `GetSection(...).Get<T>()`/`.Bind(instance)`, keyed `Bind("key", instance)`, and suggestion-gated `GetConnectionString(...)` (`CFG009`).
 - Strict `ErrorOnUnknownConfiguration` binder options for unknown-key failures.

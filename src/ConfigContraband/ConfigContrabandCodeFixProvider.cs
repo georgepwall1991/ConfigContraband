@@ -275,7 +275,11 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         return optionsBuilderType is not null &&
                invocationType is not null &&
                TryGetOptionsBuilderType(invocationType, optionsBuilderType, out var appendBuilderType) &&
-               TryGetBoundOptionsType(outermost, semanticModel, optionsBuilderType, out var boundOptionsType) &&
+               TryGetRegistrationOptionsType(
+                   outermost,
+                   semanticModel,
+                   optionsBuilderType,
+                   out var boundOptionsType) &&
                SymbolEqualityComparer.Default.Equals(
                    appendBuilderType.TypeArguments[0],
                    boundOptionsType);
@@ -314,6 +318,48 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         }
 
         constructedOptionsBuilderType = null!;
+        return false;
+    }
+
+    private static bool TryGetRegistrationOptionsType(
+        InvocationExpressionSyntax outermost,
+        SemanticModel semanticModel,
+        INamedTypeSymbol optionsBuilderType,
+        out ITypeSymbol boundOptionsType)
+    {
+        if (TryGetBoundOptionsType(outermost, semanticModel, optionsBuilderType, out boundOptionsType))
+        {
+            return true;
+        }
+
+        var current = outermost;
+        while (true)
+        {
+            var symbol = semanticModel.GetSymbolInfo(current).Symbol as IMethodSymbol;
+            var original = symbol?.ReducedFrom ?? symbol;
+            if (original is not null &&
+                (string.Equals(original.Name, "AddOptions", StringComparison.Ordinal) ||
+                 string.Equals(original.Name, "AddOptionsWithValidateOnStart", StringComparison.Ordinal)) &&
+                string.Equals(
+                    original.ContainingType.ToDisplayString(),
+                    "Microsoft.Extensions.DependencyInjection.OptionsServiceCollectionExtensions",
+                    StringComparison.Ordinal) &&
+                symbol?.TypeArguments.Length == 1)
+            {
+                boundOptionsType = symbol.TypeArguments[0];
+                return true;
+            }
+
+            if (current.Expression is not MemberAccessExpressionSyntax memberAccess ||
+                memberAccess.Expression is not InvocationExpressionSyntax receiverInvocation)
+            {
+                break;
+            }
+
+            current = receiverInvocation;
+        }
+
+        boundOptionsType = null!;
         return false;
     }
 

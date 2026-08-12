@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
@@ -48,6 +49,7 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             var providerSemantics = GetConfigurationProviderSemantics(compilationContext.Compilation);
             var nestedValidationReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
             var unknownKeysReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+            var validationReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
 
             compilationContext.RegisterSyntaxNodeAction(
                 syntaxContext =>
@@ -86,8 +88,9 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                         syntaxContext.ReportDiagnostic,
                         registration,
                         compilation,
+                        validationReported,
                         syntaxContext.CancellationToken);
-                    if (registration.SupportsValidationRules)
+                    if (registration.ReportNestedValidation)
                     {
                         AnalyzeOptionType(
                             syntaxContext.ReportDiagnostic,
@@ -97,7 +100,7 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                             syntaxContext.CancellationToken);
                     }
 
-                    if (configuration.HasFiles)
+                    if (configuration.HasFiles && registration.HasBoundSection)
                     {
                         var strictUnknownConfigurationKeySuppressed = IsDiagnosticSuppressed(
                             syntaxContext.Options,
@@ -166,6 +169,7 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         Action<Diagnostic> reportDiagnostic,
         OptionsRegistration registration,
         Compilation compilation,
+        ConcurrentDictionary<string, byte> validationReported,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -174,12 +178,18 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             return;
         }
 
+        var location = registration.ValidationInvocation.GetLocation();
         if (registration.HasValidation && !registration.HasValidateOnStart)
         {
-            reportDiagnostic(Diagnostic.Create(
-                DiagnosticDescriptors.ValidationNotOnStart,
-                registration.OutermostInvocation.GetLocation(),
-                registration.OptionsType.Name));
+            TryReportValidationDiagnostic(
+                reportDiagnostic,
+                validationReported,
+                DiagnosticIds.ValidationNotOnStart,
+                location,
+                () => Diagnostic.Create(
+                    DiagnosticDescriptors.ValidationNotOnStart,
+                    location,
+                    registration.OptionsType.Name));
         }
 
         var metadata = OptionsTypeMetadata.Create(
@@ -192,12 +202,36 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             var properties = ImmutableDictionary<string, string?>.Empty
                 .Add(HasValidateOnStartPropertyName, registration.HasValidateOnStart ? "true" : "false");
 
-            reportDiagnostic(Diagnostic.Create(
-                DiagnosticDescriptors.DataAnnotationsNotEnabled,
-                registration.OutermostInvocation.GetLocation(),
-                properties,
-                registration.OptionsType.Name));
+            TryReportValidationDiagnostic(
+                reportDiagnostic,
+                validationReported,
+                DiagnosticIds.DataAnnotationsNotEnabled,
+                location,
+                () => Diagnostic.Create(
+                    DiagnosticDescriptors.DataAnnotationsNotEnabled,
+                    location,
+                    properties,
+                    registration.OptionsType.Name));
         }
+    }
+
+    private static void TryReportValidationDiagnostic(
+        Action<Diagnostic> reportDiagnostic,
+        ConcurrentDictionary<string, byte> validationReported,
+        string diagnosticId,
+        Location location,
+        Func<Diagnostic> createDiagnostic)
+    {
+        var key = diagnosticId + "\0" +
+                  (location.SourceTree?.FilePath ?? string.Empty) + "\0" +
+                  location.SourceSpan.Start.ToString(CultureInfo.InvariantCulture) + "\0" +
+                  location.SourceSpan.End.ToString(CultureInfo.InvariantCulture);
+        if (!validationReported.TryAdd(key, 0))
+        {
+            return;
+        }
+
+        reportDiagnostic(createDiagnostic());
     }
 
     private static void AnalyzeOptionType(
@@ -361,7 +395,10 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             bool errorsOnUnknownConfiguration,
             bool isDataAnnotationsEnabled,
             Location bindLocation,
-            bool requiresRuntimeSection)
+            bool requiresRuntimeSection,
+            InvocationExpressionSyntax? validationInvocation = null,
+            bool? reportNestedValidation = null,
+            bool hasBoundSection = true)
         {
             OptionsType = optionsType;
             SectionPath = sectionPath;
@@ -377,6 +414,9 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             IsDataAnnotationsEnabled = isDataAnnotationsEnabled;
             BindLocation = bindLocation;
             RequiresRuntimeSection = requiresRuntimeSection;
+            ValidationInvocation = validationInvocation ?? outermostInvocation;
+            ReportNestedValidation = reportNestedValidation ?? supportsValidationRules;
+            HasBoundSection = hasBoundSection;
         }
 
         public INamedTypeSymbol OptionsType { get; }
@@ -393,6 +433,9 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         public bool IsDataAnnotationsEnabled { get; }
         public Location BindLocation { get; }
         public bool RequiresRuntimeSection { get; }
+        public InvocationExpressionSyntax ValidationInvocation { get; }
+        public bool ReportNestedValidation { get; }
+        public bool HasBoundSection { get; }
     }
 
     private sealed class InvocationChain
@@ -427,6 +470,17 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             AddSubsequentLocalInvocations(bindInvocation, semanticModel, methods);
 
             return new InvocationChain(outermost, methods.ToImmutable());
+        }
+
+        public static InvocationChain CreateFrom(
+            InvocationExpressionSyntax invocation,
+            SemanticModel semanticModel)
+        {
+            var methods = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
+            AddRecognizedOptionsBuilderMethod(invocation, semanticModel, methods);
+            AddReceiverInvocations(invocation, semanticModel, methods);
+            AddSubsequentLocalInvocations(invocation, semanticModel, methods);
+            return new InvocationChain(invocation, methods.ToImmutable());
         }
 
         private static void AddReceiverInvocations(
