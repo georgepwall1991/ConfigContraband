@@ -340,7 +340,61 @@ internal static class OptionsValidatorRegistration
                 return true;
             }
 
+            if (TryGetUnreducedExtensionServiceCollectionArgument(current, model, out collection))
+            {
+                return true;
+            }
+
             return false;
         }
+    }
+
+    private static bool TryGetUnreducedExtensionServiceCollectionArgument(
+        InvocationExpressionSyntax invocation,
+        SemanticModel model,
+        out ISymbol collection)
+    {
+        collection = null!;
+        if (model.GetOperation(invocation) is not IInvocationOperation operation)
+        {
+            return false;
+        }
+
+        var original = GetUnreducedOriginal(operation.TargetMethod);
+        if (original.Parameters.Length == 0)
+        {
+            return false;
+        }
+
+        if (original.Parameters[0].Type.ToDisplayString() !=
+            "Microsoft.Extensions.DependencyInjection.IServiceCollection")
+        {
+            return false;
+        }
+
+        foreach (var argument in operation.Arguments)
+        {
+            if (argument.Parameter is not { Ordinal: 0 })
+            {
+                continue;
+            }
+
+            var value = UnwrapConversion(argument.Value);
+            if (value is ILocalReferenceOperation local)
+            {
+                collection = local.Local;
+                return true;
+            }
+
+            if (value is IParameterReferenceOperation parameter)
+            {
+                collection = parameter.Parameter;
+                return true;
+            }
+
+            return false;
+        }
+
+        return false;
     }
 }

@@ -1031,6 +1031,23 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg004_still_reports_when_static_options_validator_is_registered_on_a_different_service_collection()
+    {
+        var source = OptionsSource("""
+            IServiceCollection other = new ServiceCollection();
+            ServiceCollectionServiceExtensions.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>(other);
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")|};
+            """, extraUsings: "using Microsoft.Extensions.Options;\n", optionsTypes: OptionsValidatorTypes);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
     public async Task Cfg003_reports_when_options_validator_is_registered_via_parenthesized_receiver()
     {
         var source = OptionsSource("""

@@ -444,6 +444,19 @@ public sealed class OptionsValidatorSchemaTests
     }
 
     [Fact]
+    public void Binding_is_not_validated_by_a_static_add_singleton_on_a_different_service_collection()
+    {
+        var section = Assert.Single(Extract("""
+            IServiceCollection other = new ServiceCollection();
+            ServiceCollectionServiceExtensions.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>(other);
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe");
+            """));
+
+        Assert.False(section.ValidatesDataAnnotations);
+    }
+
+    [Fact]
     public void Binding_is_validated_for_parenthesized_and_null_forgiving_receivers()
     {
         var section = Assert.Single(Extract("""

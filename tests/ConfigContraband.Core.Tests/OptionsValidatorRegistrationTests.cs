@@ -913,12 +913,164 @@ public sealed class OptionsValidatorRegistrationTests
         Assert.False(OptionsValidatorRegistration.TryGetValidatedOptionsType(invocation, model, out _));
     }
 
+    [Fact]
+    public void Same_service_collection_or_unproven_rejects_a_static_add_singleton_on_a_different_local()
+    {
+        var (bind, validator, model) = GetBindAndValidator(
+            """
+            IServiceCollection other = new ServiceCollection();
+            ServiceCollectionServiceExtensions.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>(other);
+            services.AddOptions<StripeOptions>().BindConfiguration("Stripe");
+            """);
+
+        Assert.False(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, validator, model));
+    }
+
+    [Fact]
+    public void Same_service_collection_or_unproven_matches_a_static_add_singleton_on_the_same_parameter()
+    {
+        var (bind, validator, model) = GetBindAndValidator(
+            """
+            services.AddOptions<StripeOptions>().BindConfiguration("Stripe");
+            ServiceCollectionServiceExtensions.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>(services);
+            """);
+
+        Assert.True(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, validator, model));
+    }
+
+    [Fact]
+    public void Same_service_collection_or_unproven_rejects_a_named_static_try_add_enumerable_on_a_different_local()
+    {
+        var (bind, validator, model) = GetBindAndValidator(
+            """
+            IServiceCollection other = new ServiceCollection();
+            ServiceCollectionDescriptorExtensions.TryAddEnumerable(
+                descriptor: ServiceDescriptor.Singleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>(),
+                services: other);
+            services.AddOptions<StripeOptions>().BindConfiguration("Stripe");
+            """);
+
+        Assert.False(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, validator, model));
+    }
+
+    [Fact]
+    public void Same_service_collection_or_unproven_matches_when_a_static_receiver_is_a_field()
+    {
+        var source = """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public sealed class Startup
+            {
+                private readonly IServiceCollection other = new ServiceCollection();
+
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>().BindConfiguration("Stripe");
+                    ServiceCollectionServiceExtensions.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>(other);
+                }
+            }
+            """ + StripeValidatorTypes;
+
+        var (bind, validator, model) = GetBindAndValidatorFromSource(source);
+        Assert.True(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, validator, model));
+    }
+
+    [Fact]
+    public void Same_service_collection_or_unproven_matches_a_parameterless_static_invocation()
+    {
+        var source = """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>().BindConfiguration("Stripe");
+                    Startup.Register();
+                }
+
+                public static void Register() {}
+            }
+            """ + StripeValidatorTypes;
+
+        var references = TrustedReferences();
+        var tree = CSharpSyntaxTree.ParseText(source);
+        var compilation = CSharpCompilation.Create(
+            "OptionsValidatorRegistrationTests",
+            [tree],
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        Assert.DoesNotContain(
+            compilation.GetDiagnostics(),
+            diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+
+        var model = compilation.GetSemanticModel(tree);
+        var configure = tree.GetRoot()
+            .DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .Single(method => method.Identifier.ValueText == "Configure");
+        var invocations = configure.DescendantNodes().OfType<InvocationExpressionSyntax>().ToArray();
+        var bind = invocations.Single(invocation =>
+            invocation.Expression is MemberAccessExpressionSyntax member &&
+            member.Name.Identifier.ValueText == "BindConfiguration");
+        var register = invocations.Single(invocation =>
+            invocation.Expression is MemberAccessExpressionSyntax member &&
+            member.Name.Identifier.ValueText == "Register");
+
+        Assert.True(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, register, model));
+    }
+
+    [Fact]
+    public void Same_service_collection_or_unproven_matches_static_bind_configuration_as_unproven()
+    {
+        var (bind, validator, model) = GetBindAndValidator(
+            """
+            OptionsBuilderConfigurationExtensions.BindConfiguration(services.AddOptions<StripeOptions>(), "Stripe");
+            services.AddSingleton<IValidateOptions<StripeOptions>, ValidateStripeOptions>();
+            """);
+
+        Assert.True(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, validator, model));
+    }
+
+    [Fact]
+    public void Same_service_collection_or_unproven_matches_an_unresolved_static_invocation_as_unproven()
+    {
+        var (configure, model) = CompileConfigure(
+            """
+            using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.Options;
+
+            public static class Startup
+            {
+                public static void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>().BindConfiguration("Stripe");
+                    ServiceCollectionServiceExtensions.DoesNotExist(services);
+                }
+            }
+            """ + StripeValidatorTypes,
+            allowErrors: true);
+
+        var invocations = configure.DescendantNodes().OfType<InvocationExpressionSyntax>().ToArray();
+        var bind = invocations.Single(invocation =>
+            invocation.Expression is MemberAccessExpressionSyntax member &&
+            member.Name.Identifier.ValueText == "BindConfiguration");
+        var missing = invocations.Single(invocation =>
+            invocation.Expression is MemberAccessExpressionSyntax member &&
+            member.Name.Identifier.ValueText == "DoesNotExist");
+
+        Assert.True(OptionsValidatorRegistration.SameServiceCollectionOrUnproven(bind, missing, model));
+    }
+
     private static (InvocationExpressionSyntax Bind, InvocationExpressionSyntax Validator, SemanticModel Model) GetBindAndValidator(
         string registration)
     {
         return GetBindAndValidatorFromSource(
             $$"""
             using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.DependencyInjection.Extensions;
             using Microsoft.Extensions.Options;
 
             public static class Startup
