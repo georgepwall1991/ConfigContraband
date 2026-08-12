@@ -89,4 +89,42 @@ public sealed partial class ConfigContrabandAnalyzerTests
 
         await Verifier.VerifyAnalyzerAsync(source, expected);
     }
+
+    [Fact]
+    public async Task Cfg004_reports_private_set_when_matching_configure_enables_bind_non_public_properties()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<AppOptions>(
+                configuration.GetSection("App"),
+                options => options.BindNonPublicProperties = true);
+            {|#0:services.AddOptions<AppOptions>()
+                .Validate(_ => true)
+                .ValidateOnStart()|};
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; private set; } = ""; }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.DataAnnotationsNotEnabled)
+            .WithLocation(0)
+            .WithArguments("AppOptions");
+
+        await Verifier.VerifyAnalyzerAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Cfg004_ignores_private_set_when_matching_configure_does_not_enable_bind_non_public_properties()
+    {
+        var source = OptionsSource("""
+            IConfiguration configuration = null!;
+            services.Configure<AppOptions>(configuration.GetSection("App"));
+            services.AddOptions<AppOptions>()
+                .Validate(_ => true)
+                .ValidateOnStart();
+            """, extraUsings: "using Microsoft.Extensions.Configuration;\n", optionsTypes: """
+            public class AppOptions { [Required] public string ConnectionString { get; private set; } = ""; }
+            """);
+
+        await Verifier.VerifyAnalyzerAsync(source);
+    }
 }

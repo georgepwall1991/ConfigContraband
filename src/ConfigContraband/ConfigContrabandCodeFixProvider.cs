@@ -350,13 +350,34 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
                 return true;
             }
 
-            if (current.Expression is not MemberAccessExpressionSyntax memberAccess ||
-                memberAccess.Expression is not InvocationExpressionSyntax receiverInvocation)
+            if (current.Expression is not MemberAccessExpressionSyntax memberAccess)
             {
                 break;
             }
 
-            current = receiverInvocation;
+            if (memberAccess.Expression is InvocationExpressionSyntax receiverInvocation)
+            {
+                current = receiverInvocation;
+                continue;
+            }
+
+            if (semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol is ILocalSymbol localSymbol)
+            {
+                var declaration = localSymbol.DeclaringSyntaxReferences
+                    .Select(static reference => reference.GetSyntax())
+                    .OfType<VariableDeclaratorSyntax>()
+                    .FirstOrDefault();
+                if (declaration?.Initializer?.Value is InvocationExpressionSyntax initializer)
+                {
+                    return TryGetRegistrationOptionsType(
+                        initializer,
+                        semanticModel,
+                        optionsBuilderType,
+                        out boundOptionsType);
+                }
+            }
+
+            break;
         }
 
         boundOptionsType = null!;
