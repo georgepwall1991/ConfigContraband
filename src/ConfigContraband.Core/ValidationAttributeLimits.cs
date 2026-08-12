@@ -61,11 +61,6 @@ internal static class ValidationAttributeLimits
 
         if (arguments.Length == 2)
         {
-            if (arguments[0].Value is null || arguments[1].Value is null)
-            {
-                return false;
-            }
-
             operands = new RangeOperands(
                 arguments[0].Value,
                 arguments[1].Value,
@@ -195,21 +190,13 @@ internal static class ValidationAttributeLimits
 
     private static string? FormatNumericConstant(TypedConstant argument)
     {
-        if (argument.Kind != TypedConstantKind.Primitive)
-        {
-            return null;
-        }
-
         // double.PositiveInfinity / NaN are compile-time constants, so [Range(0, double.PositiveInfinity)]
         // is legal and would format as "Infinity"/"NaN" - not valid JSON. Skip non-finite bounds, and
         // validate every formatted token so an invalid JSON number is never written verbatim.
         string? formatted = argument.Value switch
         {
             int value => value.ToString(Invariant),
-            long value => value.ToString(Invariant),
             double value when !double.IsNaN(value) && !double.IsInfinity(value) => value.ToString("R", Invariant),
-            float value when !float.IsNaN(value) && !float.IsInfinity(value) => value.ToString("R", Invariant),
-            decimal value => value.ToString(Invariant),
             _ => null,
         };
 

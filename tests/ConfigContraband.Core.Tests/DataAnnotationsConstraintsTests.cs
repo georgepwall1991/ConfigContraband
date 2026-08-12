@@ -877,6 +877,326 @@ public sealed class DataAnnotationsConstraintsTests
             containingTypeName: "ServerOptions");
     }
 
+    [Fact]
+    public void Range_reports_when_converted_value_overflows_int_operand()
+    {
+        AssertFailure(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ServerOptions
+            {
+                [Range(1, 65535)]
+                public long Port { get; set; }
+            }
+            """,
+            "Port",
+            ScalarKind.Number,
+            "3000000000",
+            "Range");
+    }
+
+    [Fact]
+    public void Length_with_inverted_bounds_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class NameOptions
+            {
+                [Length(5, 2)]
+                public string Code { get; set; } = "";
+            }
+            """,
+            "Code",
+            ScalarKind.String,
+            "abc");
+    }
+
+    [Fact]
+    public void StringLength_without_minimum_stays_quiet_inside_maximum()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class NameOptions
+            {
+                [StringLength(8)]
+                public string Code { get; set; } = "";
+            }
+            """,
+            "Code",
+            ScalarKind.String,
+            "abcd");
+    }
+
+    [Fact]
+    public void Unsupported_property_type_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class IdOptions
+            {
+                [Range(typeof(int), "1", "10", ParseLimitsInInvariantCulture = true)]
+                public Guid Id { get; set; }
+            }
+            """,
+            "Id",
+            ScalarKind.String,
+            "00000000-0000-0000-0000-000000000001");
+    }
+
+    [Fact]
+    public void MinLength_on_non_string_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ServerOptions
+            {
+                [MinLength(1)]
+                public int Port { get; set; }
+            }
+            """,
+            "Port",
+            ScalarKind.Number,
+            "0");
+    }
+
+    [Fact]
+    public void Length_on_non_string_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ServerOptions
+            {
+                [Length(1, 4)]
+                public int Port { get; set; }
+            }
+            """,
+            "Port",
+            ScalarKind.Number,
+            "0");
+    }
+
+    [Fact]
+    public void StringLength_on_non_string_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ServerOptions
+            {
+                [StringLength(3)]
+                public int Port { get; set; }
+            }
+            """,
+            "Port",
+            ScalarKind.Number,
+            "0");
+    }
+
+    [Fact]
+    public void MaxLength_on_non_string_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ServerOptions
+            {
+                [MaxLength(3)]
+                public int Port { get; set; }
+            }
+            """,
+            "Port",
+            ScalarKind.Number,
+            "0");
+    }
+
+    [Fact]
+    public void Unconvertible_bool_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class FlagOptions
+            {
+                [AllowedValues(true)]
+                public bool Enabled { get; set; }
+            }
+            """,
+            "Enabled",
+            ScalarKind.String,
+            "yes");
+    }
+
+    [Theory]
+    [InlineData("float")]
+    [InlineData("double")]
+    [InlineData("decimal")]
+    public void Unconvertible_floating_value_stays_quiet(string clrType)
+    {
+        AssertQuiet(
+            $$"""
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class NumericOptions
+            {
+                [Range(typeof({{clrType}}), "1", "10", ParseLimitsInInvariantCulture = true)]
+                public {{clrType}} Amount { get; set; }
+            }
+            """,
+            "Amount",
+            ScalarKind.String,
+            "nope");
+    }
+
+    [Theory]
+    [InlineData("sbyte")]
+    [InlineData("byte")]
+    [InlineData("short")]
+    [InlineData("ushort")]
+    [InlineData("uint")]
+    [InlineData("long")]
+    [InlineData("ulong")]
+    public void Hex_integer_inside_bounds_for_each_integral_type(string clrType)
+    {
+        AssertQuiet(
+            $$"""
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class NumericOptions
+            {
+                [Range(typeof({{clrType}}), "1", "32", ParseLimitsInInvariantCulture = true)]
+                public {{clrType}} Amount { get; set; }
+            }
+            """,
+            "Amount",
+            ScalarKind.String,
+            "0x10");
+    }
+
+    [Fact]
+    public void AllowedValues_reports_numeric_enum_value_not_in_list()
+    {
+        AssertFailure(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public enum Color { Red = 1, Blue = 2 }
+
+            public sealed class TintOptions
+            {
+                [AllowedValues(Color.Red)]
+                public Color Tint { get; set; }
+            }
+            """,
+            "Tint",
+            ScalarKind.Number,
+            "2",
+            "AllowedValues");
+    }
+
+    [Fact]
+    public void AllowedValues_reports_enum_comma_list_last_member()
+    {
+        AssertFailure(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public enum Color { Red, Blue }
+
+            public sealed class TintOptions
+            {
+                [AllowedValues(Color.Red)]
+                public Color Tint { get; set; }
+            }
+            """,
+            "Tint",
+            ScalarKind.String,
+            "Red, Blue",
+            "AllowedValues");
+    }
+
+    [Fact]
+    public void Unknown_enum_member_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public enum Color { Red, Blue }
+
+            public sealed class TintOptions
+            {
+                [AllowedValues(Color.Red)]
+                public Color Tint { get; set; }
+            }
+            """,
+            "Tint",
+            ScalarKind.String,
+            "Green");
+    }
+
+    [Fact]
+    public void Empty_enum_token_stays_quiet()
+    {
+        AssertQuiet(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public enum Color { Red, Blue }
+
+            public sealed class TintOptions
+            {
+                [AllowedValues(Color.Red)]
+                public Color Tint { get; set; }
+            }
+            """,
+            "Tint",
+            ScalarKind.String,
+            "Red,");
+    }
+
+    [Theory]
+    [InlineData("byte")]
+    [InlineData("sbyte")]
+    [InlineData("short")]
+    [InlineData("ushort")]
+    [InlineData("uint")]
+    [InlineData("long")]
+    [InlineData("ulong")]
+    public void AllowedValues_reports_numeric_enum_for_each_backing_type(string backing)
+    {
+        AssertFailure(
+            $$"""
+            using System.ComponentModel.DataAnnotations;
+
+            public enum Color : {{backing}} { Red = 1, Blue = 2 }
+
+            public sealed class TintOptions
+            {
+                [AllowedValues(Color.Red)]
+                public Color Tint { get; set; }
+            }
+            """,
+            "Tint",
+            ScalarKind.Number,
+            "2",
+            "AllowedValues");
+    }
+
     private static void AssertFailure(
         string source,
         string propertyName,

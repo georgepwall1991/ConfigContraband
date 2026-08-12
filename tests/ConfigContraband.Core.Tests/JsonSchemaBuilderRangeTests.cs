@@ -797,4 +797,159 @@ public sealed partial class JsonSchemaBuilderTests
             schema,
             ignoreLineEndingDifferences: true);
     }
+
+    [Fact]
+    public void StringLength_negative_maximum_is_skipped()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class NameOptions
+            {
+                [StringLength(-1)]
+                public string Code { get; set; } = "";
+            }
+            """,
+            "NameOptions");
+
+        Assert.DoesNotContain("maxLength", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_float_emits_number_bounds()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class RateOptions
+            {
+                [Range(typeof(float), "0.5", "1.5")]
+                public float Ratio { get; set; }
+            }
+            """,
+            "RateOptions");
+
+        Assert.Contains("\"minimum\": 0.5", schema);
+        Assert.Contains("\"maximum\": 1.5", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_unknown_operand_keeps_json_shaped_bounds()
+    {
+        var schema = BuildSchema(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class WhenOptions
+            {
+                [Range(typeof(DateTime), "1e2", "1e+3")]
+                public double Amount { get; set; }
+            }
+            """,
+            "WhenOptions");
+
+        Assert.Contains("\"minimum\": 1e2", schema);
+        Assert.Contains("\"maximum\": 1e+3", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_unknown_operand_drops_invalid_json_numbers()
+    {
+        var schema = BuildSchema(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class WhenOptions
+            {
+                [Range(typeof(DateTime), "1.", "1e")]
+                public double Amount { get; set; }
+            }
+            """,
+            "WhenOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.DoesNotContain("maximum", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_unknown_operand_drops_incomplete_exponent()
+    {
+        var schema = BuildSchema(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class WhenOptions
+            {
+                [Range(typeof(DateTime), "1e-", "")]
+                public double Amount { get; set; }
+            }
+            """,
+            "WhenOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.DoesNotContain("maximum", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_unknown_operand_drops_sign_only_and_plus_prefix()
+    {
+        var schema = BuildSchema(
+            """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class WhenOptions
+            {
+                [Range(typeof(DateTime), "-", "+1")]
+                public double Amount { get; set; }
+            }
+            """,
+            "WhenOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.DoesNotContain("maximum", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_float_drops_non_finite_bounds()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class RateOptions
+            {
+                [Range(typeof(float), "NaN", "Infinity")]
+                public float Ratio { get; set; }
+            }
+            """,
+            "RateOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.DoesNotContain("maximum", schema);
+    }
+
+    [Fact]
+    public void Range_typeof_null_minimum_is_skipped()
+    {
+        var schema = BuildSchema(
+            """
+            using System.ComponentModel.DataAnnotations;
+
+            public sealed class ServerOptions
+            {
+                [Range(typeof(int), null, "10")]
+                public int Port { get; set; }
+            }
+            """,
+            "ServerOptions");
+
+        Assert.DoesNotContain("minimum", schema);
+        Assert.Contains("\"maximum\": 10", schema);
+    }
 }

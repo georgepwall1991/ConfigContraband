@@ -48,11 +48,6 @@ internal static class DataAnnotationsConstraints
         foreach (var attribute in attributes)
         {
             var attributeName = GetFrameworkConstraintName(attribute.AttributeClass);
-            if (attributeName is null || OverridesIsValid(attribute.AttributeClass))
-            {
-                continue;
-            }
-
             var failed = attributeName switch
             {
                 ValidationAttributeLimits.RangeAttributeName =>
@@ -67,12 +62,10 @@ internal static class DataAnnotationsConstraints
                     FailsLength(attribute, converted),
                 ValidationAttributeLimits.AllowedValuesAttributeName =>
                     FailsAllowedValues(attribute, converted, convertedType),
-                ValidationAttributeLimits.DeniedValuesAttributeName =>
-                    FailsDeniedValues(attribute, converted, convertedType),
-                _ => false,
+                _ => FailsDeniedValues(attribute, converted, convertedType),
             };
 
-            if (failed)
+            if (failed && attributeName is not null)
             {
                 attributeDisplayName = DisplayName(attributeName);
                 return true;
@@ -105,7 +98,7 @@ internal static class DataAnnotationsConstraints
         foreach (var attribute in declaredAttributes)
         {
             var name = GetFrameworkConstraintName(attribute.AttributeClass);
-            if (name is not null)
+            if (name is not null && !OverridesIsValid(attribute.AttributeClass))
             {
                 effective[name] = attribute;
             }
@@ -248,10 +241,6 @@ internal static class DataAnnotationsConstraints
             if (argument.Kind == TypedConstantKind.Array)
             {
                 values.AddRange(argument.Values);
-            }
-            else
-            {
-                values.Add(argument);
             }
         }
 
@@ -452,7 +441,7 @@ internal static class DataAnnotationsConstraints
             }
         }
 
-        return converted is not null;
+        return true;
     }
 
     private static bool TryParseEnumNumeric(INamedTypeSymbol enumType, string value, out object converted)
@@ -516,30 +505,8 @@ internal static class DataAnnotationsConstraints
 
     private static bool OverridesIsValid(INamedTypeSymbol? attributeClass)
     {
-        if (attributeClass is null)
+        for (var current = attributeClass; current is not null && !IsFrameworkConstraintName(current); current = current.BaseType)
         {
-            return false;
-        }
-
-        var frameworkNames = new HashSet<string>(StringComparer.Ordinal)
-        {
-            ValidationAttributeLimits.RangeAttributeName,
-            ValidationAttributeLimits.MaxLengthAttributeName,
-            ValidationAttributeLimits.MinLengthAttributeName,
-            ValidationAttributeLimits.StringLengthAttributeName,
-            ValidationAttributeLimits.LengthAttributeName,
-            ValidationAttributeLimits.AllowedValuesAttributeName,
-            ValidationAttributeLimits.DeniedValuesAttributeName,
-        };
-
-        for (var current = attributeClass; current is not null; current = current.BaseType)
-        {
-            var name = current.ToDisplayString();
-            if (frameworkNames.Contains(name))
-            {
-                return false;
-            }
-
             if (current.GetMembers("IsValid").OfType<IMethodSymbol>().Any(method => method.IsOverride))
             {
                 return true;
@@ -549,11 +516,23 @@ internal static class DataAnnotationsConstraints
         return false;
     }
 
+    private static bool IsFrameworkConstraintName(INamedTypeSymbol attributeClass)
+    {
+        var name = attributeClass.ToDisplayString();
+        return name is
+            ValidationAttributeLimits.RangeAttributeName or
+            ValidationAttributeLimits.MaxLengthAttributeName or
+            ValidationAttributeLimits.MinLengthAttributeName or
+            ValidationAttributeLimits.StringLengthAttributeName or
+            ValidationAttributeLimits.LengthAttributeName or
+            ValidationAttributeLimits.AllowedValuesAttributeName or
+            ValidationAttributeLimits.DeniedValuesAttributeName;
+    }
+
     private static string DisplayName(string attributeFullName)
     {
         var simple = attributeFullName.Split('.').Last();
-        return simple.EndsWith("Attribute", StringComparison.Ordinal)
-            ? simple.Substring(0, simple.Length - "Attribute".Length)
-            : simple;
+        const string suffix = "Attribute";
+        return simple.Substring(0, simple.Length - suffix.Length);
     }
 }
