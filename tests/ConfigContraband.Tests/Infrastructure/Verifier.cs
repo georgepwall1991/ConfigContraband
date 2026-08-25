@@ -238,11 +238,22 @@ internal static class Verifier
         await test.RunAsync();
     }
 
+    public static Task VerifyFixAllAsync(
+        string source,
+        string fixedSource,
+        (string filename, string content) additionalFile,
+        string equivalenceKey,
+        params DiagnosticResult[] expected)
+    {
+        return VerifyFixAllAsync(source, fixedSource, additionalFile, equivalenceKey, 1, expected);
+    }
+
     public static async Task VerifyFixAllAsync(
         string source,
         string fixedSource,
         (string filename, string content) additionalFile,
         string equivalenceKey,
+        int expectedIterations,
         params DiagnosticResult[] expected)
     {
         var test = CreateFixAllTest(equivalenceKey, expected);
@@ -250,6 +261,8 @@ internal static class Verifier
         test.FixedCode = fixedSource;
         test.BatchFixedCode = fixedSource;
         test.TestState.AdditionalFiles.Add(additionalFile);
+        test.NumberOfFixAllInDocumentIterations = expectedIterations;
+        test.NumberOfFixAllInProjectIterations = expectedIterations;
         await test.RunAsync();
     }
 

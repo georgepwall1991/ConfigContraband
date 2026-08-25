@@ -1,6 +1,16 @@
 # Changelog
 
-All notable changes to ConfigContraband will be documented in this file.
+
+## 0.9.2 - 2026-08-25
+
+### What's new
+
+- **The CFG001/CFG009 section-literal fix now rewrites constant initializers.** When the diagnostic anchors a same-document `const` local or field whose declared value equals the reported section path, the fix rewrites the constant's own string initializer instead of inlining a literal over the identifier — every usage of the constant is corrected at once and the stale constant can no longer re-introduce the broken path elsewhere.
+
+### Details
+
+- The rewrite only applies when the anchored expression's compile-time constant value matches the declaration's literal, so shadowed or renamed identifiers never touch an unrelated declaration.
+- Non-constant anchors and cross-document declarations keep the previous inline-literal behavior.
 
 ## 0.9.1 - 2026-08-25
 

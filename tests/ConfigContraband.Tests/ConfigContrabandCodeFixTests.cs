@@ -273,6 +273,158 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg001_fix_rewrites_const_local_initializer_for_section_anchor()
+    {
+        var source = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:Section|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var fixedSource = OptionsSource("""
+            const string Section = "Stripe";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration(Section)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_fix_all_rewrites_const_initializer_and_plain_literal()
+    {
+        var source = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:Section|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#1:"Strpie"|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var fixedSource = OptionsSource("""
+            const string Section = "Stripe";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration(Section)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var appsettings = ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """);
+
+        await Verifier.VerifyFixAllAsync(
+            source,
+            fixedSource,
+            appsettings,
+            "UseSuggestedSection",
+            Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+                .WithLocation(0)
+                .WithArguments("Strpie", ". Did you mean \"Stripe\"?"),
+            Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+                .WithLocation(1)
+                .WithArguments("Strpie", ". Did you mean \"Stripe\"?"));
+    }
+
+    [Fact]
+    public async Task Cfg001_fix_rewrites_const_field_initializer_for_section_anchor()
+    {
+        var optionsTypes = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                private const string Section = "Strpie";
+
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration({|#0:Section|})
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+            """;
+
+        var fixedTypes = """
+            using System.ComponentModel.DataAnnotations;
+            using Microsoft.Extensions.DependencyInjection;
+
+            public sealed class Startup
+            {
+                private const string Section = "Stripe";
+
+                public void Configure(IServiceCollection services)
+                {
+                    services.AddOptions<StripeOptions>()
+                        .BindConfiguration(Section)
+                        .ValidateDataAnnotations()
+                        .ValidateOnStart();
+                }
+            }
+
+            public sealed class StripeOptions
+            {
+                [Required]
+                public string ApiKey { get; set; } = "";
+            }
+            """;
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            optionsTypes,
+            fixedTypes,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg001_fix_uses_escaped_literal_when_raw_section_replacement_contains_newline()
     {
         var source = OptionsSource(""""
@@ -299,42 +451,6 @@ public sealed partial class ConfigContrabandCodeFixTests
             ("appsettings.json", """
             {
               "Stri\npe": {
-                "ApiKey": "secret"
-              }
-            }
-            """),
-            expected);
-    }
-
-    [Fact]
-    public async Task Cfg001_fix_replaces_constant_section_identifier()
-    {
-        var source = OptionsSource("""
-            const string SectionName = "Strpie";
-            services.AddOptions<StripeOptions>()
-                .BindConfiguration({|#0:SectionName|})
-                .ValidateDataAnnotations()
-                .ValidateOnStart();
-            """);
-
-        var fixedSource = OptionsSource("""
-            const string SectionName = "Strpie";
-            services.AddOptions<StripeOptions>()
-                .BindConfiguration("Stripe")
-                .ValidateDataAnnotations()
-                .ValidateOnStart();
-            """);
-
-        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
-            .WithLocation(0)
-            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
-
-        await Verifier.VerifyCodeFixAsync(
-            source,
-            fixedSource,
-            ("appsettings.json", """
-            {
-              "Stripe": {
                 "ApiKey": "secret"
               }
             }

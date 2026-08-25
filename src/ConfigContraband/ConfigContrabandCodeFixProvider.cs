@@ -136,12 +136,69 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             return document;
         }
 
+        // When the anchored section path is a same-document constant identifier,
+        // rewrite the constant's own initializer instead of inlining a literal at
+        // the use site, so every usage of the constant is corrected at once and
+        // the stale constant cannot re-introduce the broken path elsewhere.
+        var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+        if (semanticModel is not null &&
+            TryGetConstDeclaratorInitializer(expression, semanticModel, cancellationToken, out var initializer) &&
+            initializer.SyntaxTree == root.SyntaxTree)
+        {
+            var trackedRoot = root.TrackNodes(initializer);
+            var currentInitializer = trackedRoot.GetCurrentNode(initializer);
+            if (currentInitializer is not null)
+            {
+                var constReplacement = SyntaxFactory.LiteralExpression(
+                        SyntaxKind.StringLiteralExpression,
+                        CreateReplacementStringLiteral(currentInitializer.Value, suggestion))
+                    .WithTriviaFrom(currentInitializer.Value);
+
+                return document.WithSyntaxRoot(
+                    trackedRoot.ReplaceNode(currentInitializer.Value, constReplacement));
+            }
+        }
+
         var replacement = SyntaxFactory.LiteralExpression(
                 SyntaxKind.StringLiteralExpression,
                 CreateReplacementStringLiteral(expression, suggestion))
             .WithTriviaFrom(expression);
 
         return document.WithSyntaxRoot(root.ReplaceNode(expression, replacement));
+    }
+
+    private static bool TryGetConstDeclaratorInitializer(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        CancellationToken cancellationToken,
+        out EqualsValueClauseSyntax? initializer)
+    {
+        initializer = null;
+
+        // The reported constant value must match the symbol's declared constant so
+        // a renamed or shadowed identifier never rewrites an unrelated declaration.
+        var symbol = semanticModel.GetSymbolInfo(expression, cancellationToken).Symbol;
+        if (semanticModel.GetConstantValue(expression, cancellationToken).Value is not string sectionPath ||
+            symbol is not (ILocalSymbol { IsConst: true } or IFieldSymbol { IsConst: true }))
+        {
+            return false;
+        }
+
+        foreach (var declaringReference in symbol.DeclaringSyntaxReferences)
+        {
+            if (declaringReference.GetSyntax(cancellationToken) is not VariableDeclaratorSyntax declarator ||
+                declarator.Initializer?.Value is not LiteralExpressionSyntax literal ||
+                !literal.IsKind(SyntaxKind.StringLiteralExpression) ||
+                literal.Token.ValueText != sectionPath)
+            {
+                continue;
+            }
+
+            initializer = declarator.Initializer;
+            return true;
+        }
+
+        return false;
     }
 
     private static SyntaxToken CreateReplacementStringLiteral(ExpressionSyntax expression, string suggestion)
