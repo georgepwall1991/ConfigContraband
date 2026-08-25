@@ -557,6 +557,72 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg003_fix_preserves_crlf_line_breaks_in_multiline_chain()
+    {
+        var source = OptionsSource("""
+            {|#0:services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()|};
+            """).Replace("\n", "\r\n");
+
+        var fixedSource = OptionsSource("""
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """).Replace("\n", "\r\n");
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithLocation(0)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(source, fixedSource, expected);
+    }
+
+    [Fact]
+    public async Task Cfg003_fix_preserves_crlf_line_breaks_when_chain_ends_at_eof()
+    {
+        var source = (
+            "using System.ComponentModel.DataAnnotations;\r\n" +
+            "using Microsoft.Extensions.DependencyInjection;\r\n" +
+            "\r\n" +
+            "var services = new ServiceCollection();\r\n" +
+            "{|#0:services.AddOptions<StripeOptions>()\r\n" +
+            "    .BindConfiguration(\"Stripe\")\r\n" +
+            "    .ValidateDataAnnotations();|}");
+
+        var fixedSource = (
+            "using System.ComponentModel.DataAnnotations;\r\n" +
+            "using Microsoft.Extensions.DependencyInjection;\r\n" +
+            "\r\n" +
+            "var services = new ServiceCollection();\r\n" +
+            "services.AddOptions<StripeOptions>()\r\n" +
+            "    .BindConfiguration(\"Stripe\")\r\n" +
+            "    .ValidateDataAnnotations()\r\n" +
+            "    .ValidateOnStart();");
+
+        var optionsTypes = (
+            "Types.cs",
+            """
+            public sealed class StripeOptions
+            {
+                [System.ComponentModel.DataAnnotations.Required]
+                public string ApiKey { get; set; } = "";
+            }
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ValidationNotOnStart)
+            .WithSpan("Test0.cs", 5, 1, 7, 31)
+            .WithArguments("StripeOptions");
+
+        await Verifier.VerifyCodeFixAsync(
+            new[] { ("Test0.cs", source), optionsTypes },
+            new[] { ("Test0.cs", fixedSource), optionsTypes },
+            Microsoft.CodeAnalysis.OutputKind.ConsoleApplication,
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg003_fix_appends_validate_on_start_when_options_validator_is_registered()
     {
         const string validatorTypes = """

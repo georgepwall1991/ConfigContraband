@@ -386,8 +386,21 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         var indentation = text.ToString(TextSpan.FromBounds(line.Start, memberAccess.OperatorToken.SpanStart));
         if (indentation.All(char.IsWhiteSpace))
         {
+            var lineBreak = text.ToString(TextSpan.FromBounds(line.End, line.EndIncludingLineBreak));
+            if (lineBreak.Length == 0)
+            {
+                // Unterminated final line (EOF without a trailing newline): reuse
+                // the preceding line's break so CRLF documents stay uniform. Only
+                // the final line of a document can be unterminated, and reaching
+                // this branch implies the chain started on an earlier line, so the
+                // predecessor exists and carries a real line break.
+                var previousLine = text.Lines[line.LineNumber - 1];
+                lineBreak = text.ToString(TextSpan.FromBounds(previousLine.End, previousLine.EndIncludingLineBreak));
+            }
+
             return SyntaxFactory.Token(
-                SyntaxFactory.TriviaList(SyntaxFactory.EndOfLine("\n"), SyntaxFactory.Whitespace(indentation)),
+                SyntaxTriviaList.Create(SyntaxFactory.EndOfLine(lineBreak))
+                    .Add(SyntaxFactory.Whitespace(indentation)),
                 SyntaxKind.DotToken,
                 SyntaxTriviaList.Empty);
         }
