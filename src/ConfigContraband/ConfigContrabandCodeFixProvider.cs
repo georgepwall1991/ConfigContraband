@@ -180,69 +180,83 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         initializer = null;
         constSymbol = null;
 
-        // The reported constant value must match the symbol's declared constant so
-        // a renamed or shadowed identifier never rewrites an unrelated declaration.
+        // The anchored expression must be a const local or field; the declaration
+        // lookup below additionally pins its literal initializer to the reported
+        // value so a renamed or shadowed identifier never matches.
         var symbol = semanticModel.GetSymbolInfo(expression, cancellationToken).Symbol;
-        if (semanticModel.GetConstantValue(expression, cancellationToken).Value is not string sectionPath ||
-            symbol is not (ILocalSymbol { IsConst: true } or IFieldSymbol { IsConst: true }))
+        if (symbol is not (ILocalSymbol { IsConst: true } or IFieldSymbol { IsConst: true }))
         {
             return false;
         }
 
+        var declaredValue = semanticModel.GetConstantValue(expression, cancellationToken).Value as string;
         foreach (var declaringReference in symbol.DeclaringSyntaxReferences)
         {
-            if (declaringReference.GetSyntax(cancellationToken) is not VariableDeclaratorSyntax declarator ||
-                declarator.Initializer?.Value is not LiteralExpressionSyntax literal ||
-                !literal.IsKind(SyntaxKind.StringLiteralExpression) ||
-                literal.Token.ValueText != sectionPath)
+            if (declaringReference.GetSyntax(cancellationToken) is not VariableDeclaratorSyntax
+                {
+                    Initializer: EqualsValueClauseSyntax initializerClause,
+                    Initializer.Value: LiteralExpressionSyntax literal
+                })
             {
+                // Chained constants (`const string Alias = Direct;`) have no
+                // literal of their own to rewrite.
                 continue;
             }
 
-            initializer = declarator.Initializer;
-            constSymbol = symbol;
-            return true;
+            if (literal.IsKind(SyntaxKind.StringLiteralExpression) &&
+                literal.Token.ValueText == declaredValue)
+            {
+                initializer = initializerClause;
+                constSymbol = symbol;
+                return true;
+            }
         }
 
         return false;
     }
 
     // Rewriting the initializer changes the constant for every reference, so the
-    // fix may only take that path when each reference uses the constant as a
-    // configuration section path. Any other use (a switch label, a key that is
-    // only valid under another parent, ...) keeps the use-site inline rewrite.
+    // fix may only take that path when each reference feeds a root-level
+    // BindConfiguration path. Any other shape — a nested GetSection parent, a
+    // direct read, a switch label, a key valid under another parent — keeps the
+    // use-site inline rewrite because the shared value cannot be proven uniform.
     private static async Task<bool> AllConstantReferencesAreSectionPathsAsync(
         Document document,
         ISymbol constSymbol,
         CancellationToken cancellationToken)
     {
+        var documentTree = await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false);
         foreach (var syntaxReference in constSymbol.DeclaringSyntaxReferences)
         {
-            if (syntaxReference.SyntaxTree != (await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false)))
+            if (syntaxReference.SyntaxTree != documentTree)
             {
+                // Declarations outside this document are not rewritten by this fix.
                 return false;
             }
         }
 
         foreach (var candidateDocument in document.Project.Documents)
         {
-            var candidateRoot = await candidateDocument.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
-            var candidateModel = await candidateDocument.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
-            if (candidateRoot is null || candidateModel is null)
-            {
-                continue;
-            }
-
+            var candidateRoot = (await candidateDocument.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false))!;
+            var candidateModel = (await candidateDocument.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false))!;
             foreach (var identifier in candidateRoot.DescendantNodes().OfType<IdentifierNameSyntax>())
             {
-                if (identifier.Parent is VariableDeclaratorSyntax ||
-                    !string.Equals(identifier.Identifier.ValueText, constSymbol.Name, StringComparison.Ordinal) ||
-                    !SymbolEqualityComparer.Default.Equals(candidateModel.GetSymbolInfo(identifier, cancellationToken).Symbol, constSymbol))
+                if (identifier.Identifier.ValueText != constSymbol.Name)
                 {
                     continue;
                 }
 
-                if (!IsSectionPathArgument(identifier))
+                if (identifier.Parent is VariableDeclaratorSyntax)
+                {
+                    continue;
+                }
+
+                if (!SymbolEqualityComparer.Default.Equals(candidateModel.GetSymbolInfo(identifier, cancellationToken).Symbol, constSymbol))
+                {
+                    continue;
+                }
+
+                if (!IsRootLevelBindConfigurationArgument(identifier))
                 {
                     return false;
                 }
@@ -252,16 +266,14 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         return true;
     }
 
-    private static bool IsSectionPathArgument(IdentifierNameSyntax identifier)
+    private static bool IsRootLevelBindConfigurationArgument(IdentifierNameSyntax identifier)
     {
-        return identifier.FirstAncestorOrSelf<InvocationExpressionSyntax>()?.Expression is MemberAccessExpressionSyntax memberAccess &&
-               memberAccess.Name.Identifier.ValueText is "BindConfiguration"
-                   or "Bind"
-                   or "Configure"
-                   or "GetSection"
-                   or "GetRequiredSection"
-                   or "GetValue"
-                   or "GetConnectionString";
+        if (identifier.FirstAncestorOrSelf<InvocationExpressionSyntax>() is not { Expression: MemberAccessExpressionSyntax memberAccess })
+        {
+            return false;
+        }
+
+        return memberAccess.Name.Identifier.ValueText == "BindConfiguration";
     }
 
     private static SyntaxToken CreateReplacementStringLiteral(ExpressionSyntax expression, string suggestion)
