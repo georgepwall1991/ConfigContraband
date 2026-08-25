@@ -225,6 +225,45 @@ internal static class Verifier
         await test.RunAsync();
     }
 
+    public static Task VerifyCodeFixAsync(
+        (string filename, string content)[] sources,
+        (string filename, string content)[] fixedSources,
+        (string filename, string content) additionalFile,
+        params DiagnosticResult[] expected)
+    {
+        return VerifyCodeFixAsync(sources, fixedSources, Microsoft.CodeAnalysis.OutputKind.DynamicallyLinkedLibrary, additionalFile, expected);
+    }
+
+    public static async Task VerifyCodeFixAsync(
+        (string filename, string content)[] sources,
+        (string filename, string content)[] fixedSources,
+        Microsoft.CodeAnalysis.OutputKind outputKind,
+        (string filename, string content) additionalFile,
+        params DiagnosticResult[] expected)
+    {
+        var test = new CSharpCodeFixTest<ConfigContrabandAnalyzer, ConfigContrabandCodeFixProvider, DefaultVerifier>
+        {
+            ReferenceAssemblies = OptionsReferences
+        };
+
+        foreach (var source in sources)
+        {
+            test.TestState.Sources.Add(source);
+        }
+
+        foreach (var fixedSource in fixedSources)
+        {
+            test.FixedState.Sources.Add(fixedSource);
+        }
+
+        test.TestState.OutputKind = outputKind;
+        test.FixedState.OutputKind = outputKind;
+        test.TestState.AdditionalFiles.Add(additionalFile);
+
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
     public static async Task VerifyFixAllAsync(
         string source,
         string fixedSource,
@@ -238,11 +277,22 @@ internal static class Verifier
         await test.RunAsync();
     }
 
+    public static Task VerifyFixAllAsync(
+        string source,
+        string fixedSource,
+        (string filename, string content) additionalFile,
+        string equivalenceKey,
+        params DiagnosticResult[] expected)
+    {
+        return VerifyFixAllAsync(source, fixedSource, additionalFile, equivalenceKey, 1, expected);
+    }
+
     public static async Task VerifyFixAllAsync(
         string source,
         string fixedSource,
         (string filename, string content) additionalFile,
         string equivalenceKey,
+        int expectedIterations,
         params DiagnosticResult[] expected)
     {
         var test = CreateFixAllTest(equivalenceKey, expected);
@@ -250,6 +300,8 @@ internal static class Verifier
         test.FixedCode = fixedSource;
         test.BatchFixedCode = fixedSource;
         test.TestState.AdditionalFiles.Add(additionalFile);
+        test.NumberOfFixAllInDocumentIterations = expectedIterations;
+        test.NumberOfFixAllInProjectIterations = expectedIterations;
         await test.RunAsync();
     }
 

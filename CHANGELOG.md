@@ -1,6 +1,16 @@
 # Changelog
 
-All notable changes to ConfigContraband will be documented in this file.
+
+## 0.9.2 - 2026-08-25
+
+### What's new
+
+- **The CFG001 section-literal fix now rewrites const-local initializers.** When the diagnostic anchors a same-document `const` local or field whose declared value equals the reported section path, the fix rewrites the constant's own string initializer instead of inlining a literal over the identifier — every usage of the constant is corrected at once and the stale constant can no longer re-introduce the broken path elsewhere.
+
+### Details
+
+- Applies to same-document const locals only (this is a CFG001-only capability; every reference must be the symbol-resolved `configSectionPath` argument of a framework `BindConfiguration` invocation. Const fields, sibling overloads such as `Bind(IConfiguration, ...)`, references inside `configureBinder` callbacks or under inactive preprocessor branches, chained constants, and unrelated uses keep the previous use-site inline rewrite. The fix claim is scoped to CFG001; CFG009 direct-read anchors keep their inline fix by construction.
+- Non-constant anchors and cross-document declarations keep the previous inline-literal behavior.
 
 ## 0.9.1 - 2026-08-25
 

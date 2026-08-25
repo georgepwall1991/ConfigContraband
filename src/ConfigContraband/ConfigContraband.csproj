@@ -14,7 +14,7 @@
 
   <PropertyGroup>
     <PackageId>ConfigContraband</PackageId>
-    <Version>0.9.1</Version>
+    <Version>0.9.2</Version>
     <Authors>George Wall</Authors>
     <Title>ConfigContraband — Options and appsettings validation analyzer</Title>
     <Description>Compile-time Options validation for .NET: a Roslyn analyzer that checks BindConfiguration, ValidateOnStart, ValidateDataAnnotations, and appsettings.json against your IOptions types so broken configuration fails in the editor and CI—not production.</Description>
@@ -28,7 +28,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>The CFG003/CFG004 append code fix now preserves the source file's line breaks (CRLF documents no longer receive mixed line endings when .ValidateOnStart() is appended).</PackageReleaseNotes>
+    <PackageReleaseNotes>The CFG001 section-literal code fix now rewrites a const local's initializer instead of inlining a literal at the use site, so every usage of the constant is corrected at once.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

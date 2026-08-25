@@ -9,6 +9,7 @@ using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Formatting;
 using Microsoft.CodeAnalysis.Text;
 
@@ -136,12 +137,193 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             return document;
         }
 
+        // When the anchored section path is a const local, rewrite the local's own
+        // initializer instead of inlining a literal at the use site, so every
+        // usage of the constant is corrected at once and the stale constant cannot
+        // re-introduce the broken path elsewhere. The rewrite is gated on every
+        // reference of the local feeding a framework BindConfiguration section
+        // path; anything else keeps the use-site inline rewrite.
+        var semanticModel = (await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false))!;
+
+        if (!TryGetConstDeclaratorInitializer(expression, semanticModel, cancellationToken, out var initializer))
+        {
+            return InlineReplacement(document, root, expression, suggestion);
+        }
+
+        if (!AllConstantReferencesAreRootBindConfigurationArguments(root, semanticModel, expression, cancellationToken))
+        {
+            return InlineReplacement(document, root, expression, suggestion);
+        }
+
+        var trackedRoot = root.TrackNodes(initializer!);
+        var currentInitializer = trackedRoot.GetCurrentNode(initializer!)!;
+        var constReplacement = SyntaxFactory.LiteralExpression(
+                SyntaxKind.StringLiteralExpression,
+                CreateReplacementStringLiteral(currentInitializer.Value, suggestion))
+            .WithTriviaFrom(currentInitializer.Value);
+
+        return document.WithSyntaxRoot(
+            trackedRoot.ReplaceNode(currentInitializer.Value, constReplacement));
+    }
+
+    private static Document InlineReplacement(
+        Document document,
+        SyntaxNode root,
+        ExpressionSyntax expression,
+        string suggestion)
+    {
         var replacement = SyntaxFactory.LiteralExpression(
                 SyntaxKind.StringLiteralExpression,
                 CreateReplacementStringLiteral(expression, suggestion))
             .WithTriviaFrom(expression);
 
         return document.WithSyntaxRoot(root.ReplaceNode(expression, replacement));
+    }
+
+    private static bool TryGetConstDeclaratorInitializer(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        CancellationToken cancellationToken,
+        out EqualsValueClauseSyntax? initializer)
+    {
+        initializer = null;
+
+        // Only const locals qualify. Const fields are visible across projects and
+        // documents, so no in-document scan can prove a global initializer rewrite
+        // safe for them; they keep the use-site inline rewrite.
+        if (semanticModel.GetSymbolInfo(expression, cancellationToken).Symbol is not ILocalSymbol { IsConst: true } symbol)
+        {
+            return false;
+        }
+
+        // The declaration lookup pins the local's literal initializer to the
+        // reported value so a renamed or shadowed identifier never matches.
+        var declaredValue = semanticModel.GetConstantValue(expression, cancellationToken).Value as string;
+        foreach (var declaringReference in symbol.DeclaringSyntaxReferences)
+        {
+            if (declaringReference.GetSyntax(cancellationToken) is not VariableDeclaratorSyntax declarator)
+            {
+                continue;
+            }
+
+            var initializerClause = declarator.Initializer;
+            if (initializerClause is null)
+            {
+                continue;
+            }
+
+            if (initializerClause.Value is not LiteralExpressionSyntax literal)
+            {
+                // Chained constants (`const string Alias = Direct;`) have no
+                // literal of their own to rewrite.
+                continue;
+            }
+
+            if (!literal.IsKind(SyntaxKind.StringLiteralExpression))
+            {
+                continue;
+            }
+
+            if (literal.Token.ValueText != declaredValue)
+            {
+                continue;
+            }
+
+            initializer = initializerClause;
+            return true;
+        }
+
+        return false;
+    }
+
+    // Rewriting the initializer changes the constant for every reference, so the
+    // fix may only take that path when each reference of the local feeds the
+    // section-path argument of a framework BindConfiguration call. Any other
+    // shape — a nested GetSection parent, a direct read, a configureBinder
+    // callback, a switch label — keeps the use-site inline rewrite because the
+    // shared value cannot be proven uniform.
+    private static bool AllConstantReferencesAreRootBindConfigurationArguments(
+        SyntaxNode root,
+        SemanticModel semanticModel,
+        ExpressionSyntax anchor,
+        CancellationToken cancellationToken)
+    {
+        var anchorSymbol = semanticModel.GetSymbolInfo(anchor, cancellationToken).Symbol!;
+        foreach (var trivia in root.DescendantTrivia())
+        {
+            // Inactive preprocessor branches may hide additional references
+            // (possibly written with unicode identifier escapes) that cannot be
+            // symbol-checked; any disabled text forces the conservative path.
+            if (trivia.IsKind(SyntaxKind.DisabledTextTrivia))
+            {
+                return false;
+            }
+        }
+
+        foreach (var identifier in root.DescendantNodes().OfType<IdentifierNameSyntax>())
+        {
+            if (identifier.Identifier.ValueText != anchorSymbol.Name)
+            {
+                continue;
+            }
+
+            if (identifier.Parent is VariableDeclaratorSyntax)
+            {
+                continue;
+            }
+
+            if (!SymbolEqualityComparer.Default.Equals(semanticModel.GetSymbolInfo(identifier, cancellationToken).Symbol, anchorSymbol))
+            {
+                continue;
+            }
+
+            if (!IsBindConfigurationSectionPathArgument(identifier, semanticModel, cancellationToken))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsBindConfigurationSectionPathArgument(
+        IdentifierNameSyntax identifier,
+        SemanticModel semanticModel,
+        CancellationToken cancellationToken)
+    {
+        if (identifier.FirstAncestorOrSelf<InvocationExpressionSyntax>() is not { } invocationSyntax ||
+            semanticModel.GetOperation(invocationSyntax, cancellationToken) is not IInvocationOperation invocation)
+        {
+            // References outside any call argument (assignments, case labels,
+            // switch expressions) cannot be proven to be section paths.
+            return false;
+        }
+
+        var targetMethod = invocation.TargetMethod.OriginalDefinition;
+        var containingTypeName = targetMethod.ContainingType!.ToDisplayString();
+        if (!string.Equals(
+                containingTypeName,
+                "Microsoft.Extensions.DependencyInjection.OptionsBuilderConfigurationExtensions",
+                StringComparison.Ordinal))
+        {
+            // Sibling invocations (GetSection chains, direct reads, unrelated
+            // helpers) are not BindConfiguration registration paths.
+            return false;
+        }
+
+        // Sibling overloads such as OptionsBuilder<T>.Bind(IConfiguration, ...)
+        // live on the same extensions class and carry no configSectionPath
+        // parameter; their references are not root-level registration paths.
+        var pathArgument = invocation.Arguments.FirstOrDefault(argument => argument.Parameter!.Name == "configSectionPath");
+        if (pathArgument is null)
+        {
+            return false;
+        }
+        // The constant must BE the whole section path argument. A composed path
+        // such as "Parent:" + Section may be valid as written and must not be
+        // mutated by this fix. (Roslyn operation syntax omits parentheses, so a
+        // parenthesized anchor compares equal to its identifier directly.)
+        return pathArgument.Value.Syntax == identifier;
     }
 
     private static SyntaxToken CreateReplacementStringLiteral(ExpressionSyntax expression, string suggestion)
