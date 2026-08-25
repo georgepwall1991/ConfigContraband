@@ -6,10 +6,11 @@ All notable changes to ConfigContraband will be documented in this file.
 
 ### What's new
 
-- **The CFG003/CFG004 append fixer preserves the source file's line breaks.** The appended `.ValidateOnStart()` / `.ValidateDataAnnotations()` dot token reused a hard-coded `\n` break, so applying the fix to a CRLF document produced mixed line endings on one line of an otherwise CRLF file. The appended invocation now reuses the actual line break of the chain it extends.
+- **The CFG003/CFG004 append fixer preserves the source file's line breaks.** The appended `.ValidateOnStart()` / `.ValidateDataAnnotations()` dot token reused a hard-coded `\n` break, so applying the fix to a CRLF document produced mixed line endings on one line of an otherwise CRLF file. The appended invocation now reuses the actual line break of the chain it extends — including an unterminated final line at EOF, which falls back to the nearest preceding line break.
 
 ### Details
 
+- An unterminated final line at EOF reuses the nearest preceding line break instead of assuming `\n`.
 - Single-line chains are unchanged: the fix still appends inline when the dot token shares its line with code.
 - Indentation reuse and `Formatter` behavior are unchanged; only the end-of-line trivia is now source-derived.
 

@@ -389,7 +389,22 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             var lineBreak = text.ToString(TextSpan.FromBounds(line.End, line.EndIncludingLineBreak));
             if (lineBreak.Length == 0)
             {
-                lineBreak = "\n";
+                // Unterminated final line (EOF without a trailing newline): reuse
+                // the nearest preceding line break so CRLF documents stay uniform.
+                for (var previous = line.LineNumber - 1; previous >= 0; previous--)
+                {
+                    var previousLine = text.Lines[previous];
+                    lineBreak = text.ToString(TextSpan.FromBounds(previousLine.End, previousLine.EndIncludingLineBreak));
+                    if (lineBreak.Length > 0)
+                    {
+                        break;
+                    }
+                }
+
+                if (lineBreak.Length == 0)
+                {
+                    lineBreak = "\n";
+                }
             }
 
             return SyntaxFactory.Token(

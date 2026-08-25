@@ -41,7 +41,7 @@ When the analyzer cannot prove a configuration shape statically, it **stays quie
 ## Install
 
 ```xml
-  <PackageReference Include="ConfigContraband" Version="0.9.0" PrivateAssets="all" />
+  <PackageReference Include="ConfigContraband" Version="0.9.1" PrivateAssets="all" />
 ```
 
 Or:
