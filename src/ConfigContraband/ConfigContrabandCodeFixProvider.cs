@@ -288,18 +288,20 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             return false;
         }
 
-        if (invocation.TargetMethod.OriginalDefinition is not
-            {
-                Name: "BindConfiguration",
-                ContainingType: { } containingType,
-            } ||
-            containingType.ToDisplayString() != "Microsoft.Extensions.DependencyInjection.OptionsBuilderConfigurationExtensions")
+        var targetMethod = invocation.TargetMethod.OriginalDefinition;
+        var containingTypeName = targetMethod.ContainingType!.ToDisplayString();
+        if (!string.Equals(
+                containingTypeName,
+                "Microsoft.Extensions.DependencyInjection.OptionsBuilderConfigurationExtensions",
+                StringComparison.Ordinal))
         {
+            // Sibling invocations (GetSection chains, direct reads, unrelated
+            // helpers) are not BindConfiguration registration paths.
             return false;
         }
 
-        // configSectionPath has no default value, so every BindConfiguration
-        // invocation operation supplies exactly one matching argument.
+        // configSectionPath has no default value, so once the containing type is
+        // pinned to this extensions class, exactly one argument carries it.
         var pathArgument = invocation.Arguments.Single(argument => argument.Parameter!.Name == "configSectionPath");
         if (pathArgument.Value.Syntax == identifier)
         {
