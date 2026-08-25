@@ -391,6 +391,8 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             {
                 // Unterminated final line (EOF without a trailing newline): reuse
                 // the nearest preceding line break so CRLF documents stay uniform.
+                // Reaching this branch implies the chain started on an earlier
+                // line, so a terminated preceding line always exists.
                 for (var previous = line.LineNumber - 1; previous >= 0; previous--)
                 {
                     var previousLine = text.Lines[previous];
@@ -399,11 +401,6 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
                     {
                         break;
                     }
-                }
-
-                if (lineBreak.Length == 0)
-                {
-                    lineBreak = "\n";
                 }
             }
 
