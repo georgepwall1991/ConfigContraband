@@ -9,6 +9,7 @@ using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Formatting;
 using Microsoft.CodeAnalysis.Text;
 
@@ -136,30 +137,27 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             return document;
         }
 
-        // When the anchored section path is a same-document constant identifier,
-        // rewrite the constant's own initializer instead of inlining a literal at
-        // the use site, so every usage of the constant is corrected at once and
-        // the stale constant cannot re-introduce the broken path elsewhere.
+        // When the anchored section path is a const local, rewrite the local's own
+        // initializer instead of inlining a literal at the use site, so every
+        // usage of the constant is corrected at once and the stale constant cannot
+        // re-introduce the broken path elsewhere. The rewrite is gated on every
+        // reference of the local feeding a framework BindConfiguration section
+        // path; anything else keeps the use-site inline rewrite.
         var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
         if (semanticModel is not null &&
-            TryGetConstDeclaratorInitializer(expression, semanticModel, cancellationToken, out var initializer, out var constSymbol) &&
+            TryGetConstDeclaratorInitializer(expression, semanticModel, cancellationToken, out var initializer) &&
             initializer is not null &&
-            constSymbol is not null &&
-            initializer.SyntaxTree == root.SyntaxTree &&
-            await AllConstantReferencesAreSectionPathsAsync(document, constSymbol, cancellationToken).ConfigureAwait(false))
+            AllConstantReferencesAreRootBindConfigurationArguments(root, semanticModel, expression, cancellationToken))
         {
             var trackedRoot = root.TrackNodes(initializer);
-            var currentInitializer = trackedRoot.GetCurrentNode(initializer);
-            if (currentInitializer is not null)
-            {
-                var constReplacement = SyntaxFactory.LiteralExpression(
-                        SyntaxKind.StringLiteralExpression,
-                        CreateReplacementStringLiteral(currentInitializer.Value, suggestion))
-                    .WithTriviaFrom(currentInitializer.Value);
+            var currentInitializer = trackedRoot.GetCurrentNode(initializer)!;
+            var constReplacement = SyntaxFactory.LiteralExpression(
+                    SyntaxKind.StringLiteralExpression,
+                    CreateReplacementStringLiteral(currentInitializer.Value, suggestion))
+                .WithTriviaFrom(currentInitializer.Value);
 
-                return document.WithSyntaxRoot(
-                    trackedRoot.ReplaceNode(currentInitializer.Value, constReplacement));
-            }
+            return document.WithSyntaxRoot(
+                trackedRoot.ReplaceNode(currentInitializer.Value, constReplacement));
         }
 
         var replacement = SyntaxFactory.LiteralExpression(
@@ -174,21 +172,20 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         ExpressionSyntax expression,
         SemanticModel semanticModel,
         CancellationToken cancellationToken,
-        out EqualsValueClauseSyntax? initializer,
-        out ISymbol? constSymbol)
+        out EqualsValueClauseSyntax? initializer)
     {
         initializer = null;
-        constSymbol = null;
 
-        // The anchored expression must be a const local or field; the declaration
-        // lookup below additionally pins its literal initializer to the reported
-        // value so a renamed or shadowed identifier never matches.
-        var symbol = semanticModel.GetSymbolInfo(expression, cancellationToken).Symbol;
-        if (symbol is not (ILocalSymbol { IsConst: true } or IFieldSymbol { IsConst: true }))
+        // Only const locals qualify. Const fields are visible across projects and
+        // documents, so no in-document scan can prove a global initializer rewrite
+        // safe for them; they keep the use-site inline rewrite.
+        if (semanticModel.GetSymbolInfo(expression, cancellationToken).Symbol is not ILocalSymbol { IsConst: true } symbol)
         {
             return false;
         }
 
+        // The declaration lookup pins the local's literal initializer to the
+        // reported value so a renamed or shadowed identifier never matches.
         var declaredValue = semanticModel.GetConstantValue(expression, cancellationToken).Value as string;
         foreach (var declaringReference in symbol.DeclaringSyntaxReferences)
         {
@@ -207,7 +204,6 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
                 literal.Token.ValueText == declaredValue)
             {
                 initializer = initializerClause;
-                constSymbol = symbol;
                 return true;
             }
         }
@@ -216,64 +212,72 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
     }
 
     // Rewriting the initializer changes the constant for every reference, so the
-    // fix may only take that path when each reference feeds a root-level
-    // BindConfiguration path. Any other shape — a nested GetSection parent, a
-    // direct read, a switch label, a key valid under another parent — keeps the
-    // use-site inline rewrite because the shared value cannot be proven uniform.
-    private static async Task<bool> AllConstantReferencesAreSectionPathsAsync(
-        Document document,
-        ISymbol constSymbol,
+    // fix may only take that path when each reference of the local feeds the
+    // section-path argument of a framework BindConfiguration call. Any other
+    // shape — a nested GetSection parent, a direct read, a configureBinder
+    // callback, a switch label — keeps the use-site inline rewrite because the
+    // shared value cannot be proven uniform.
+    private static bool AllConstantReferencesAreRootBindConfigurationArguments(
+        SyntaxNode root,
+        SemanticModel semanticModel,
+        ExpressionSyntax anchor,
         CancellationToken cancellationToken)
     {
-        var documentTree = await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var syntaxReference in constSymbol.DeclaringSyntaxReferences)
+        var anchorSymbol = semanticModel.GetSymbolInfo(anchor, cancellationToken).Symbol!;
+        foreach (var identifier in root.DescendantNodes().OfType<IdentifierNameSyntax>())
         {
-            if (syntaxReference.SyntaxTree != documentTree)
+            if (identifier.Identifier.ValueText != anchorSymbol.Name)
             {
-                // Declarations outside this document are not rewritten by this fix.
-                return false;
+                continue;
             }
-        }
 
-        foreach (var candidateDocument in document.Project.Documents)
-        {
-            var candidateRoot = (await candidateDocument.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false))!;
-            var candidateModel = (await candidateDocument.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false))!;
-            foreach (var identifier in candidateRoot.DescendantNodes().OfType<IdentifierNameSyntax>())
+            if (identifier.Parent is VariableDeclaratorSyntax)
             {
-                if (identifier.Identifier.ValueText != constSymbol.Name)
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                if (identifier.Parent is VariableDeclaratorSyntax)
-                {
-                    continue;
-                }
+            if (!SymbolEqualityComparer.Default.Equals(semanticModel.GetSymbolInfo(identifier, cancellationToken).Symbol, anchorSymbol))
+            {
+                continue;
+            }
 
-                if (!SymbolEqualityComparer.Default.Equals(candidateModel.GetSymbolInfo(identifier, cancellationToken).Symbol, constSymbol))
-                {
-                    continue;
-                }
-
-                if (!IsRootLevelBindConfigurationArgument(identifier))
-                {
-                    return false;
-                }
+            if (!IsBindConfigurationSectionPathArgument(identifier, semanticModel, cancellationToken))
+            {
+                return false;
             }
         }
 
         return true;
     }
 
-    private static bool IsRootLevelBindConfigurationArgument(IdentifierNameSyntax identifier)
+    private static bool IsBindConfigurationSectionPathArgument(
+        IdentifierNameSyntax identifier,
+        SemanticModel semanticModel,
+        CancellationToken cancellationToken)
     {
-        if (identifier.FirstAncestorOrSelf<InvocationExpressionSyntax>() is not { Expression: MemberAccessExpressionSyntax memberAccess })
+        if (semanticModel.GetOperation(identifier.FirstAncestorOrSelf<InvocationExpressionSyntax>()!, cancellationToken) is not IInvocationOperation invocation ||
+            invocation.TargetMethod.OriginalDefinition is not
+            {
+                Name: "BindConfiguration",
+                ContainingType: { } containingType,
+            } ||
+            containingType.ToDisplayString() != "Microsoft.Extensions.DependencyInjection.OptionsBuilderConfigurationExtensions")
         {
             return false;
         }
 
-        return memberAccess.Name.Identifier.ValueText == "BindConfiguration";
+        foreach (var argument in invocation.Arguments)
+        {
+            if (argument.Parameter?.Name != "configSectionPath")
+            {
+                continue;
+            }
+
+            return argument.Value.Syntax == identifier ||
+                   argument.Value.Syntax.DescendantNodes().Contains(identifier);
+        }
+
+        return false;
     }
 
     private static SyntaxToken CreateReplacementStringLiteral(ExpressionSyntax expression, string suggestion)

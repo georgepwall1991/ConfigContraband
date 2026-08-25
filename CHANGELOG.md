@@ -9,7 +9,7 @@
 
 ### Details
 
-- The rewrite only applies when the anchored expression's compile-time constant value matches the declaration's literal AND the constant declares in the same document with every project reference feeding a root-level `BindConfiguration` argument. Nested `GetSection` parents, direct reads, chained constants, and unrelated uses keep the previous use-site inline rewrite, so keys valid under another parent are never mutated.
+- Applies to const locals only: every reference of the local must be the symbol-resolved `configSectionPath` argument of a framework `BindConfiguration` invocation. Const fields (visible across projects), nested `GetSection` parents, `configureBinder` callbacks, chained constants, and unrelated uses keep the previous use-site inline rewrite. The fix claim is scoped to CFG001; CFG009 direct-read anchors keep their inline fix by construction.
 - Non-constant anchors and cross-document declarations keep the previous inline-literal behavior.
 
 ## 0.9.1 - 2026-08-25

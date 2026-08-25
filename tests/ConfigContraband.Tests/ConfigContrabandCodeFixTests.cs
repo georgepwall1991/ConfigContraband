@@ -394,6 +394,43 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg001_fix_keeps_use_site_rewrite_when_const_used_in_configure_binder_callback()
+    {
+        var source = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:Section|}, _ => System.Console.WriteLine(Section.Length))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var fixedSource = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe", _ => System.Console.WriteLine(Section.Length))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json",
+                """
+                {
+                  "Stripe": {
+                    "ApiKey": "secret"
+                  }
+                }
+                """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg001_fix_keeps_use_site_rewrite_for_cross_document_const_field()
     {
         var source = (
@@ -611,7 +648,7 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
-    public async Task Cfg001_fix_rewrites_const_field_initializer_for_section_anchor()
+    public async Task Cfg001_fix_keeps_use_site_rewrite_for_const_field()
     {
         var optionsTypes = """
             using System.ComponentModel.DataAnnotations;
@@ -643,12 +680,12 @@ public sealed partial class ConfigContrabandCodeFixTests
 
             public sealed class Startup
             {
-                private const string Section = "Stripe";
+                private const string Section = "Strpie";
 
                 public void Configure(IServiceCollection services)
                 {
                     services.AddOptions<StripeOptions>()
-                        .BindConfiguration(Section)
+                        .BindConfiguration("Stripe")
                         .ValidateDataAnnotations()
                         .ValidateOnStart();
                 }
