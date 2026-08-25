@@ -249,6 +249,17 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         CancellationToken cancellationToken)
     {
         var anchorSymbol = semanticModel.GetSymbolInfo(anchor, cancellationToken).Symbol!;
+        foreach (var trivia in root.DescendantTrivia())
+        {
+            if (trivia.IsKind(SyntaxKind.DisabledTextTrivia) &&
+                trivia.ToString().Contains(anchorSymbol.Name, StringComparison.Ordinal))
+            {
+                // Inactive preprocessor branches may hide additional references
+                // that cannot be symbol-checked; stay conservative.
+                return false;
+            }
+        }
+
         foreach (var identifier in root.DescendantNodes().OfType<IdentifierNameSyntax>())
         {
             if (identifier.Identifier.ValueText != anchorSymbol.Name)
@@ -300,9 +311,14 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             return false;
         }
 
-        // configSectionPath has no default value, so once the containing type is
-        // pinned to this extensions class, exactly one argument carries it.
-        var pathArgument = invocation.Arguments.Single(argument => argument.Parameter!.Name == "configSectionPath");
+        // Sibling overloads such as OptionsBuilder<T>.Bind(IConfiguration, ...)
+        // live on the same extensions class and carry no configSectionPath
+        // parameter; their references are not root-level registration paths.
+        var pathArgument = invocation.Arguments.FirstOrDefault(argument => argument.Parameter?.Name == "configSectionPath");
+        if (pathArgument is null)
+        {
+            return false;
+        }
         if (pathArgument.Value.Syntax == identifier)
         {
             return true;

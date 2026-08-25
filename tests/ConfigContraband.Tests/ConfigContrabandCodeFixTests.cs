@@ -427,6 +427,90 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg001_fix_keeps_use_site_rewrite_when_const_used_in_bind_configuration_overload()
+    {
+        var source = OptionsSource("""
+            const string Section = "Strpie";
+            Microsoft.Extensions.Configuration.IConfiguration configuration = null!;
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:Section|})
+                .Bind(configuration, binderOptions => _ = Section.Length == 6)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var fixedSource = OptionsSource("""
+            const string Section = "Strpie";
+            Microsoft.Extensions.Configuration.IConfiguration configuration = null!;
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .Bind(configuration, binderOptions => _ = Section.Length == 6)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json",
+                """
+                {
+                  "Stripe": {
+                    "ApiKey": "secret"
+                  }
+                }
+                """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_fix_keeps_use_site_rewrite_when_const_used_in_inactive_preprocessor_branch()
+    {
+        var source = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:Section|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            #if ALT
+            System.Console.WriteLine(Section.Length);
+            #endif
+            """);
+
+        var fixedSource = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            #if ALT
+            System.Console.WriteLine(Section.Length);
+            #endif
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json",
+                """
+                {
+                  "Stripe": {
+                    "ApiKey": "secret"
+                  }
+                }
+                """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg001_fix_keeps_use_site_rewrite_when_const_used_under_nested_parent()
     {
         var source = OptionsSource("""
