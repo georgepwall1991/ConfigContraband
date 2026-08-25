@@ -309,6 +309,44 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg001_fix_keeps_use_site_rewrite_when_const_has_unrelated_uses()
+    {
+        var source = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:Section|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            System.Console.WriteLine(Section.Length);
+            """);
+
+        var fixedSource = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            System.Console.WriteLine(Section.Length);
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json", """
+            {
+              "Stripe": {
+                "ApiKey": "secret"
+              }
+            }
+            """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg001_fix_all_rewrites_const_initializer_and_plain_literal()
     {
         var source = OptionsSource("""

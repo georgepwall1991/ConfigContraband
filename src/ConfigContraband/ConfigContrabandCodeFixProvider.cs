@@ -142,9 +142,11 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         // the stale constant cannot re-introduce the broken path elsewhere.
         var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
         if (semanticModel is not null &&
-            TryGetConstDeclaratorInitializer(expression, semanticModel, cancellationToken, out var initializer) &&
+            TryGetConstDeclaratorInitializer(expression, semanticModel, cancellationToken, out var initializer, out var constSymbol) &&
             initializer is not null &&
-            initializer.SyntaxTree == root.SyntaxTree)
+            constSymbol is not null &&
+            initializer.SyntaxTree == root.SyntaxTree &&
+            await AllConstantReferencesAreSectionPathsAsync(document, constSymbol, cancellationToken).ConfigureAwait(false))
         {
             var trackedRoot = root.TrackNodes(initializer);
             var currentInitializer = trackedRoot.GetCurrentNode(initializer);
@@ -172,9 +174,11 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         ExpressionSyntax expression,
         SemanticModel semanticModel,
         CancellationToken cancellationToken,
-        out EqualsValueClauseSyntax? initializer)
+        out EqualsValueClauseSyntax? initializer,
+        out ISymbol? constSymbol)
     {
         initializer = null;
+        constSymbol = null;
 
         // The reported constant value must match the symbol's declared constant so
         // a renamed or shadowed identifier never rewrites an unrelated declaration.
@@ -196,10 +200,68 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             }
 
             initializer = declarator.Initializer;
+            constSymbol = symbol;
             return true;
         }
 
         return false;
+    }
+
+    // Rewriting the initializer changes the constant for every reference, so the
+    // fix may only take that path when each reference uses the constant as a
+    // configuration section path. Any other use (a switch label, a key that is
+    // only valid under another parent, ...) keeps the use-site inline rewrite.
+    private static async Task<bool> AllConstantReferencesAreSectionPathsAsync(
+        Document document,
+        ISymbol constSymbol,
+        CancellationToken cancellationToken)
+    {
+        foreach (var syntaxReference in constSymbol.DeclaringSyntaxReferences)
+        {
+            if (syntaxReference.SyntaxTree != (await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false)))
+            {
+                return false;
+            }
+        }
+
+        foreach (var candidateDocument in document.Project.Documents)
+        {
+            var candidateRoot = await candidateDocument.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+            var candidateModel = await candidateDocument.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+            if (candidateRoot is null || candidateModel is null)
+            {
+                continue;
+            }
+
+            foreach (var identifier in candidateRoot.DescendantNodes().OfType<IdentifierNameSyntax>())
+            {
+                if (identifier.Parent is VariableDeclaratorSyntax ||
+                    !string.Equals(identifier.Identifier.ValueText, constSymbol.Name, StringComparison.Ordinal) ||
+                    !SymbolEqualityComparer.Default.Equals(candidateModel.GetSymbolInfo(identifier, cancellationToken).Symbol, constSymbol))
+                {
+                    continue;
+                }
+
+                if (!IsSectionPathArgument(identifier))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsSectionPathArgument(IdentifierNameSyntax identifier)
+    {
+        return identifier.FirstAncestorOrSelf<InvocationExpressionSyntax>()?.Expression is MemberAccessExpressionSyntax memberAccess &&
+               memberAccess.Name.Identifier.ValueText is "BindConfiguration"
+                   or "Bind"
+                   or "Configure"
+                   or "GetSection"
+                   or "GetRequiredSection"
+                   or "GetValue"
+                   or "GetConnectionString";
     }
 
     private static SyntaxToken CreateReplacementStringLiteral(ExpressionSyntax expression, string suggestion)

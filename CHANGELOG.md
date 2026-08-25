@@ -9,7 +9,7 @@
 
 ### Details
 
-- The rewrite only applies when the anchored expression's compile-time constant value matches the declaration's literal, so shadowed or renamed identifiers never touch an unrelated declaration.
+- The rewrite only applies when the anchored expression's compile-time constant value matches the declaration's literal AND every reference of the constant in the project uses it as a configuration section path argument; constants with unrelated uses keep the previous use-site inline rewrite, so switch labels or keys valid under other parents are never mutated.
 - Non-constant anchors and cross-document declarations keep the previous inline-literal behavior.
 
 ## 0.9.1 - 2026-08-25
