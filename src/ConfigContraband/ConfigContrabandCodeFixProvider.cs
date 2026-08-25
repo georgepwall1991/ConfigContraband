@@ -314,7 +314,7 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         // Sibling overloads such as OptionsBuilder<T>.Bind(IConfiguration, ...)
         // live on the same extensions class and carry no configSectionPath
         // parameter; their references are not root-level registration paths.
-        var pathArgument = invocation.Arguments.FirstOrDefault(argument => argument.Parameter?.Name == "configSectionPath");
+        var pathArgument = invocation.Arguments.FirstOrDefault(argument => argument.Parameter!.Name == "configSectionPath");
         if (pathArgument is null)
         {
             return false;
