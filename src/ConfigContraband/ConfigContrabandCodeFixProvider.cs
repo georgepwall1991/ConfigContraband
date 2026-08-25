@@ -143,23 +143,35 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         // re-introduce the broken path elsewhere. The rewrite is gated on every
         // reference of the local feeding a framework BindConfiguration section
         // path; anything else keeps the use-site inline rewrite.
-        var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
-        if (semanticModel is not null &&
-            TryGetConstDeclaratorInitializer(expression, semanticModel, cancellationToken, out var initializer) &&
-            initializer is not null &&
-            AllConstantReferencesAreRootBindConfigurationArguments(root, semanticModel, expression, cancellationToken))
-        {
-            var trackedRoot = root.TrackNodes(initializer);
-            var currentInitializer = trackedRoot.GetCurrentNode(initializer)!;
-            var constReplacement = SyntaxFactory.LiteralExpression(
-                    SyntaxKind.StringLiteralExpression,
-                    CreateReplacementStringLiteral(currentInitializer.Value, suggestion))
-                .WithTriviaFrom(currentInitializer.Value);
+        var semanticModel = (await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false))!;
 
-            return document.WithSyntaxRoot(
-                trackedRoot.ReplaceNode(currentInitializer.Value, constReplacement));
+        if (!TryGetConstDeclaratorInitializer(expression, semanticModel, cancellationToken, out var initializer))
+        {
+            return InlineReplacement(document, root, expression, suggestion);
         }
 
+        if (!AllConstantReferencesAreRootBindConfigurationArguments(root, semanticModel, expression, cancellationToken))
+        {
+            return InlineReplacement(document, root, expression, suggestion);
+        }
+
+        var trackedRoot = root.TrackNodes(initializer!);
+        var currentInitializer = trackedRoot.GetCurrentNode(initializer!)!;
+        var constReplacement = SyntaxFactory.LiteralExpression(
+                SyntaxKind.StringLiteralExpression,
+                CreateReplacementStringLiteral(currentInitializer.Value, suggestion))
+            .WithTriviaFrom(currentInitializer.Value);
+
+        return document.WithSyntaxRoot(
+            trackedRoot.ReplaceNode(currentInitializer.Value, constReplacement));
+    }
+
+    private static Document InlineReplacement(
+        Document document,
+        SyntaxNode root,
+        ExpressionSyntax expression,
+        string suggestion)
+    {
         var replacement = SyntaxFactory.LiteralExpression(
                 SyntaxKind.StringLiteralExpression,
                 CreateReplacementStringLiteral(expression, suggestion))
@@ -189,23 +201,36 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         var declaredValue = semanticModel.GetConstantValue(expression, cancellationToken).Value as string;
         foreach (var declaringReference in symbol.DeclaringSyntaxReferences)
         {
-            if (declaringReference.GetSyntax(cancellationToken) is not VariableDeclaratorSyntax
-                {
-                    Initializer: EqualsValueClauseSyntax initializerClause,
-                    Initializer.Value: LiteralExpressionSyntax literal
-                })
+            if (declaringReference.GetSyntax(cancellationToken) is not VariableDeclaratorSyntax declarator)
+            {
+                continue;
+            }
+
+            var initializerClause = declarator.Initializer;
+            if (initializerClause is null)
+            {
+                continue;
+            }
+
+            if (initializerClause.Value is not LiteralExpressionSyntax literal)
             {
                 // Chained constants (`const string Alias = Direct;`) have no
                 // literal of their own to rewrite.
                 continue;
             }
 
-            if (literal.IsKind(SyntaxKind.StringLiteralExpression) &&
-                literal.Token.ValueText == declaredValue)
+            if (!literal.IsKind(SyntaxKind.StringLiteralExpression))
             {
-                initializer = initializerClause;
-                return true;
+                continue;
             }
+
+            if (literal.Token.ValueText != declaredValue)
+            {
+                continue;
+            }
+
+            initializer = initializerClause;
+            return true;
         }
 
         return false;
@@ -255,8 +280,15 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         SemanticModel semanticModel,
         CancellationToken cancellationToken)
     {
-        if (semanticModel.GetOperation(identifier.FirstAncestorOrSelf<InvocationExpressionSyntax>()!, cancellationToken) is not IInvocationOperation invocation ||
-            invocation.TargetMethod.OriginalDefinition is not
+        if (identifier.FirstAncestorOrSelf<InvocationExpressionSyntax>() is not { } invocationSyntax ||
+            semanticModel.GetOperation(invocationSyntax, cancellationToken) is not IInvocationOperation invocation)
+        {
+            // References outside any call argument (assignments, case labels,
+            // switch expressions) cannot be proven to be section paths.
+            return false;
+        }
+
+        if (invocation.TargetMethod.OriginalDefinition is not
             {
                 Name: "BindConfiguration",
                 ContainingType: { } containingType,
@@ -266,18 +298,15 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
             return false;
         }
 
-        foreach (var argument in invocation.Arguments)
+        // configSectionPath has no default value, so every BindConfiguration
+        // invocation operation supplies exactly one matching argument.
+        var pathArgument = invocation.Arguments.Single(argument => argument.Parameter!.Name == "configSectionPath");
+        if (pathArgument.Value.Syntax == identifier)
         {
-            if (argument.Parameter?.Name != "configSectionPath")
-            {
-                continue;
-            }
-
-            return argument.Value.Syntax == identifier ||
-                   argument.Value.Syntax.DescendantNodes().Contains(identifier);
+            return true;
         }
 
-        return false;
+        return pathArgument.Value.Syntax.DescendantNodes().Contains(identifier);
     }
 
     private static SyntaxToken CreateReplacementStringLiteral(ExpressionSyntax expression, string suggestion)

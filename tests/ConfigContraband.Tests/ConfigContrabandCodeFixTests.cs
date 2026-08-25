@@ -319,6 +319,7 @@ public sealed partial class ConfigContrabandCodeFixTests
                 .ValidateOnStart();
             System.Console.WriteLine(Section.Length);
             _ = nameof(Section);
+            _ = Section.Length == 5;
             """);
 
         var fixedSource = OptionsSource("""
@@ -329,6 +330,7 @@ public sealed partial class ConfigContrabandCodeFixTests
                 .ValidateOnStart();
             System.Console.WriteLine(Section.Length);
             _ = nameof(Section);
+            _ = Section.Length == 5;
             """);
 
         var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
@@ -345,6 +347,82 @@ public sealed partial class ConfigContrabandCodeFixTests
               }
             }
             """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_fix_rewrites_const_initializer_for_parenthesized_anchor()
+    {
+        var source = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration(({|#0:Section|}))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var fixedSource = OptionsSource("""
+            const string Section = "Stripe";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration((Section))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json",
+                """
+                {
+                  "Stripe": {
+                    "ApiKey": "secret"
+                  }
+                }
+                """),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg001_fix_keeps_use_site_rewrite_for_non_invocation_reference()
+    {
+        var source = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:Section|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            _ = Section.Length;
+            """);
+
+        var fixedSource = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            _ = Section.Length;
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json",
+                """
+                {
+                  "Stripe": {
+                    "ApiKey": "secret"
+                  }
+                }
+                """),
             expected);
     }
 
@@ -399,7 +477,11 @@ public sealed partial class ConfigContrabandCodeFixTests
         var source = OptionsSource("""
             const string Section = "Strpie";
             services.AddOptions<StripeOptions>()
-                .BindConfiguration({|#0:Section|}, _ => System.Console.WriteLine(Section.Length))
+                .BindConfiguration({|#0:Section|}, _ => _.ErrorOnUnknownConfiguration = Section.Length > 0)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration(configureBinder: _ => _.ErrorOnUnknownConfiguration = Section.Length > 0, configSectionPath: {|#1:Section|})
                 .ValidateDataAnnotations()
                 .ValidateOnStart();
             """);
@@ -407,14 +489,24 @@ public sealed partial class ConfigContrabandCodeFixTests
         var fixedSource = OptionsSource("""
             const string Section = "Strpie";
             services.AddOptions<StripeOptions>()
-                .BindConfiguration("Stripe", _ => System.Console.WriteLine(Section.Length))
+                .BindConfiguration("Stripe", _ => _.ErrorOnUnknownConfiguration = Section.Length > 0)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration(configureBinder: _ => _.ErrorOnUnknownConfiguration = Section.Length > 0, configSectionPath: "Stripe")
                 .ValidateDataAnnotations()
                 .ValidateOnStart();
             """);
 
-        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
-            .WithLocation(0)
-            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+        var expected = new[]
+        {
+            Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+                .WithLocation(0)
+                .WithArguments("Strpie", ". Did you mean \"Stripe\"?"),
+            Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+                .WithLocation(1)
+                .WithArguments("Strpie", ". Did you mean \"Stripe\"?"),
+        };
 
         await Verifier.VerifyCodeFixAsync(
             source,
