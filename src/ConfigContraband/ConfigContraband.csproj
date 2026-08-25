@@ -28,7 +28,7 @@
     <RepositoryUrl>https://github.com/georgepwall1991/ConfigContraband</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/georgepwall1991/ConfigContraband</PackageProjectUrl>
-    <PackageReleaseNotes>The CFG001/CFG009 section-literal code fix now rewrites a constant identifier's initializer instead of inlining a literal at the use site, so every usage of the constant is corrected at once.</PackageReleaseNotes>
+    <PackageReleaseNotes>The CFG001 section-literal code fix now rewrites a const local's initializer instead of inlining a literal at the use site, so every usage of the constant is corrected at once.</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>

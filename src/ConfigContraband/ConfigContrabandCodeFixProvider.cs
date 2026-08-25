@@ -251,11 +251,11 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         var anchorSymbol = semanticModel.GetSymbolInfo(anchor, cancellationToken).Symbol!;
         foreach (var trivia in root.DescendantTrivia())
         {
-            if (trivia.IsKind(SyntaxKind.DisabledTextTrivia) &&
-                trivia.ToString().Contains(anchorSymbol.Name, StringComparison.Ordinal))
+            // Inactive preprocessor branches may hide additional references
+            // (possibly written with unicode identifier escapes) that cannot be
+            // symbol-checked; any disabled text forces the conservative path.
+            if (trivia.IsKind(SyntaxKind.DisabledTextTrivia))
             {
-                // Inactive preprocessor branches may hide additional references
-                // that cannot be symbol-checked; stay conservative.
                 return false;
             }
         }
