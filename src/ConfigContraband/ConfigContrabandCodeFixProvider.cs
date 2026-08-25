@@ -319,12 +319,11 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         {
             return false;
         }
-        if (pathArgument.Value.Syntax == identifier)
-        {
-            return true;
-        }
-
-        return pathArgument.Value.Syntax.DescendantNodes().Contains(identifier);
+        // The constant must BE the whole section path argument. A composed path
+        // such as "Parent:" + Section may be valid as written and must not be
+        // mutated by this fix. (Roslyn operation syntax omits parentheses, so a
+        // parenthesized anchor compares equal to its identifier directly.)
+        return pathArgument.Value.Syntax == identifier;
     }
 
     private static SyntaxToken CreateReplacementStringLiteral(ExpressionSyntax expression, string suggestion)

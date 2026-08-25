@@ -550,6 +550,56 @@ public sealed partial class ConfigContrabandCodeFixTests
     }
 
     [Fact]
+    public async Task Cfg001_fix_keeps_use_site_rewrite_when_const_is_composed_into_path()
+    {
+        var source = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration({|#0:Section|})
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Parent:" + Section)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var fixedSource = OptionsSource("""
+            const string Section = "Strpie";
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Stripe")
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            services.AddOptions<StripeOptions>()
+                .BindConfiguration("Parent:" + Section)
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
+            """);
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.MissingConfigurationSection)
+            .WithLocation(0)
+            .WithArguments("Strpie", ". Did you mean \"Stripe\"?");
+
+        await Verifier.VerifyCodeFixAsync(
+            source,
+            fixedSource,
+            ("appsettings.json",
+                """
+                {
+                  "Stripe": {
+                    "ApiKey": "secret"
+                  },
+                  "Parent": {
+                    "Strpie": {
+                      "ApiKey": "secret"
+                    }
+                  }
+                }
+                """),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg001_fix_keeps_use_site_rewrite_when_const_used_under_nested_parent()
     {
         var source = OptionsSource("""
