@@ -143,6 +143,7 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
         var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
         if (semanticModel is not null &&
             TryGetConstDeclaratorInitializer(expression, semanticModel, cancellationToken, out var initializer) &&
+            initializer is not null &&
             initializer.SyntaxTree == root.SyntaxTree)
         {
             var trackedRoot = root.TrackNodes(initializer);
