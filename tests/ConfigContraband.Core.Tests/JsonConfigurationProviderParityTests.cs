@@ -143,6 +143,7 @@ public sealed class JsonConfigurationProviderParityTests
         yield return Row("block comments", "{ /* c */ \"a\": 1 }", null);
         yield return Row("comment after scalar", "{ \"a\": 1 /* c */, \"b\": 2 }", null);
         yield return Row("line comment after scalar", "{ \"a\": 1 // c\n, \"b\": 2 }", null);
+        yield return Row("block comment immediately after scalar", "{ \"a\": 1/* c */, \"b\": 2 }", null);
         yield return Row("trailing comma in object", "{ \"a\": 1, }", null);
         yield return Row("trailing comma in array", "{ \"a\": [1, 2,] }", null);
         yield return Row("trailing comment after root", "{ \"a\": 1 } // done", null);

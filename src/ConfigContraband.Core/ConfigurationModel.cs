@@ -10,11 +10,11 @@ namespace ConfigContraband;
 internal sealed class ConfigurationSnapshot
 {
     private readonly ImmutableArray<ConfigurationFile> _files;
-    private readonly ImmutableArray<RejectedConfigurationFile> _rejectedFiles;
+    private readonly ImmutableArray<ConfigurationFileRejection> _rejectedFiles;
 
     private ConfigurationSnapshot(
         ImmutableArray<ConfigurationFile> files,
-        ImmutableArray<RejectedConfigurationFile> rejectedFiles)
+        ImmutableArray<ConfigurationFileRejection> rejectedFiles)
     {
         _files = files;
         _rejectedFiles = rejectedFiles;
@@ -22,7 +22,8 @@ internal sealed class ConfigurationSnapshot
 
     public bool HasFiles => !_files.IsDefaultOrEmpty;
 
-    public ImmutableArray<RejectedConfigurationFile> RejectedFiles => _rejectedFiles;
+    /// <summary>Runtime-load rejections for visible appsettings files the provider cannot parse.</summary>
+    public ImmutableArray<ConfigurationFileRejection> RejectedFiles => _rejectedFiles;
 
     public static ConfigurationSnapshot Create(
         ImmutableArray<AdditionalText> additionalFiles,
@@ -30,7 +31,7 @@ internal sealed class ConfigurationSnapshot
         System.Threading.CancellationToken cancellationToken)
     {
         var builder = ImmutableArray.CreateBuilder<ConfigurationFile>();
-        var rejectedBuilder = ImmutableArray.CreateBuilder<RejectedConfigurationFile>();
+        var rejectedBuilder = ImmutableArray.CreateBuilder<ConfigurationFileRejection>();
 
         foreach (var file in additionalFiles)
         {
@@ -53,7 +54,7 @@ internal sealed class ConfigurationSnapshot
                 isStrictUnknownConfigurationKeySuppressed(file));
             if (result.Rejection is { } rejection)
             {
-                rejectedBuilder.Add(new RejectedConfigurationFile(file, rejection));
+                rejectedBuilder.Add(rejection);
             }
             else
             {
@@ -430,21 +431,6 @@ internal sealed class ConfigurationFileRejection
     /// <summary>The flattened configuration path of the repeated key, when <see cref="Kind"/> is
     /// <see cref="ConfigurationFileRejectionKind.DuplicateKey"/>.</summary>
     public string? DuplicateKey { get; }
-}
-
-/// <summary>
-/// A visible appsettings file the runtime JSON provider rejects on load, with the rejection detail.
-/// </summary>
-internal sealed class RejectedConfigurationFile
-{
-    public RejectedConfigurationFile(AdditionalText file, ConfigurationFileRejection rejection)
-    {
-        File = file;
-        Rejection = rejection;
-    }
-
-    public AdditionalText File { get; }
-    public ConfigurationFileRejection Rejection { get; }
 }
 
 internal sealed class ConfigurationFileParseResult

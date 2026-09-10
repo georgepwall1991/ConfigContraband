@@ -53,13 +53,13 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
 
             compilationContext.RegisterCompilationEndAction(compilationActionContext =>
             {
-                foreach (var rejectedFile in configuration.RejectedFiles)
+                foreach (var rejection in configuration.RejectedFiles)
                 {
                     compilationActionContext.CancellationToken.ThrowIfCancellationRequested();
                     compilationActionContext.ReportDiagnostic(Diagnostic.Create(
                         DiagnosticDescriptors.ConfigurationFileLoadFailure,
-                        rejectedFile.Rejection.Location,
-                        DescribeRejection(rejectedFile.Rejection)));
+                        rejection.Location,
+                        DescribeRejection(rejection)));
                 }
             });
 
