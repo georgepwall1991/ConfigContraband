@@ -20,12 +20,13 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
 {
     public override ImmutableArray<string> FixableDiagnosticIds => ImmutableArray.Create(
         DiagnosticIds.MissingConfigurationSection,
+        DiagnosticIds.MissingRequiredConfigurationKey,
         DiagnosticIds.ValidationNotOnStart,
         DiagnosticIds.DataAnnotationsNotEnabled,
         DiagnosticIds.NestedValidationNotRecursive,
         DiagnosticIds.ConfigurationKeyNotFound);
 
-    public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
+    public override FixAllProvider GetFixAllProvider() => ConfigContrabandFixAllProvider.Instance;
 
     private static readonly string[] ValidateOnStartInvocation = { "ValidateOnStart" };
 
@@ -38,6 +39,10 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
                 case DiagnosticIds.MissingConfigurationSection:
                 case DiagnosticIds.ConfigurationKeyNotFound:
                     RegisterMissingSectionFix(context, diagnostic);
+                    break;
+
+                case DiagnosticIds.MissingRequiredConfigurationKey:
+                    await RegisterMissingRequiredKeyFixesAsync(context, diagnostic).ConfigureAwait(false);
                     break;
 
                 case DiagnosticIds.ValidationNotOnStart:
@@ -95,6 +100,135 @@ public sealed class ConfigContrabandCodeFixProvider : CodeFixProvider
                     break;
             }
         }
+    }
+
+    // CFG002's diagnostic anchors on the C# registration call, so the fix can run here even
+    // though it edits a JSON additional file: one action is registered per visible appsettings
+    // file that contains the section, inserting "<key>": null as the section's first member.
+    private static async Task RegisterMissingRequiredKeyFixesAsync(CodeFixContext context, Diagnostic diagnostic)
+    {
+        if (!diagnostic.Properties.TryGetValue(ConfigContrabandAnalyzer.RequiredKeyPropertyName, out var requiredKey) ||
+            string.IsNullOrEmpty(requiredKey) ||
+            !diagnostic.Properties.TryGetValue(ConfigContrabandAnalyzer.RequiredKeySectionPathPropertyName, out var sectionPath) ||
+            sectionPath is null)
+        {
+            return;
+        }
+
+        var project = context.Document.Project;
+        foreach (var additionalDocument in project.AdditionalDocuments)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+
+            if (!ConfigurationSnapshot.IsAppSettingsFile(additionalDocument.FilePath))
+            {
+                continue;
+            }
+
+            var filePath = additionalDocument.FilePath!;
+
+            var text = await additionalDocument.GetTextAsync(context.CancellationToken).ConfigureAwait(false);
+            var result = JsonConfigurationParser.ParseDetailed(
+                filePath,
+                text,
+                strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
+            if (result.Root is not { } fileRoot)
+            {
+                continue;
+            }
+
+            foreach (var section in ConfigurationSnapshot.FindSections(fileRoot, sectionPath))
+            {
+                if (!section.IsObject || section.Location is null)
+                {
+                    continue;
+                }
+
+                var newText = text.WithChanges(CreateInsertKeyChange(text, section, requiredKey!));
+                var fileName = System.IO.Path.GetFileName(filePath);
+                var documentId = additionalDocument.Id;
+                context.RegisterCodeFix(
+                    CodeAction.Create(
+                        $"Add required key \"{requiredKey}\" to {fileName}",
+                        _ => Task.FromResult(project.Solution.WithAdditionalDocumentText(documentId, newText)),
+                        equivalenceKey: "AddRequiredKey:" + fileName),
+                    diagnostic);
+            }
+        }
+    }
+
+    // The parser guarantees Location covers the object's '{'…'}' span, so the closing brace
+    // position is span.End - 1.
+    private static TextChange CreateInsertKeyChange(
+        SourceText text,
+        ConfigurationNode section,
+        string requiredKey)
+    {
+        var span = section.Location!.SourceSpan;
+        var memberText = "\"" + requiredKey.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\": null";
+        var eol = "\n";
+        foreach (var line in text.Lines)
+        {
+            if (line.EndIncludingLineBreak - line.End == 2)
+            {
+                eol = "\r\n";
+                break;
+            }
+        }
+        var innerSpan = TextSpan.FromBounds(span.Start + 1, span.End - 1);
+        var braceLine = text.Lines.GetLineFromPosition(span.Start);
+        var closingLine = text.Lines.GetLineFromPosition(span.End - 1);
+        var sectionIndent = LeadingWhitespace(braceLine.ToString());
+
+        if (section.Properties.IsEmpty)
+        {
+            return braceLine.LineNumber == closingLine.LineNumber
+                ? new TextChange(innerSpan, " " + memberText + " ")
+                : new TextChange(innerSpan, eol + sectionIndent + DetectIndentUnit(text) + memberText + eol + sectionIndent);
+        }
+
+        if (braceLine.LineNumber == closingLine.LineNumber)
+        {
+            return new TextChange(new TextSpan(span.Start + 1, 0), " " + memberText + ",");
+        }
+
+        var childIndent = sectionIndent + DetectIndentUnit(text);
+        foreach (var property in section.Properties)
+        {
+            var propertyLine = text.Lines.GetLineFromPosition(property.Location.SourceSpan.Start);
+            if (propertyLine.LineNumber != braceLine.LineNumber)
+            {
+                childIndent = LeadingWhitespace(propertyLine.ToString());
+                break;
+            }
+        }
+
+        return new TextChange(new TextSpan(span.Start + 1, 0), eol + childIndent + memberText + ",");
+    }
+
+    private static string LeadingWhitespace(string line)
+    {
+        var end = 0;
+        while (end < line.Length && (line[end] == ' ' || line[end] == '\t'))
+        {
+            end++;
+        }
+
+        return line.Substring(0, end);
+    }
+
+    private static string DetectIndentUnit(SourceText text)
+    {
+        foreach (var line in text.Lines)
+        {
+            var leading = LeadingWhitespace(line.ToString());
+            if (leading.Length > 0)
+            {
+                return leading.StartsWith("\t", StringComparison.Ordinal) ? "\t" : "  ";
+            }
+        }
+
+        return "  ";
     }
 
     private static void RegisterMissingSectionFix(CodeFixContext context, Diagnostic diagnostic)
