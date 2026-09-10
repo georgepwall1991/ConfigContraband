@@ -56,14 +56,6 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
                 foreach (var rejectedFile in configuration.RejectedFiles)
                 {
                     compilationActionContext.CancellationToken.ThrowIfCancellationRequested();
-                    if (IsDiagnosticSuppressed(
-                            compilationActionContext.Options,
-                            rejectedFile.File,
-                            DiagnosticIds.ConfigurationFileLoadFailure))
-                    {
-                        continue;
-                    }
-
                     compilationActionContext.ReportDiagnostic(Diagnostic.Create(
                         DiagnosticDescriptors.ConfigurationFileLoadFailure,
                         rejectedFile.Rejection.Location,

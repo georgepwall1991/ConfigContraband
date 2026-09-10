@@ -697,7 +697,7 @@ The rule models the tolerant `JsonDocument` reader the provider actually uses �
 
 The report lands on the offending construct in the JSON file itself. Because the provider throws before exposing any values, a rejected file is excluded from `CFG001`–`CFG010` analysis entirely — the same way a missing file is — so `CFG011` is the only signal you get for it. Files the runtime tolerates stay quiet, including line/block comments, trailing commas, scalar-then-empty-container overwrites, and valid escapes.
 
-Environment-specific files count: `appsettings.Development.json` only crashes in Development, but it still crashes. Suppress per file if a malformed file is intentional (for example a test fixture): `dotnet_diagnostic.CFG011.severity = none`. There is no automatic code fix — the rule reports at a JSON location the analyzer cannot safely rewrite for you.
+Environment-specific files count: `appsettings.Development.json` only crashes in Development, but it still crashes. If a malformed file is intentional (for example a test fixture), suppress with `dotnet_diagnostic.CFG011.severity = none`. There is no automatic code fix — the rule reports at a JSON location the analyzer cannot safely rewrite for you.
 
 ## Design Principles
 

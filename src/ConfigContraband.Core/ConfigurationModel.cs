@@ -55,9 +55,9 @@ internal sealed class ConfigurationSnapshot
             {
                 rejectedBuilder.Add(new RejectedConfigurationFile(file, rejection));
             }
-            else if (result.Root is { } root)
+            else
             {
-                builder.Add(new ConfigurationFile(file.Path, root));
+                builder.Add(new ConfigurationFile(file.Path, result.Root!));
             }
         }
 

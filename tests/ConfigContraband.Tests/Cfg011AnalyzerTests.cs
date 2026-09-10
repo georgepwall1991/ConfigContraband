@@ -161,6 +161,68 @@ public sealed partial class ConfigContrabandAnalyzerTests
     }
 
     [Fact]
+    public async Task Cfg011_reports_trailing_content_after_non_object_root()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationFileLoadFailure)
+            .WithSpan("appsettings.json", 1, 5, 1, 6)
+            .WithArguments(InvalidSyntaxMessage);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """[1] x"""),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg011_reports_slash_that_is_not_a_comment()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationFileLoadFailure)
+            .WithSpan("appsettings.json", 1, 8, 1, 9)
+            .WithArguments(InvalidSyntaxMessage);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "a": 1/x }"""),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg011_reports_string_ending_in_lone_backslash()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationFileLoadFailure)
+            .WithSpan("appsettings.json", 1, 8, 1, 9)
+            .WithArguments(InvalidSyntaxMessage);
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", """{ "a": "x\"""),
+            expected);
+    }
+
+    [Fact]
+    public async Task Cfg011_reports_deeply_nested_arrays()
+    {
+        var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
+
+        var json = "{ \"Server\": " + new string('[', 65) + new string(']', 65) + " }";
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationFileLoadFailure)
+            .WithSpan("appsettings.json", 1, 76, 1, 77)
+            .WithArguments("the maximum JSON depth of 64 is exceeded");
+
+        await Verifier.VerifyAnalyzerAsync(
+            source,
+            ("appsettings.json", json),
+            expected);
+    }
+
+    [Fact]
     public async Task Cfg011_reports_unterminated_array()
     {
         var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));

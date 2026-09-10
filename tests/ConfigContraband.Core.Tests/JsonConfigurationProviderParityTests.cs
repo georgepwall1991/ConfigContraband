@@ -73,6 +73,11 @@ public sealed class JsonConfigurationProviderParityTests
         yield return Row("unescaped control character", "{ \"a\": \"x\ny\" }", InvalidSyntax);
         yield return Row("unescaped tab in string", "{ \"a\": \"x\ty\" }", InvalidSyntax);
         yield return Row("form feed outside string", "{ \"a\": 1 \f }", InvalidSyntax);
+        yield return Row("non-object root with trailing content", "[1] extra", InvalidSyntax);
+        yield return Row("slash that is not a comment inside scalar", "{ \"a\": 1/x }", InvalidSyntax);
+        yield return Row("slash that is not a comment after root", "{ } /x", InvalidSyntax);
+        yield return Row("string ends in lone backslash", "{ \"a\": \"x\\", InvalidSyntax);
+        yield return Row("high surrogate then malformed escape", "{ \"a\": \"\\uD800\\uZ\" }", InvalidSyntax);
         yield return Row("lone high surrogate escape", "{ \"a\": \"\\uD800\" }", InvalidSyntax);
         yield return Row("lone low surrogate escape", "{ \"a\": \"\\uDC00\" }", InvalidSyntax);
         yield return Row("high surrogate then non-surrogate escape", "{ \"a\": \"\\uD800\\u0041\" }", InvalidSyntax);
@@ -125,14 +130,19 @@ public sealed class JsonConfigurationProviderParityTests
             "{ \"a\": [ { \"x\": { \"y\": 1 }, \"x:y\": 2 } ] }",
             DuplicateKey);
 
-        // Exceeding the runtime reader's default maximum depth.
+        // Exceeding the runtime reader's default maximum depth — arrays count too.
         var deep65 = "{" + string.Concat(Enumerable.Repeat("\"n\":{", 64)) + "\"v\":1" + new string('}', 65);
         yield return Row("65 nested objects", deep65, DepthExceeded);
+        yield return Row(
+            "65 nested arrays",
+            "{ \"a\": " + new string('[', 65) + new string(']', 65) + " }",
+            DepthExceeded);
 
         // Syntax the runtime provider tolerates — these must stay quiet.
         yield return Row("line comments", "{ // c\n \"a\": 1 }", null);
         yield return Row("block comments", "{ /* c */ \"a\": 1 }", null);
         yield return Row("comment after scalar", "{ \"a\": 1 /* c */, \"b\": 2 }", null);
+        yield return Row("line comment after scalar", "{ \"a\": 1 // c\n, \"b\": 2 }", null);
         yield return Row("trailing comma in object", "{ \"a\": 1, }", null);
         yield return Row("trailing comma in array", "{ \"a\": [1, 2,] }", null);
         yield return Row("trailing comment after root", "{ \"a\": 1 } // done", null);
