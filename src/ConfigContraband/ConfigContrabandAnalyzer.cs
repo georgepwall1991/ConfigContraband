@@ -30,7 +30,8 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         DiagnosticDescriptors.UnknownConfigurationKeyWillThrow,
         DiagnosticDescriptors.ConfigurationValueTypeMismatch,
         DiagnosticDescriptors.ConfigurationKeyNotFound,
-        DiagnosticDescriptors.ConfigurationValueFailsValidation);
+        DiagnosticDescriptors.ConfigurationValueFailsValidation,
+        DiagnosticDescriptors.ConfigurationFileLoadFailure);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -49,6 +50,18 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
             var providerSemantics = GetConfigurationProviderSemantics(compilationContext.Compilation);
             var nestedValidationReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
             var unknownKeysReported = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+
+            compilationContext.RegisterCompilationEndAction(compilationActionContext =>
+            {
+                foreach (var rejection in configuration.RejectedFiles)
+                {
+                    compilationActionContext.CancellationToken.ThrowIfCancellationRequested();
+                    compilationActionContext.ReportDiagnostic(Diagnostic.Create(
+                        DiagnosticDescriptors.ConfigurationFileLoadFailure,
+                        rejection.Location,
+                        DescribeRejection(rejection)));
+                }
+            });
 
             compilationContext.RegisterSyntaxNodeAction(
                 syntaxContext =>
@@ -161,6 +174,20 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
     {
         return options.TryGetValue(key, out var severity) &&
                string.Equals(severity, "none", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DescribeRejection(ConfigurationFileRejection rejection)
+    {
+        return rejection.Kind switch
+        {
+            ConfigurationFileRejectionKind.NonObjectRoot =>
+                "the top-level JSON element must be an object",
+            ConfigurationFileRejectionKind.DuplicateKey =>
+                $"the configuration key \"{rejection.DuplicateKey}\" is duplicated",
+            ConfigurationFileRejectionKind.DepthExceeded =>
+                "the maximum JSON depth of 64 is exceeded",
+            _ => "the JSON syntax is invalid",
+        };
     }
 
     private static void AnalyzeRegistrationChain(

@@ -56,7 +56,7 @@ The package includes `buildTransitive` props that pass visible `appsettings.json
 
 ## See it work
 
-Product-flow diagrams from the real showcase build (`CFG001`–`CFG010` diagnostics):
+Product-flow diagrams from the real showcase build (`CFG001`–`CFG011` diagnostics):
 
 ### 1. Build / IDE diagnostics (Options validation)
 
@@ -130,7 +130,7 @@ The ConfigContraband analyzer package targets `netstandard2.0` and compiles agai
 
 ConfigContraband follows SemVer for the public package surface:
 
-- **Diagnostic IDs** (`CFG001`–`CFG010`) are stable. Removing or reassigning an ID is a breaking change.
+- **Diagnostic IDs** (`CFG001`–`CFG011`) are stable. Removing or reassigning an ID is a breaking change.
 - **Pre-1.0** (`0.x`): message text, quiet boundaries, and supported registration shapes may still tighten when a runtime or documentation mismatch is proved. Changes are called out in `CHANGELOG.md`.
 - **1.0** when the monitor posture holds (all rules healthy), the analyzer + tool package surface is stable, and no known P1 release-readiness gaps remain. This repository is not at 1.0 yet.
 
@@ -226,6 +226,7 @@ When the analyzer cannot prove a configuration shape statically, it stays quiet.
 | `CFG008` | Configuration value cannot be bound to the target type | Warning | Scalar values that provably cannot convert to a bound property or direct generic/non-generic `GetValue` target type, e.g. `"Port": "eighty"` for an `int`. |
 | `CFG009` | Direct configuration path is unavailable from visible appsettings files | Warning | `configuration.GetRequiredSection("Strpie")` (throws at runtime), near-miss `GetSection("Strpie").Get<T>()`/`.Bind(instance)` typos (bind nothing), and provable `GetConnectionString` typos. |
 | `CFG010` | Configuration value fails DataAnnotations validation | Warning | A convertible appsettings scalar that fails `[Range]`, length, or allow/deny-list validation when `ValidateDataAnnotations()` is proven, e.g. `"Port": 0` for `[Range(1, 65535)]`. |
+| `CFG011` | Configuration file will fail to load at runtime | Warning | A visible `appsettings*.json` file the runtime JSON provider rejects on load — invalid syntax, non-object root, duplicate flattened key, or too much nesting — throwing during `builder.Build()`. |
 
 ## appsettings IntelliSense (schema generation)
 
@@ -674,6 +675,30 @@ Stay quiet: `[RegularExpression]` / `[EmailAddress]` / `[Url]` / `[Phone]` / `[C
 
 There is no automatic code fix — like `CFG002`/`CFG006`/`CFG007`/`CFG008`, the diagnostic points at a JSON additional file rather than at C# the analyzer can rewrite.
 
+### `CFG011`: Appsettings Files Must Load Cleanly
+
+Every rule above reasons about the contents of your `appsettings*.json` files — but all of that is moot when the file itself cannot load. The runtime JSON provider throws during `builder.Build()` on a file it cannot parse, so a malformed `appsettings.Production.json` crashes startup *before* any options validation runs. `CFG011` reports the first load-breaking construct in each visible file:
+
+```json
+{
+  "Server": {
+    "Port": 443
+  },
+  "Features": { "Beta": true }
+// <- the missing final `}` makes the provider throw while building configuration
+```
+
+The rule models the tolerant `JsonDocument` reader the provider actually uses — comments and trailing commas are legal — and reports when the file would throw on load:
+
+- **Invalid JSON syntax** — unterminated objects/arrays/strings/comments, missing colons or commas, unquoted member names, invalid `\` escapes or `\uXXXX` sequences (including unpaired surrogates), unescaped control characters, scalar tokens that are not valid JSON (`tru`, `TRUE`, `080`, `+1`, `NaN`, `0x10`, …), content after the root object, and empty or comment-only files. Comments are legal, but a line comment containing a U+2028/U+2029 separator is rejected the same way the runtime reader rejects it.
+- **A non-object root** — `[ ... ]`, `5`, `"text"`, `true`, `null`. These parse as JSON, but the provider requires a top-level object.
+- **A duplicate flattened key** — a scalar, `null`, or empty container that repeats a case-insensitive configuration path already written, e.g. `"Server":{"Value":1}` followed by `"server:value":2`. (Merged duplicate *objects* are legal and stay quiet; an empty container following a scalar at the same path is the provider's overwrite semantics and also stays quiet.)
+- **Nesting beyond depth 64** — the runtime reader's default ceiling, counting the root object.
+
+The report lands on the offending construct in the JSON file itself. Because the provider throws before exposing any values, a rejected file is excluded from `CFG001`–`CFG010` analysis entirely — the same way a missing file is — so `CFG011` is the only signal you get for it. Files the runtime tolerates stay quiet, including line/block comments, trailing commas, scalar-then-empty-container overwrites, and valid escapes.
+
+Environment-specific files count: `appsettings.Development.json` only crashes in Development, but it still crashes. If a malformed file is intentional (for example a test fixture), suppress with `dotnet_diagnostic.CFG011.severity = none`. There is no automatic code fix — the rule reports at a JSON location the analyzer cannot safely rewrite for you.
+
 ## Design Principles
 
 - Prefer warnings for configuration failures that are likely to break production.
@@ -692,6 +717,7 @@ ConfigContraband currently focuses on:
 - Direct framework generic `ConfigurationBinder.GetValue<T>` and non-generic `GetValue(typeof(T), ...)` reads for provable scalar conversion failures (`CFG008`).
 - Bound scalars that convert but fail DataAnnotations `[Range]`, length, or allow/deny-list constraints when `ValidateDataAnnotations()` or a same-scope `[OptionsValidator]` registration is proven (`CFG010`).
 - Direct configuration reads: standalone `GetRequiredSection(...)`, suggestion-gated `GetSection(...).Get<T>()`/`.Bind(instance)`, keyed `Bind("key", instance)`, and suggestion-gated `GetConnectionString(...)` (`CFG009`).
+- Runtime-load rejection of visible `appsettings*.json` files themselves — invalid JSON, non-object roots, duplicate flattened keys, and depth overflows (`CFG011`). Rejected files are excluded from every other rule, matching the runtime where the provider throws before exposing values.
 - Strict `ErrorOnUnknownConfiguration` binder options for unknown-key failures.
 - Compile-time constant section names, including literals, `const` values, and `nameof` expressions.
 - Public bindable properties on options types, including inherited and constructor-bound bindable properties.

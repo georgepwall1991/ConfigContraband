@@ -53,6 +53,9 @@ services.AddOptions<ConstraintOptions>()
 
 _ = services;
 
+// CFG011: appsettings.Broken.json is missing its closing brace, so the runtime JSON provider
+// throws during configuration build before any of its values reach options binding.
+
 // CFG009: a direct read of a section path that is not in appsettings.json throws at runtime.
 public sealed class DirectReader
 {
