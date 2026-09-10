@@ -40,6 +40,10 @@ public sealed partial class ConfigContrabandAnalyzerTests
     {
         var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
 
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationFileLoadFailure)
+            .WithSpan("appsettings.json", 5, 3, 5, 17)
+            .WithArguments("the configuration key \"server:value\" is duplicated");
+
         await Verifier.VerifyAnalyzerAsync(
             source,
             ("appsettings.json", """
@@ -49,13 +53,18 @@ public sealed partial class ConfigContrabandAnalyzerTests
               },
               "server:value": 80
             }
-            """));
+            """),
+            expected);
     }
 
     [Fact]
     public async Task Cfg008_ignores_file_with_empty_container_before_duplicate_scalar()
     {
         var source = OptionsSource(BindServer, optionsTypes: ServerOptionsOf("int"));
+
+        var expected = Verifier.Diagnostic(DiagnosticDescriptors.ConfigurationFileLoadFailure)
+            .WithSpan("appsettings.json", 5, 3, 5, 17)
+            .WithArguments("the configuration key \"server:value\" is duplicated");
 
         await Verifier.VerifyAnalyzerAsync(
             source,
@@ -66,7 +75,8 @@ public sealed partial class ConfigContrabandAnalyzerTests
               },
               "server:value": "eighty"
             }
-            """));
+            """),
+            expected);
     }
 
     [Theory]

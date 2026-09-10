@@ -36,5 +36,5 @@ When the analyzer cannot prove a configuration shape statically, it **stays quie
 ## Next steps
 
 - Copy-paste green sample: [ConfigContraband.Quickstart](https://github.com/georgepwall1991/ConfigContraband/tree/main/samples/ConfigContraband.Quickstart)
-- Full rule reference (`CFG001`–`CFG010`): [README on GitHub](https://github.com/georgepwall1991/ConfigContraband#rule-details)
+- Full rule reference (`CFG001`–`CFG011`): [README on GitHub](https://github.com/georgepwall1991/ConfigContraband#rule-details)
 - Optional IntelliSense schema tool: [ConfigContraband.Tool](https://www.nuget.org/packages/ConfigContraband.Tool)

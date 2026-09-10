@@ -10,7 +10,7 @@ public sealed class ConfigurationModelCoverageTests
     {
         var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
             {
-              "Escaped\"Quote\\Slash\/Back\bForm\fLine\nReturn\rTab\tUnicode\u0041Lower\u006fOther\q": {
+              "Escaped\"Quote\\Slash\/Back\bForm\fLine\nReturn\rTab\tUnicode\u0041Lower\u006f": {
                 "Value": "ok"
               }
             }
@@ -28,46 +28,49 @@ public sealed class ConfigurationModelCoverageTests
         Assert.Contains('\t', property.Key);
         Assert.Contains("UnicodeA", property.Key);
         Assert.Contains("Lowero", property.Key);
-        Assert.Contains("Otherq", property.Key);
     }
 
     [Fact]
-    public void Json_parser_keeps_malformed_unicode_escapes_as_literal_text()
+    public void Json_parser_rejects_malformed_unicode_escape()
     {
-        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
-            {
-              "Bad\u00g1": {
-                "Value": "ok"
-              }
-            }
-            """));
+        var result = JsonConfigurationParser.ParseDetailed(
+            "appsettings.json",
+            SourceText.From("""
+                {
+                  "Bad\u00g1": {
+                    "Value": "ok"
+                  }
+                }
+                """),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
 
-        Assert.NotNull(root);
-        var property = Assert.Single(root!.Properties);
-        Assert.Equal("Badu00g1", property.Key);
+        Assert.Null(result.Root);
+        Assert.Equal(ConfigurationFileRejectionKind.InvalidSyntax, result.Rejection!.Kind);
     }
 
     [Fact]
-    public void Json_parser_keeps_unfinished_unicode_escape_as_literal_text()
+    public void Json_parser_rejects_unfinished_unicode_escape()
     {
-        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("{\"Bad\\u"));
+        var result = JsonConfigurationParser.ParseDetailed(
+            "appsettings.json",
+            SourceText.From("{\"Bad\\u"),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
 
-        Assert.NotNull(root);
-        var property = Assert.Single(root!.Properties);
-        Assert.Equal("Badu", property.Key);
+        Assert.Null(result.Root);
+        Assert.Equal(ConfigurationFileRejectionKind.InvalidSyntax, result.Rejection!.Kind);
     }
 
     [Fact]
-    public void Json_parser_recovers_from_malformed_object_member()
+    public void Json_parser_rejects_unquoted_object_member()
     {
-        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("{ unquoted: true }"));
-        Assert.NotNull(root);
-        var file = new ConfigurationFile("appsettings.json", root);
+        var result = JsonConfigurationParser.ParseDetailed(
+            "appsettings.json",
+            SourceText.From("{ unquoted: true }"),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
 
-        Assert.Equal("appsettings.json", file.Path);
-        Assert.Empty(file.Root.Properties);
-        Assert.True(file.Root.IsObject);
-        Assert.False(file.Root.TryGetProperty("Missing", out _));
+        Assert.Null(result.Root);
+        var rejection = Assert.IsType<ConfigurationFileRejection>(result.Rejection);
+        Assert.Equal(ConfigurationFileRejectionKind.InvalidSyntax, rejection.Kind);
     }
 
     [Fact]
@@ -89,22 +92,22 @@ public sealed class ConfigurationModelCoverageTests
     }
 
     [Fact]
-    public void Json_parser_keeps_unclosed_array_items()
+    public void Json_parser_rejects_unclosed_array()
     {
-        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
-            {
-              "Servers": [
+        var result = JsonConfigurationParser.ParseDetailed(
+            "appsettings.json",
+            SourceText.From("""
                 {
-                  "Host": "api"
+                  "Servers": [
+                    {
+                      "Host": "api"
+                    }
                 }
-            }
-            """));
-        Assert.NotNull(root);
+                """),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
 
-        Assert.True(root!.TryGetProperty("Servers", out var servers));
-        var item = Assert.Single(servers.Value.Properties);
-        Assert.Equal("0", item.Key);
-        Assert.True(item.Value.TryGetProperty("Host", out _));
+        Assert.Null(result.Root);
+        Assert.Equal(ConfigurationFileRejectionKind.InvalidSyntax, result.Rejection!.Kind);
     }
 
     [Fact]
@@ -135,62 +138,89 @@ public sealed class ConfigurationModelCoverageTests
     [Fact]
     public void Json_parser_rejects_case_insensitive_duplicate_flattened_scalar_paths()
     {
-        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
-            {
-              "Server": {
-                "Value": "eighty"
-              },
-              "server:value": 80
-            }
-            """));
+        var result = JsonConfigurationParser.ParseDetailed(
+            "appsettings.json",
+            SourceText.From("""
+                {
+                  "Server": {
+                    "Value": "eighty"
+                  },
+                  "server:value": 80
+                }
+                """),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
 
-        Assert.Null(root);
+        Assert.Null(result.Root);
+        Assert.Equal(ConfigurationFileRejectionKind.DuplicateKey, result.Rejection!.Kind);
+        Assert.Equal("server:value", result.Rejection.DuplicateKey);
     }
 
     [Fact]
     public void Json_parser_rejects_non_object_root()
     {
-        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("[]"));
+        var result = JsonConfigurationParser.ParseDetailed(
+            "appsettings.json",
+            SourceText.From("[]"),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
 
-        Assert.Null(root);
+        Assert.Null(result.Root);
+        Assert.Equal(ConfigurationFileRejectionKind.NonObjectRoot, result.Rejection!.Kind);
     }
 
     [Fact]
     public void Json_parser_propagates_duplicate_flattened_path_from_nested_object()
     {
-        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
-            {
-              "Outer": {
-                "Server": {
-                  "Value": "eighty"
-                },
-                "server:value": 80
-              }
-            }
-            """));
+        var result = JsonConfigurationParser.ParseDetailed(
+            "appsettings.json",
+            SourceText.From("""
+                {
+                  "Outer": {
+                    "Server": {
+                      "Value": "eighty"
+                    },
+                    "server:value": 80
+                  }
+                }
+                """),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
 
-        Assert.Null(root);
+        Assert.Null(result.Root);
+        Assert.Equal(ConfigurationFileRejectionKind.DuplicateKey, result.Rejection!.Kind);
+        Assert.Equal("Outer:server:value", result.Rejection.DuplicateKey);
     }
 
     [Fact]
-    public void Json_parser_preserves_maximum_depth_fallback()
+    public void Json_parser_rejects_beyond_maximum_depth()
     {
         var json = "{" +
             string.Concat(Enumerable.Repeat("\"Nested\":{", 65)) +
             "\"Value\":1" +
             new string('}', 66);
 
-        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From(json));
+        var result = JsonConfigurationParser.ParseDetailed(
+            "appsettings.json",
+            SourceText.From(json),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
 
-        Assert.NotNull(root);
-        var current = root!;
-        for (var depth = 0; depth < 65; depth++)
-        {
-            Assert.True(current.TryGetProperty("Nested", out var nested));
-            current = nested.Value;
-        }
+        Assert.Null(result.Root);
+        Assert.Equal(ConfigurationFileRejectionKind.DepthExceeded, result.Rejection!.Kind);
+    }
 
-        Assert.Empty(current.Properties);
+    [Fact]
+    public void Json_parser_accepts_maximum_depth_boundary()
+    {
+        var json = "{" +
+            string.Concat(Enumerable.Repeat("\"Nested\":{", 63)) +
+            "\"Value\":1" +
+            new string('}', 64);
+
+        var result = JsonConfigurationParser.ParseDetailed(
+            "appsettings.json",
+            SourceText.From(json),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
+
+        Assert.NotNull(result.Root);
+        Assert.Null(result.Rejection);
     }
 
     [Theory]
@@ -199,16 +229,20 @@ public sealed class ConfigurationModelCoverageTests
     public void Json_parser_rejects_empty_container_followed_by_scalar_at_same_flattened_path(
         string emptyContainer)
     {
-        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From($$"""
-            {
-              "Server": {
-                "Value": {{emptyContainer}}
-              },
-              "server:value": 80
-            }
-            """));
+        var result = JsonConfigurationParser.ParseDetailed(
+            "appsettings.json",
+            SourceText.From($$"""
+                {
+                  "Server": {
+                    "Value": {{emptyContainer}}
+                  },
+                  "server:value": 80
+                }
+                """),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
 
-        Assert.Null(root);
+        Assert.Null(result.Root);
+        Assert.Equal(ConfigurationFileRejectionKind.DuplicateKey, result.Rejection!.Kind);
     }
 
     [Theory]
@@ -249,16 +283,20 @@ public sealed class ConfigurationModelCoverageTests
     [Fact]
     public void Json_parser_rejects_duplicate_path_below_empty_root_segment()
     {
-        var root = JsonConfigurationParser.Parse("appsettings.json", SourceText.From("""
-            {
-              "": {
-                "A": 1
-              },
-              ":A": 2
-            }
-            """));
+        var result = JsonConfigurationParser.ParseDetailed(
+            "appsettings.json",
+            SourceText.From("""
+                {
+                  "": {
+                    "A": 1
+                  },
+                  ":A": 2
+                }
+                """),
+            strictUnknownConfigurationKeySuppressedByAnalyzerConfig: false);
 
-        Assert.Null(root);
+        Assert.Null(result.Root);
+        Assert.Equal(ConfigurationFileRejectionKind.DuplicateKey, result.Rejection!.Kind);
     }
 
     [Fact]

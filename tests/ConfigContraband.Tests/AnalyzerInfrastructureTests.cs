@@ -94,6 +94,7 @@ public sealed partial class ConfigContrabandAnalyzerTests
                 "CFG008",
                 "CFG009",
                 "CFG010",
+                "CFG011",
             ],
             showcaseWarningsNotAsErrors.Value.Split(';'));
 
@@ -140,6 +141,8 @@ public sealed partial class ConfigContrabandAnalyzerTests
                 ("cfg009-direct-configuration-paths-unavailable-from-visible-appsettings-files", "### `CFG009`: Direct Configuration Paths Unavailable from Visible Appsettings Files"),
             [DiagnosticIds.ConfigurationValueFailsValidation] =
                 ("cfg010-bound-values-must-satisfy-dataannotations", "### `CFG010`: Bound Values Must Satisfy DataAnnotations"),
+            [DiagnosticIds.ConfigurationFileLoadFailure] =
+                ("cfg011-appsettings-files-must-load-cleanly", "### `CFG011`: Appsettings Files Must Load Cleanly"),
         };
         var supportedDiagnostics = new ConfigContrabandAnalyzer().SupportedDiagnostics;
         var repositoryRoot = Path.GetFullPath(

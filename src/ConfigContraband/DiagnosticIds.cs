@@ -12,4 +12,5 @@ public static class DiagnosticIds
     public const string ConfigurationValueTypeMismatch = "CFG008";
     public const string ConfigurationKeyNotFound = "CFG009";
     public const string ConfigurationValueFailsValidation = "CFG010";
+    public const string ConfigurationFileLoadFailure = "CFG011";
 }

@@ -106,4 +106,14 @@ public static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "A scalar value in appsettings is convertible to the bound property type but fails a DataAnnotations constraint that ValidateDataAnnotations() would evaluate at startup.",
         helpLinkUri: DocumentationBaseUrl + "cfg010-bound-values-must-satisfy-dataannotations");
+
+    public static readonly DiagnosticDescriptor ConfigurationFileLoadFailure = new(
+        id: DiagnosticIds.ConfigurationFileLoadFailure,
+        title: "Configuration file will fail to load at runtime",
+        messageFormat: "Configuration file will fail to load at runtime: {0}",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "A visible appsettings file contains content the runtime JSON configuration provider rejects, so configuration loading throws FormatException during startup.",
+        helpLinkUri: DocumentationBaseUrl + "cfg011-appsettings-files-must-load-cleanly");
 }

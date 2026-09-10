@@ -10,13 +10,19 @@ namespace ConfigContraband;
 internal sealed class ConfigurationSnapshot
 {
     private readonly ImmutableArray<ConfigurationFile> _files;
+    private readonly ImmutableArray<RejectedConfigurationFile> _rejectedFiles;
 
-    private ConfigurationSnapshot(ImmutableArray<ConfigurationFile> files)
+    private ConfigurationSnapshot(
+        ImmutableArray<ConfigurationFile> files,
+        ImmutableArray<RejectedConfigurationFile> rejectedFiles)
     {
         _files = files;
+        _rejectedFiles = rejectedFiles;
     }
 
     public bool HasFiles => !_files.IsDefaultOrEmpty;
+
+    public ImmutableArray<RejectedConfigurationFile> RejectedFiles => _rejectedFiles;
 
     public static ConfigurationSnapshot Create(
         ImmutableArray<AdditionalText> additionalFiles,
@@ -24,6 +30,7 @@ internal sealed class ConfigurationSnapshot
         System.Threading.CancellationToken cancellationToken)
     {
         var builder = ImmutableArray.CreateBuilder<ConfigurationFile>();
+        var rejectedBuilder = ImmutableArray.CreateBuilder<RejectedConfigurationFile>();
 
         foreach (var file in additionalFiles)
         {
@@ -40,17 +47,21 @@ internal sealed class ConfigurationSnapshot
                 continue;
             }
 
-            var root = JsonConfigurationParser.Parse(
+            var result = JsonConfigurationParser.ParseDetailed(
                 file.Path,
                 text,
                 isStrictUnknownConfigurationKeySuppressed(file));
-            if (root is not null)
+            if (result.Rejection is { } rejection)
+            {
+                rejectedBuilder.Add(new RejectedConfigurationFile(file, rejection));
+            }
+            else if (result.Root is { } root)
             {
                 builder.Add(new ConfigurationFile(file.Path, root));
             }
         }
 
-        return new ConfigurationSnapshot(builder.ToImmutable());
+        return new ConfigurationSnapshot(builder.ToImmutable(), rejectedBuilder.ToImmutable());
     }
 
     public ImmutableArray<string> GetSiblingSectionNames(string sectionPath)
@@ -379,6 +390,78 @@ internal sealed class ConfigurationFile
     public ConfigurationNode Root { get; }
 }
 
+internal enum ConfigurationFileRejectionKind
+{
+    /// <summary>The file's text is not valid JSON under the runtime provider's tolerant reader
+    /// (comments and trailing commas allowed) — syntax errors, unterminated constructs, invalid
+    /// escapes, invalid scalar tokens, or trailing content after the root object.</summary>
+    InvalidSyntax,
+
+    /// <summary>The file parses as JSON but the root element is not an object.</summary>
+    NonObjectRoot,
+
+    /// <summary>A scalar or null value repeats a case-insensitive flattened path already written
+    /// by a scalar, null, or empty container.</summary>
+    DuplicateKey,
+
+    /// <summary>Nesting exceeds the runtime provider's maximum JSON depth.</summary>
+    DepthExceeded,
+}
+
+/// <summary>
+/// A reason the runtime JSON configuration provider throws <see cref="System.FormatException"/>
+/// when loading a visible appsettings file, with the location of the offending content.
+/// </summary>
+internal sealed class ConfigurationFileRejection
+{
+    public ConfigurationFileRejection(
+        ConfigurationFileRejectionKind kind,
+        Location location,
+        string? duplicateKey = null)
+    {
+        Kind = kind;
+        Location = location;
+        DuplicateKey = duplicateKey;
+    }
+
+    public ConfigurationFileRejectionKind Kind { get; }
+    public Location Location { get; }
+
+    /// <summary>The flattened configuration path of the repeated key, when <see cref="Kind"/> is
+    /// <see cref="ConfigurationFileRejectionKind.DuplicateKey"/>.</summary>
+    public string? DuplicateKey { get; }
+}
+
+/// <summary>
+/// A visible appsettings file the runtime JSON provider rejects on load, with the rejection detail.
+/// </summary>
+internal sealed class RejectedConfigurationFile
+{
+    public RejectedConfigurationFile(AdditionalText file, ConfigurationFileRejection rejection)
+    {
+        File = file;
+        Rejection = rejection;
+    }
+
+    public AdditionalText File { get; }
+    public ConfigurationFileRejection Rejection { get; }
+}
+
+internal sealed class ConfigurationFileParseResult
+{
+    public ConfigurationFileParseResult(ConfigurationNode? root, ConfigurationFileRejection? rejection)
+    {
+        Root = root;
+        Rejection = rejection;
+    }
+
+    /// <summary>The parsed root node, or <c>null</c> when the file was rejected.</summary>
+    public ConfigurationNode? Root { get; }
+
+    /// <summary>The runtime-load rejection, or <c>null</c> when the file parses cleanly.</summary>
+    public ConfigurationFileRejection? Rejection { get; }
+}
+
 internal sealed class ConfigurationNode
 {
     public static readonly ConfigurationNode Empty = new(
@@ -440,7 +523,7 @@ internal enum ConfigurationSectionExistence
 
 internal enum ScalarKind
 {
-    /// <summary>The value is not a scalar (object, array, or malformed).</summary>
+    /// <summary>The value is not a scalar (object or array; malformed files are rejected).</summary>
     None,
     String,
     Number,
@@ -478,7 +561,7 @@ internal sealed class ConfigurationProperty
     public Location Location { get; }
     public bool StrictUnknownConfigurationKeySuppressedByAnalyzerConfig { get; }
 
-    /// <summary>Kind of the property's scalar value, or <see cref="ScalarKind.None"/> for object/array/malformed values.</summary>
+    /// <summary>Kind of the property's scalar value, or <see cref="ScalarKind.None"/> for object/array values.</summary>
     public ScalarKind ScalarKind { get; }
 
     /// <summary>The property's scalar value as text (decoded for strings; the literal for other scalars), or <c>null</c> for non-scalar values.</summary>
@@ -516,8 +599,30 @@ internal static class JsonConfigurationParser
         SourceText text,
         bool strictUnknownConfigurationKeySuppressedByAnalyzerConfig)
     {
+        return ParseDetailed(path, text, strictUnknownConfigurationKeySuppressedByAnalyzerConfig).Root;
+    }
+
+    /// <summary>
+    /// Parses a visible appsettings file. The result carries either the parsed root node or the
+    /// first reason the runtime JSON provider would reject the file on load, matching the tolerant
+    /// <c>JsonDocument</c> reader the provider uses (comments and trailing commas allowed, default
+    /// maximum depth, strict string/scalar grammar, case-insensitive duplicate flattened scalar
+    /// paths rejected).
+    /// </summary>
+    public static ConfigurationFileParseResult ParseDetailed(
+        string path,
+        SourceText text,
+        bool strictUnknownConfigurationKeySuppressedByAnalyzerConfig)
+    {
         var parser = new Parser(path, text, strictUnknownConfigurationKeySuppressedByAnalyzerConfig);
-        return parser.ParseRoot();
+        try
+        {
+            return new ConfigurationFileParseResult(parser.ParseRoot(), rejection: null);
+        }
+        catch (ParseRejectedException rejected)
+        {
+            return new ConfigurationFileParseResult(root: null, rejected.Rejection);
+        }
     }
 
     private sealed class Parser
@@ -543,23 +648,45 @@ internal static class JsonConfigurationParser
                 strictUnknownConfigurationKeySuppressedByAnalyzerConfig;
         }
 
-        public ConfigurationNode? ParseRoot()
+        public ConfigurationNode ParseRoot()
         {
+            // A physical UTF-8 BOM never reaches the parser: Roslyn decodes the file and strips
+            // it. A literal U+FEFF inside the decoded text is the second BOM of a double-BOM
+            // file, which the runtime provider rejects — it is not JSON whitespace.
             SkipWhitespace();
             if (Current != '{')
             {
-                return null;
+                var rootStart = _position;
+                _ = ParseValue(string.Empty, depth: 1);
+                SkipWhitespace();
+                if (!IsEnd)
+                {
+                    throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, _position);
+                }
+
+                throw Rejection(ConfigurationFileRejectionKind.NonObjectRoot, rootStart);
             }
 
-            var root = ParseObject(parentPath: string.Empty, depth: 0);
+            // The runtime reader counts the root object as depth one of its default 64-deep ceiling.
+            var root = ParseObject(parentPath: string.Empty, depth: 1);
+            SkipWhitespace();
+            if (!IsEnd)
+            {
+                throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, _position);
+            }
+
             var overwrittenScalarPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (HasDuplicateRuntimePath(
                     root,
                     parentRuntimePath: null,
                     new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-                    overwrittenScalarPaths))
+                    overwrittenScalarPaths,
+                    out var offendingProperty))
             {
-                return null;
+                throw new ParseRejectedException(new ConfigurationFileRejection(
+                    ConfigurationFileRejectionKind.DuplicateKey,
+                    offendingProperty!.Location,
+                    offendingProperty.FullPath));
             }
 
             return overwrittenScalarPaths.Count == 0
@@ -571,14 +698,17 @@ internal static class JsonConfigurationParser
             ConfigurationNode node,
             string? parentRuntimePath,
             HashSet<string> runtimePaths,
-            HashSet<string> overwrittenScalarPaths)
+            HashSet<string> overwrittenScalarPaths,
+            out ConfigurationProperty? offendingProperty)
         {
+            offendingProperty = null;
             foreach (var property in node.Properties)
             {
                 var runtimePath = CreateRuntimePath(parentRuntimePath, property.Key);
                 if (property.ScalarKind != ScalarKind.None &&
                     !runtimePaths.Add(runtimePath))
                 {
+                    offendingProperty = property;
                     return true;
                 }
 
@@ -586,7 +716,8 @@ internal static class JsonConfigurationParser
                         property.Value,
                         runtimePath,
                         runtimePaths,
-                        overwrittenScalarPaths))
+                        overwrittenScalarPaths,
+                        out offendingProperty))
                 {
                     return true;
                 }
@@ -663,17 +794,27 @@ internal static class JsonConfigurationParser
 
         private ConfigurationNode ParseObject(string parentPath, int depth)
         {
+            var objectStart = _position;
             var properties = ImmutableArray.CreateBuilder<ConfigurationProperty>();
             Read('{');
-            SkipWhitespace();
 
-            while (!IsEnd && Current != '}')
+            while (true)
             {
                 SkipWhitespace();
+                if (Current == '}')
+                {
+                    Read('}');
+                    return new ConfigurationNode(properties.ToImmutable());
+                }
+
+                if (IsEnd)
+                {
+                    throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, objectStart);
+                }
+
                 if (Current != '"')
                 {
-                    SkipMalformedValue();
-                    break;
+                    throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, _position);
                 }
 
                 var keyStart = _position;
@@ -682,12 +823,13 @@ internal static class JsonConfigurationParser
                 var fullPath = string.IsNullOrEmpty(parentPath) ? key : parentPath + ":" + key;
 
                 SkipWhitespace();
-                if (Current == ':')
+                if (Current != ':')
                 {
-                    Read(':');
+                    throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, _position);
                 }
 
-                SkipWhitespace();
+                Read(':');
+
                 var parsed = ParseValue(fullPath, depth);
                 properties.Add(new ConfigurationProperty(
                     key,
@@ -703,19 +845,19 @@ internal static class JsonConfigurationParser
                 if (Current == ',')
                 {
                     Read(',');
-                    SkipWhitespace();
                     continue;
                 }
 
-                break;
-            }
+                if (IsEnd)
+                {
+                    throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, objectStart);
+                }
 
-            if (Current == '}')
-            {
-                Read('}');
+                if (Current != '}')
+                {
+                    throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, _position);
+                }
             }
-
-            return new ConfigurationNode(properties.ToImmutable());
         }
 
         private readonly struct ParsedValue
@@ -741,8 +883,7 @@ internal static class JsonConfigurationParser
             {
                 if (depth >= MaxDepth)
                 {
-                    SkipMalformedValue();
-                    return new ParsedValue(ConfigurationNode.Empty, ScalarKind.None, raw: null, default);
+                    throw Rejection(ConfigurationFileRejectionKind.DepthExceeded, _position);
                 }
 
                 return new ParsedValue(ParseObject(path, depth + 1), ScalarKind.None, raw: null, default);
@@ -752,8 +893,7 @@ internal static class JsonConfigurationParser
             {
                 if (depth >= MaxDepth)
                 {
-                    SkipMalformedValue();
-                    return new ParsedValue(ConfigurationNode.Empty, ScalarKind.None, raw: null, default);
+                    throw Rejection(ConfigurationFileRejectionKind.DepthExceeded, _position);
                 }
 
                 return new ParsedValue(ParseArray(path, depth + 1), ScalarKind.None, raw: null, default);
@@ -771,46 +911,161 @@ internal static class JsonConfigurationParser
             }
 
             var scalarStart = _position;
-            SkipScalar();
-            var rawSpan = TextSpan.FromBounds(scalarStart, Math.Min(_position, _text.Length));
-            var rawText = _text.ToString(rawSpan);
-            var leadingWhitespace = rawText.Length - rawText.TrimStart().Length;
-            var trimmed = rawText.Trim();
-            var trimmedStart = scalarStart + leadingWhitespace;
-            var trimmedSpan = TextSpan.FromBounds(trimmedStart, trimmedStart + trimmed.Length);
-            var kind = ClassifyScalar(trimmed);
+            var token = ReadScalarToken();
+            if (!IsValidScalarToken(token))
+            {
+                throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, scalarStart);
+            }
+
+            var scalarSpan = TextSpan.FromBounds(scalarStart, _position);
+            var kind = token switch
+            {
+                "true" or "false" => ScalarKind.Bool,
+                "null" => ScalarKind.Null,
+                _ => ScalarKind.Number,
+            };
             return new ParsedValue(
                 kind == ScalarKind.Null ? ConfigurationNode.Null : ConfigurationNode.Empty,
                 kind,
-                trimmed,
-                trimmedSpan);
+                token,
+                scalarSpan);
         }
 
-        private static ScalarKind ClassifyScalar(string value)
+        /// <summary>
+        /// Reads one unquoted scalar token, stopping at whitespace, a container/scalar delimiter,
+        /// or the start of a comment. Anything the tolerant runtime reader would reject is left for
+        /// <see cref="IsValidScalarToken"/> to check.
+        /// </summary>
+        private string ReadScalarToken()
         {
-            if (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(value, "false", StringComparison.OrdinalIgnoreCase))
+            var start = _position;
+            while (!IsEnd)
             {
-                return ScalarKind.Bool;
+                var current = Current;
+                if (IsJsonWhitespace(current) || current == ',' || current == '}' || current == ']')
+                {
+                    break;
+                }
+
+                if (current == '/' && (Peek(1) == '/' || Peek(1) == '*'))
+                {
+                    break;
+                }
+
+                _position++;
             }
 
-            if (string.Equals(value, "null", StringComparison.OrdinalIgnoreCase))
+            return _text.ToString(TextSpan.FromBounds(start, _position));
+        }
+
+        /// <summary>
+        /// The exact scalar grammar the runtime JSON reader accepts: lowercase
+        /// <c>true</c>/<c>false</c>/<c>null</c>, or an RFC 8259 number.
+        /// </summary>
+        private static bool IsValidScalarToken(string token)
+        {
+            if (token is "true" or "false" or "null")
             {
-                return ScalarKind.Null;
+                return true;
             }
 
-            return ScalarKind.Number;
+            return IsValidJsonNumber(token);
+        }
+
+        private static bool IsValidJsonNumber(string token)
+        {
+            var index = 0;
+            if (index < token.Length && token[index] == '-')
+            {
+                index++;
+            }
+
+            if (index >= token.Length)
+            {
+                return false;
+            }
+
+            if (token[index] == '0')
+            {
+                index++;
+            }
+            else if (token[index] >= '1' && token[index] <= '9')
+            {
+                while (index < token.Length && IsDigit(token[index]))
+                {
+                    index++;
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            if (index < token.Length && token[index] == '.')
+            {
+                index++;
+                var fractionStart = index;
+                while (index < token.Length && IsDigit(token[index]))
+                {
+                    index++;
+                }
+
+                if (index == fractionStart)
+                {
+                    return false;
+                }
+            }
+
+            if (index < token.Length && (token[index] == 'e' || token[index] == 'E'))
+            {
+                index++;
+                if (index < token.Length && (token[index] == '+' || token[index] == '-'))
+                {
+                    index++;
+                }
+
+                var exponentStart = index;
+                while (index < token.Length && IsDigit(token[index]))
+                {
+                    index++;
+                }
+
+                if (index == exponentStart)
+                {
+                    return false;
+                }
+            }
+
+            return index == token.Length;
+        }
+
+        private static bool IsDigit(char value)
+        {
+            return value >= '0' && value <= '9';
         }
 
         private ConfigurationNode ParseArray(string path, int depth)
         {
+            var arrayStart = _position;
             var properties = ImmutableArray.CreateBuilder<ConfigurationProperty>();
             var index = 0;
 
             Read('[');
-            SkipWhitespace();
-            while (!IsEnd && Current != ']')
+
+            while (true)
             {
+                SkipWhitespace();
+                if (Current == ']')
+                {
+                    Read(']');
+                    return new ConfigurationNode(properties.ToImmutable(), ConfigurationNodeKind.Array);
+                }
+
+                if (IsEnd)
+                {
+                    throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, arrayStart);
+                }
+
                 var itemStart = _position;
                 var itemKey = index.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 var itemPath = path + ":" + itemKey;
@@ -830,23 +1085,24 @@ internal static class JsonConfigurationParser
                 if (Current == ',')
                 {
                     Read(',');
-                    SkipWhitespace();
                     continue;
                 }
 
-                break;
-            }
+                if (IsEnd)
+                {
+                    throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, arrayStart);
+                }
 
-            if (Current == ']')
-            {
-                Read(']');
+                if (Current != ']')
+                {
+                    throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, _position);
+                }
             }
-
-            return new ConfigurationNode(properties.ToImmutable(), ConfigurationNodeKind.Array);
         }
 
         private string ParseString()
         {
+            var stringStart = _position;
             Read('"');
             var chars = new List<char>();
 
@@ -857,38 +1113,86 @@ internal static class JsonConfigurationParser
 
                 if (ch == '"')
                 {
-                    break;
+                    return new string(chars.ToArray());
                 }
 
-                if (ch != '\\' || IsEnd)
+                if (ch < 0x20)
+                {
+                    throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, _position - 1);
+                }
+
+                if (ch != '\\')
                 {
                     chars.Add(ch);
                     continue;
                 }
 
+                if (IsEnd)
+                {
+                    throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, stringStart);
+                }
+
                 var escaped = Current;
                 _position++;
-                if (escaped == 'u' && TryReadUnicodeEscape(out var unicodeChar))
+                if (escaped == 'u')
                 {
+                    if (!TryReadUnicodeEscape(out var unicodeChar))
+                    {
+                        throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, _position - 2);
+                    }
+
+                    if (char.IsHighSurrogate(unicodeChar))
+                    {
+                        // A high surrogate is only legal when immediately followed by a
+                        // \uDC00-\uDFFF escape — the provider's string materialization throws
+                        // on unpaired surrogates.
+                        if (Current != '\\' || Peek(1) != 'u')
+                        {
+                            throw Rejection(
+                                ConfigurationFileRejectionKind.InvalidSyntax,
+                                _position - 6);
+                        }
+
+                        var secondEscapeStart = _position;
+                        _position += 2;
+                        if (!TryReadUnicodeEscape(out var lowSurrogate) ||
+                            !char.IsLowSurrogate(lowSurrogate))
+                        {
+                            throw Rejection(
+                                ConfigurationFileRejectionKind.InvalidSyntax,
+                                secondEscapeStart);
+                        }
+
+                        chars.Add(unicodeChar);
+                        chars.Add(lowSurrogate);
+                        continue;
+                    }
+
+                    if (char.IsLowSurrogate(unicodeChar))
+                    {
+                        throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, _position - 6);
+                    }
+
                     chars.Add(unicodeChar);
                     continue;
                 }
 
-                chars.Add(escaped switch
+                switch (escaped)
                 {
-                    '"' => '"',
-                    '\\' => '\\',
-                    '/' => '/',
-                    'b' => '\b',
-                    'f' => '\f',
-                    'n' => '\n',
-                    'r' => '\r',
-                    't' => '\t',
-                    _ => escaped
-                });
+                    case '"': chars.Add('"'); break;
+                    case '\\': chars.Add('\\'); break;
+                    case '/': chars.Add('/'); break;
+                    case 'b': chars.Add('\b'); break;
+                    case 'f': chars.Add('\f'); break;
+                    case 'n': chars.Add('\n'); break;
+                    case 'r': chars.Add('\r'); break;
+                    case 't': chars.Add('\t'); break;
+                    default:
+                        throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, _position - 2);
+                }
             }
 
-            return new string(chars.ToArray());
+            throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, stringStart);
         }
 
         private bool TryReadUnicodeEscape(out char value)
@@ -936,27 +1240,31 @@ internal static class JsonConfigurationParser
             return -1;
         }
 
-        private void SkipScalar()
+        private ParseRejectedException Rejection(
+            ConfigurationFileRejectionKind kind,
+            int position,
+            string? duplicateKey = null)
         {
-            while (!IsEnd && Current != ',' && Current != '}' && Current != ']')
-            {
-                _position++;
-            }
+            var clamped = Math.Min(position, _text.Length);
+            var span = clamped < _text.Length
+                ? TextSpan.FromBounds(clamped, clamped + 1)
+                : TextSpan.FromBounds(clamped, clamped);
+            return new ParseRejectedException(
+                new ConfigurationFileRejection(kind, CreateLocation(span), duplicateKey));
         }
 
-        private void SkipMalformedValue()
+        /// <summary>The four whitespace characters JSON allows outside strings (space, tab, CR, LF).
+        /// Form feed, vertical tab, and unicode spaces are rejected by the runtime reader.</summary>
+        private static bool IsJsonWhitespace(char value)
         {
-            while (!IsEnd && Current != '}')
-            {
-                _position++;
-            }
+            return value == ' ' || value == '\t' || value == '\r' || value == '\n';
         }
 
         private void SkipWhitespace()
         {
             while (!IsEnd)
             {
-                if (char.IsWhiteSpace(Current))
+                if (IsJsonWhitespace(Current))
                 {
                     _position++;
                     continue;
@@ -967,6 +1275,13 @@ internal static class JsonConfigurationParser
                     _position += 2;
                     while (!IsEnd && Current != '\r' && Current != '\n')
                     {
+                        // The runtime reader rejects the unicode line/paragraph separators inside
+                        // line comments rather than treating them as terminators.
+                        if (Current == '\u2028' || Current == '\u2029')
+                        {
+                            throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, _position);
+                        }
+
                         _position++;
                     }
 
@@ -975,16 +1290,24 @@ internal static class JsonConfigurationParser
 
                 if (Current == '/' && Peek(1) == '*')
                 {
+                    var commentStart = _position;
                     _position += 2;
+                    var closed = false;
                     while (!IsEnd)
                     {
                         if (Current == '*' && Peek(1) == '/')
                         {
                             _position += 2;
+                            closed = true;
                             break;
                         }
 
                         _position++;
+                    }
+
+                    if (!closed)
+                    {
+                        throw Rejection(ConfigurationFileRejectionKind.InvalidSyntax, commentStart);
                     }
 
                     continue;
@@ -1015,5 +1338,20 @@ internal static class JsonConfigurationParser
         }
 
         private bool IsEnd => _position >= _text.Length;
+    }
+
+    /// <summary>
+    /// Internal bail-out for the first construct the runtime JSON provider would reject on load.
+    /// Only the first rejection matters: the file is excluded from the configuration model either
+    /// way, and the analyzer reports a single diagnostic per file.
+    /// </summary>
+    private sealed class ParseRejectedException : Exception
+    {
+        public ParseRejectedException(ConfigurationFileRejection rejection)
+        {
+            Rejection = rejection;
+        }
+
+        public ConfigurationFileRejection Rejection { get; }
     }
 }
