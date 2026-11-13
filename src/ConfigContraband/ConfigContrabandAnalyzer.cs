@@ -17,6 +17,8 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
     internal const string SuggestedSectionReplacementPropertyName = "SuggestedSectionReplacement";
     internal const string HasValidateOnStartPropertyName = "HasValidateOnStart";
     internal const string RecursiveAttributePropertyName = "RecursiveAttribute";
+    internal const string RequiredKeyPropertyName = "RequiredKey";
+    internal const string RequiredKeySectionPathPropertyName = "RequiredKeySectionPath";
 
     private const string ConfigureAllOptionsName = "\0configure-all";
 
@@ -374,7 +376,7 @@ public sealed partial class ConfigContrabandAnalyzer : DiagnosticAnalyzer
         return null;
     }
 
-    private sealed class OptionsRegistration
+    internal sealed class OptionsRegistration
     {
         public OptionsRegistration(
             INamedTypeSymbol optionsType,

@@ -5,7 +5,7 @@ namespace ConfigContraband;
 
 public sealed partial class ConfigContrabandAnalyzer
 {
-    private static string? FindClosest(string value, ImmutableArray<string> candidates)
+    internal static string? FindClosest(string value, ImmutableArray<string> candidates)
     {
         string? best = null;
         var bestDistance = int.MaxValue;

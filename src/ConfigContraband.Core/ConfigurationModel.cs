@@ -174,7 +174,7 @@ internal sealed class ConfigurationSnapshot
             .ToImmutableArray();
     }
 
-    private static ImmutableArray<ConfigurationNode> FindSections(ConfigurationNode root, string sectionPath)
+    internal static ImmutableArray<ConfigurationNode> FindSections(ConfigurationNode root, string sectionPath)
     {
         var builder = ImmutableArray.CreateBuilder<ConfigurationNode>();
         var pathParts = SplitPath(sectionPath);
@@ -370,8 +370,13 @@ internal sealed class ConfigurationSnapshot
         return sectionPath.Split(PathSeparator, StringSplitOptions.RemoveEmptyEntries);
     }
 
-    private static bool IsAppSettingsFile(string path)
+    internal static bool IsAppSettingsFile(string? path)
     {
+        if (path is null)
+        {
+            return false;
+        }
+
         var fileName = System.IO.Path.GetFileName(path);
         return (string.Equals(fileName, "appsettings.json", StringComparison.OrdinalIgnoreCase) ||
                 fileName.StartsWith("appsettings.", StringComparison.OrdinalIgnoreCase)) &&
@@ -459,15 +464,23 @@ internal sealed class ConfigurationNode
 
     public ConfigurationNode(
         ImmutableArray<ConfigurationProperty> properties,
-        ConfigurationNodeKind kind = ConfigurationNodeKind.Object)
+        ConfigurationNodeKind kind = ConfigurationNodeKind.Object,
+        Location? location = null)
     {
         Properties = properties;
         Kind = kind;
+        Location = location;
     }
 
     public ImmutableArray<ConfigurationProperty> Properties { get; }
     public ConfigurationNodeKind Kind { get; }
     public bool IsObject => Kind == ConfigurationNodeKind.Object;
+
+    /// <summary>
+    /// Location of the object's <c>{</c>…<c>}</c> or array's <c>[</c>…<c>]</c> span in its source file,
+    /// or <c>null</c> for synthesized nodes (merged projections, scalar/null sentinels).
+    /// </summary>
+    public Location? Location { get; }
 
     public bool TryGetProperty(string key, out ConfigurationProperty property)
     {
@@ -790,7 +803,9 @@ internal static class JsonConfigurationParser
                 if (Current == '}')
                 {
                     Read('}');
-                    return new ConfigurationNode(properties.ToImmutable());
+                    return new ConfigurationNode(
+                        properties.ToImmutable(),
+                        location: CreateLocation(TextSpan.FromBounds(objectStart, _position)));
                 }
 
                 if (IsEnd)
@@ -1044,7 +1059,10 @@ internal static class JsonConfigurationParser
                 if (Current == ']')
                 {
                     Read(']');
-                    return new ConfigurationNode(properties.ToImmutable(), ConfigurationNodeKind.Array);
+                    return new ConfigurationNode(
+                        properties.ToImmutable(),
+                        ConfigurationNodeKind.Array,
+                        CreateLocation(TextSpan.FromBounds(arrayStart, _position)));
                 }
 
                 if (IsEnd)

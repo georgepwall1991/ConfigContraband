@@ -185,6 +185,42 @@ internal static class Verifier
         await test.RunAsync();
     }
 
+    public static async Task VerifyCodeFixAsync(
+        string source,
+        string fixedSource,
+        (string filename, string content) additionalFile,
+        (string filename, string content) fixedAdditionalFile,
+        params DiagnosticResult[] expected)
+    {
+        var test = new CSharpCodeFixTest<ConfigContrabandAnalyzer, ConfigContrabandCodeFixProvider, DefaultVerifier>
+        {
+            TestCode = source,
+            FixedCode = fixedSource,
+            ReferenceAssemblies = OptionsReferences
+        };
+        test.TestState.AdditionalFiles.Add(additionalFile);
+        test.FixedState.AdditionalFiles.Add(fixedAdditionalFile);
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync();
+    }
+
+    public static async Task VerifyRefactoringAsync(
+        string source,
+        string fixedSource,
+        (string filename, string content) additionalFile,
+        (string filename, string content) fixedAdditionalFile)
+    {
+        var test = new CSharpCodeRefactoringTest<ConfigContrabandCodeRefactoringProvider, DefaultVerifier>
+        {
+            TestCode = source,
+            FixedCode = fixedSource,
+            ReferenceAssemblies = OptionsReferences
+        };
+        test.TestState.AdditionalFiles.Add(additionalFile);
+        test.FixedState.AdditionalFiles.Add(fixedAdditionalFile);
+        await test.RunAsync();
+    }
+
     public static Task VerifyCodeFixAsync(
         (string filename, string content)[] sources,
         (string filename, string content)[] fixedSources,

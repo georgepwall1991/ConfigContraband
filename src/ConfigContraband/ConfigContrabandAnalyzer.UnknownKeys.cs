@@ -102,6 +102,10 @@ public sealed partial class ConfigContrabandAnalyzer
                 reportDiagnostic(Diagnostic.Create(
                     DiagnosticDescriptors.MissingRequiredConfigurationKey,
                     location,
+                    additionalLocations: null,
+                    properties: ImmutableDictionary<string, string?>.Empty
+                        .Add(RequiredKeyPropertyName, displayName)
+                        .Add(RequiredKeySectionPathPropertyName, sectionPath),
                     displayName,
                     sectionPath));
             }
