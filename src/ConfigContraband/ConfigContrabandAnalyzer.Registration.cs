@@ -11,7 +11,7 @@ namespace ConfigContraband;
 
 public sealed partial class ConfigContrabandAnalyzer
 {
-    private static bool TryCreateRegistration(
+    internal static bool TryCreateRegistration(
         InvocationExpressionSyntax invocation,
         SemanticModel semanticModel,
         out OptionsRegistration registration)
